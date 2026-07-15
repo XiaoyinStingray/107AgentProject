@@ -56,5 +56,7 @@ cd frontend
 
 ## 环境安装(TODO: 根据后续情况修改)
 conda create \<EnvName\> 
+
 conda activate \<EnvName\> 
+
 pip install -r requirements.txt
