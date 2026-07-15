@@ -7,7 +7,7 @@
 | 姓名 | 邮箱 |
 |------|------|
 | 赵俊宇 | zhaojunyu0515@mail.ustc.edu.cn |
-| 刘福康 | TODO |
+| 刘福康 | lfkustc@mail.ustc.edu.cn |
 | 岳雨婷 | TODO |
 | 吴铮 | TODO |
 
