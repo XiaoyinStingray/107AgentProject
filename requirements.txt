@@ -1,0 +1,42 @@
+# ============================================
+# 107AgentProject 统一依赖
+# 需要 Python >= 3.12
+# 安装：pip install -r requirements.txt
+# ============================================
+
+# ---- Web 框架 ----
+fastapi[standard]>=0.115,<1.0      # API 服务 + 自带服务器
+httpx>=0.28                         # 异步 HTTP 请求（调 API、连 LLM）
+
+# ---- 配置管理 ----
+pydantic-settings>=2.7              # 读 .env 配置，和 FastAPI 一体
+python-dotenv>=1.0                  # .env 文件支持
+
+# ---- LLM & Agent ----
+openai>=1.80                        # DeepSeek / GLM 都走这个 SDK
+autogen-agentchat>=0.7              # AutoGen 多 Agent 框架
+autogen-ext[openai]>=0.7            # AutoGen 连 OpenAI 兼容接口
+
+# ---- 日志 & 工具 ----
+loguru>=0.7                         # 日志，比自带的简单好用
+rich>=13.9                          # 终端彩色输出
+
+# ---- 数据库（按需取消注释）----
+# aiosqlite>=0.20                   # SQLite（最轻量，推荐新手先用这个）
+# sqlalchemy[asyncio]>=2.0          # ORM
+# asyncpg>=0.30                     # PostgreSQL 驱动
+# alembic>=1.15                     # 数据库迁移工具
+
+# ---- 缓存（按需取消注释）----
+# redis[hiredis]>=5.2               # Redis
+
+# ============================================
+# 以下为开发工具（提交代码前装一下就行）
+# ============================================
+
+# ---- 测试 ----
+pytest>=8.3
+pytest-asyncio>=0.24
+
+# ---- 代码检查 ----
+ruff>=0.9                           # 一键格式化 + 查错
