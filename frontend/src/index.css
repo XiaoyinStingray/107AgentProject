@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-bg-primary text-text-primary font-sans;
+  margin: 0;
+}
+
+/* 自定义滚动条 */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0a0f;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a2a3a;
+  border-radius: 3px;
+}
+
+/* Agent 状态指示灯 */
+.status-dot {
+  @apply w-2 h-2 rounded-full;
+}
+.status-dot.active {
+  background: #00ff88;
+  box-shadow: 0 0 8px #00ff88;
+}
+.status-dot.thinking {
+  background: #4488ff;
+  animation: pulse 1.5s infinite;
+}
+.status-dot.idle {
+  background: #8888aa;
+}
+
+/* 终端风格文字 */
+.terminal-text {
+  @apply font-mono text-sm text-text-secondary;
+}
+
+/* 卡片 */
+.card {
+  @apply bg-bg-card border border-border rounded-lg p-4;
+}

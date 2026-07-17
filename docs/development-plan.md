@@ -3,6 +3,46 @@
 > **文档目的：** 自顶向下、接口先行、模块串行的完整开发计划。
 > **目标读者：** 人类开发者 + AI（vibe coding 友好）。
 > **设计原则：** 每个 phase 自包含，有明确输入/输出接口，有 Mock 可独立测试。
+>
+> **配套流程：** 每一步开发遵循 [STEP.md](STEP.md)，完成后写入 [docs/done/](done/README.md)。
+
+---
+
+## Step 速查表
+
+| Step | Phase | 名称 | 依赖 | 核心产出 |
+|------|-------|------|------|----------|
+| 00 | 0.1 | 项目目录初始化 | — | 目录骨架 + `/health` |
+| 01 | 0.2 | Pydantic 类型定义 | 00 | 所有 shared types |
+| 02 | 0.3 | 配置 + DB + TS 类型 | 01 | config.py + db.py + 前端 types/ |
+| 03 | 1.1 | Persona Builder | 02 | 一句话 → Persona JSON |
+| 04 | 1.2 | System Prompt 构建器 | 03 | Persona → system_message str |
+| 05 | 2.1 | LifeAgent 封装 | 04 | AgentFactory + LifeAgent |
+| 06 | 2.2 | Tool 注册体系 | 05 | Agent 行动 tools |
+| 07 | 2.3 | 记忆检索器 | 02 | MemoryRetriever |
+| 08 | 3.1 | 场景模板 | 02 | 3 个内置 Scenario |
+| 09 | 3.2 | Tick 调度器 | 05, 08 | WorldEngine.tick() |
+| 10 | 3.3 | 关系演化 | 09 | 双向量化关系 |
+| 11 | 4.1 | AutoGen → SSE 翻译 | 09 | SSE 事件流 |
+| 12 | 5.1 | Agent 路由 | 05 | /api/agents CRUD |
+| 13 | 5.2 | World 路由 | 09 | /api/worlds CRUD |
+| 14 | 5.3 | main.py 组装 + 全局 registry | 12, 13 | FastAPI app 完整启动 |
+| 15 | 6.1 | 叙事引擎 | 09 | Event → Story/Diary/Letter |
+| 16 | 7.1 | 前端骨架 + Sidebar (56菜单) | 02 | App.tsx + 布局 + 路由 |
+| 17 | 7.2 | 铸造厂页面 (M1) | 16 | AgentFoundry.tsx |
+| 18 | 7.3 | SSE Hook + 思维流组件 | 16 | useSSE + ThoughtBubble |
+| 19 | 7.4 | 单人剧场 (M2) | 18 | SoloTheater.tsx |
+| 20 | 7.5 | 主观察界面 (M3) | 19 | GroupSandbox.tsx |
+| 21 | 7.6 | 关系网络图 | 20 | RelationshipGraph.tsx |
+| 22 | 7.7 | 竞技场页面 (M4) | 16 | Arena.tsx |
+| 23 | 7.8 | 叙事页面 (M5) | 15, 16 | NarrativeFactory.tsx |
+| 24 | 7.9 | 控制台 + 干预台 (M6/M7) | 20 | ControlPanel + Intervention |
+| 25 | 7.10 | 档案馆 (M8) | 16 | Archive.tsx |
+| 26 | 8.1 | 竞技引擎 | 05, 09 | ArenaEngine (debate/1v1) |
+| 27 | 9.1 | 56 菜单铺量 + 报告导出 | 25 | 占位页 + PDF 导出 |
+| 28 | 9.2 | 演示脚本 + 最终联调 | 27 | demo-script.md |
+
+> **共 29 个 Step。** 每个 Step 约 2-4 小时（一个人 + AI）。
 
 ---
 

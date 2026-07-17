@@ -67,6 +67,10 @@ coverage/
 # ===== Docker =====
 .docker/
 
+# ===== Project Data (keep .gitkeep) =====
+backend/data/*.db
+backend/data/*.sqlite
+
 # ===== Misc =====
 *.tmp
 *.temp
