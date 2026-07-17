@@ -402,6 +402,7 @@ async def init_db():
     必须在函数内 import 所有 ORM 模型模块——DeclarativeBase 只在子类被 import 时注册。
     """
     import models.memory  # noqa: F401 — 注册 Memory ORM → memories 表
+    import models.event   # noqa: F401 — 注册 Event ORM → events 表
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables ensured (SQLite)")

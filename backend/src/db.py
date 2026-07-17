@@ -44,7 +44,8 @@ async def init_db():
     # 确保所有 ORM 子类在 create_all 前被 import ——
     # SQLAlchemy DeclarativeBase 只在子类 import 时注册到 metadata。
     # 放在函数内避免 db.py 与 models.memory 的循环 import。
-    import models.memory  # noqa: F401 — 触发 Memory ORM 的 __init_subclass__ 注册
+    import models.memory  # noqa: F401 — 注册 Memory ORM → memories 表
+    import models.event   # noqa: F401 — 注册 Event ORM → events 表
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
