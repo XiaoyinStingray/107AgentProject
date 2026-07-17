@@ -21,6 +21,7 @@ from models.agent import Background, EmotionalState, Goal, Persona
 from models.memory import MemoryResponse
 from engines.persona.builder import PersonaBuilder
 from engines.persona.prompt_templates import build_system_message
+from engines.agent_factory.tools import DEFAULT_AGENT_TOOLS
 
 
 # =============================================================================
@@ -203,7 +204,7 @@ class AgentFactory:
             background=result.background,
             goals=result.goals,
             model_client=self.model_client,
-            # tools 留空，Step 06 补充 DEFAULT_AGENT_TOOLS
+            tools=DEFAULT_AGENT_TOOLS,
         )
 
         logger.info(f"AgentFactory created agent: {agent}")
@@ -234,5 +235,5 @@ class AgentFactory:
             background=background,
             goals=goals,
             model_client=self.model_client,
-            # tools 留空，Step 06 补充
+            tools=DEFAULT_AGENT_TOOLS,
         )
