@@ -162,6 +162,7 @@ class DecisionStyle(BaseModel):
 
 class Persona(BaseModel):
     """Agent 人格定义"""
+    name: str = ""               # 2026-07-17 Step05 新增——LLM 生成的 2-3 字中文名
     mbti: str = "INTJ-T"
     big_five: BigFive = Field(default_factory=BigFive)
     values: list[str] = Field(default_factory=list)       # ["成就", "自由", "安全"]
@@ -397,7 +398,10 @@ async def get_db() -> AsyncSession:
         yield session
 
 async def init_db():
-    """创建所有未存在的表（启动时调用一次）"""
+    """创建所有未存在的表（启动时调用一次）。
+    必须在函数内 import 所有 ORM 模型模块——DeclarativeBase 只在子类被 import 时注册。
+    """
+    import models.memory  # noqa: F401 — 注册 Memory ORM → memories 表
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables ensured (SQLite)")
@@ -747,13 +751,17 @@ class LifeAgent:
 
         # === 构建 AutoGen Agent ===
         system_message = build_system_message(persona, background, goals)
+        # 2026-07-17 AutoGen 0.7 适配：
+        #   max_consecutive_auto_reply → max_tool_iterations（参数重命名）
+        #   system_message= 字符串 → _system_messages=[SystemMessage(...)]（内部 API 变更）
+        #   persona.name 不再需要 hasattr——Persona 已加 name 字段（Step05）
         self._agent = AssistantAgent(
-            name=persona.name if hasattr(persona, 'name') else id,
+            name=persona.name or id,
             model_client=model_client,
             system_message=system_message,
             tools=tools or [],
             reflect_on_tool_use=True,
-            max_consecutive_auto_reply=3,
+            max_tool_iterations=3,
         )
 
     @property
@@ -827,7 +835,7 @@ async def think_aloud(thought: str) -> str:
     """
     return f"思考已记录: {thought}"
 
-async def set_goal(description: str, priority: int) -> str:
+async def set_goal(description: str, priority: int = 1) -> str:
     """设定一个新目标。
     Args:
         description: 目标描述
@@ -866,7 +874,7 @@ DEFAULT_AGENT_TOOLS = [send_message, think_aloud, set_goal, observe]
 class MemoryRetriever:
     """P0: 关键词 + 时间衰退。P2: 加向量检索。"""
 
-    def __init__(self, db_session):
+    def __init__(self, session: AsyncSession):  # 2026-07-17: 加类型标注，参数名 db_session → session
         self.db = db_session
 
     async def add_memory(self, agent_id: str, content: str, type_: str, importance: float = 0.5):
