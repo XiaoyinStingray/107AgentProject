@@ -52,6 +52,20 @@
 
 - `Persona` 模型没有 `name` 字段，下游可能需要。（留给 Step 05 决定是否添加）
 
+## 补充记录（2026-07-17 — code-review 后修复）
+
+| 问题 | 严重度 | 修复 |
+|------|--------|------|
+| `_parse_response` 的 `except` 未捕获 `AttributeError`——LLM 返回 `null` goals/background 时 crash | 🔴 | 添加 `AttributeError` 到 except 元组；`bg_data = data.get("background") or {}` 防护 null；goals 元素加 `isinstance(g, dict)` 检查 |
+| `_extract_json` 贪婪正则 `\{[\s\S]*\}` 跨多 JSON 块过度匹配 | 🔴 | 改为非贪婪 `\{[\s\S]*?\}`；fence 检测从 `re.match` 改为 `re.search`（容忍前后文本） |
+| `_call_llm` 无异常处理——网络故障/认证失败直接穿透 | 🟠 | `build()` 中用 `for attempt in range(2)` + try/except 包裹 LLM 调用，API 异常和解析失败统一重试 1 次 |
+| `_call_llm` 用 plain dict 构造消息——AutoGen 要求 `SystemMessage`/`UserMessage` 对象 | 🟠 | 改用 `autogen_core.models.SystemMessage` 和 `UserMessage` |
+| `llm/client.py` 顶层 import autogen_ext 拖慢启动 | 🟡 | 改为 lazy import（函数内 import） |
+
+### 对 Plan 的影响
+
+以上修复均为内部实现细节，**接口无变化**，development-plan.md 无需更新。唯一值得注意：重试行为从「仅 JSON 解析失败重试」扩展为「LLM API 异常也重试 1 次」——这是对上位 spec 的合理增强，不改变任何接口约定。
+
 ## 对下一步的提示
 
 - Step 04 是 System Prompt 构建器（`engines/persona/prompt_templates.py`），依赖本步的 `Persona`、`Background`、`Goal` 类型。

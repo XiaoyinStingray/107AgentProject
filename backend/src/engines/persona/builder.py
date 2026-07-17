@@ -19,6 +19,8 @@ from typing import Any
 
 from loguru import logger
 
+from autogen_core.models import SystemMessage, UserMessage
+
 from models.agent import Background, BigFive, DecisionStyle, Goal, Persona
 
 
@@ -169,26 +171,33 @@ class PersonaBuilder:
         description = description.strip()
         logger.info(f"PersonaBuilder.build: description={description[:50]}...")
 
-        # 第一次尝试
-        raw = await self._call_llm(description, retry=False)
-        result = self._parse_response(raw)
+        last_error: str = ""
+        last_raw: str = ""
 
-        if result is not None:
-            logger.info(f"PersonaBuilder.build OK: name={result.name}, mbti={result.persona.mbti}")
-            return result
+        for attempt in range(2):
+            try:
+                last_raw = await self._call_llm(description, retry=(attempt > 0))
+            except Exception as e:
+                logger.warning(f"PersonaBuilder: LLM call failed (attempt {attempt + 1}/2): {e}")
+                last_error = str(e)
+                if attempt == 1:
+                    raise ValueError(
+                        f"PersonaBuilder: 两次 LLM 调用均失败。"
+                        f"最后一次错误: {last_error[:200]}"
+                    ) from e
+                continue
 
-        # 重试 1 次（JSON 解析失败 / Pydantic 校验失败）
-        logger.warning("PersonaBuilder: first parse failed, retrying...")
-        raw = await self._call_llm(description, retry=True)
-        result = self._parse_response(raw)
+            result = self._parse_response(last_raw)
+            if result is not None:
+                suffix = " (retry)" if attempt > 0 else ""
+                logger.info(f"PersonaBuilder.build OK{suffix}: name={result.name}, mbti={result.persona.mbti}")
+                return result
 
-        if result is not None:
-            logger.info(f"PersonaBuilder.build OK (retry): name={result.name}")
-            return result
+            logger.warning(f"PersonaBuilder: parse failed (attempt {attempt + 1}/2), retrying...")
 
         raise ValueError(
             f"PersonaBuilder: 两次尝试后仍无法解析 LLM 返回。"
-            f"最后一次原始返回: {raw[:200]}..."
+            f"最后一次原始返回: {last_raw[:200]}..."
         )
 
     # -------------------------------------------------------------------------
@@ -210,13 +219,12 @@ class PersonaBuilder:
             user_content += _RETRY_SUFFIX
 
         messages = [
-            {"role": "system", "content": _BUILD_SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
+            SystemMessage(content=_BUILD_SYSTEM_PROMPT),
+            UserMessage(content=user_content, source="persona_builder"),
         ]
 
         logger.debug(f"PersonaBuilder._call_llm: retry={retry}")
         response = await self._client.create(messages=messages)
-        # AutoGen CreateResult: .content 是文本内容
         return response.content
 
     @staticmethod
@@ -259,7 +267,7 @@ class PersonaBuilder:
                 narrative=data.get("narrative", ""),
             )
 
-            bg_data = data.get("background", {})
+            bg_data = data.get("background") or {}
             background = Background(
                 hometown=bg_data.get("hometown", ""),
                 family=bg_data.get("family", ""),
@@ -267,18 +275,22 @@ class PersonaBuilder:
                 key_events=bg_data.get("key_events", []),
             )
 
-            goals = [
-                Goal(
+            goals: list[Goal] = []
+            for i, g in enumerate(data.get("goals") or []):
+                if not isinstance(g, dict):
+                    logger.warning(
+                        f"PersonaBuilder._parse_response: goals[{i}] is not a dict: {type(g).__name__}"
+                    )
+                    return None
+                goals.append(Goal(
                     id=g.get("id", f"g{i + 1}"),
                     description=g.get("description", ""),
                     priority=g.get("priority", 1),
                     deadline=g.get("deadline"),
                     status=g.get("status", "active"),
-                )
-                for i, g in enumerate(data.get("goals", []))
-            ]
+                ))
 
-        except (KeyError, TypeError, ValueError) as e:
+        except (KeyError, TypeError, ValueError, AttributeError) as e:
             logger.warning(f"PersonaBuilder._parse_response: field error: {e}")
             return None
 
@@ -311,9 +323,8 @@ def _extract_json(text: str) -> str | None:
     """
     text = text.strip()
 
-    # 去掉 markdown code fences
-    fence_pattern = r"^```(?:json)?\s*\n(.*?)\n```\s*$"
-    m = re.match(fence_pattern, text, re.DOTALL)
+    # 去掉 markdown code fences — 使用 re.search 容忍前后附加文本
+    m = re.search(r"```(?:json)?\s*\n([\s\S]*?)\n\s*```", text)
     if m:
         return m.group(1).strip()
 
@@ -321,8 +332,8 @@ def _extract_json(text: str) -> str | None:
     if text.startswith("{"):
         return text
 
-    # 尝试在文本中寻找 JSON 块
-    m = re.search(r"\{[\s\S]*\}", text)
+    # 尝试在文本中寻找 JSON 块 — 非贪婪避免跨多个块过度匹配
+    m = re.search(r"\{[\s\S]*?\}", text)
     if m:
         return m.group(0)
 

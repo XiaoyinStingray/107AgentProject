@@ -14,6 +14,9 @@ import pytest
 # =============================================================================
 
 
+from typing import Any
+
+
 class _FakeCreateResult:
     """模拟 AutoGen CreateResult。"""
 
@@ -27,9 +30,9 @@ class MockLLMClient:
     def __init__(self, fixed_response: str | None = None):
         self._fixed = fixed_response
         self.call_count = 0
-        self.last_messages: list[dict] | None = None
+        self.last_messages: list[Any] | None = None
 
-    async def create(self, messages: list[dict]) -> _FakeCreateResult:
+    async def create(self, messages: list[Any]) -> _FakeCreateResult:
         self.call_count += 1
         self.last_messages = messages
         if self._fixed is not None:
