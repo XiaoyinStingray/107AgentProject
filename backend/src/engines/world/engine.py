@@ -1,19 +1,13 @@
 """
-WorldEngine — 世界引擎：tick 推进 + 事件分发 + （关系演化 — Step 10）。
+WorldEngine — 世界引擎：tick 推进 + 事件分发 + 关系演化。
 
 核心接口:
     engine = WorldEngine(world, agents, db_session)
     events = await engine.tick()   # 推进一个 tick
     all_events = await engine.run(max_ticks=30)  # 运行整个模拟
-
-依赖:
-    - engines.agent_factory: LifeAgent
-    - engines.agent_factory.memory: MemoryRetriever
-    - models.event: SimEvent, Event (ORM)
-    - models.world: WorldResponse
-    - autogen_agentchat: AssistantAgent, RoundRobinGroupChat
 """
 
+import json
 import uuid
 from datetime import datetime, timezone
 
@@ -25,23 +19,47 @@ from models.event import Event, SimEvent
 from models.world import WorldResponse
 from engines.agent_factory.factory import LifeAgent
 from engines.agent_factory.memory import MemoryRetriever
+from engines.world.relationships import (
+    apply_relationship_changes,
+    extract_relationship_changes,
+)
+
+
+# =============================================================================
+# 辅助函数
+# =============================================================================
+
+def _resolve_agent_id(name_or_id: str, agents: dict[str, LifeAgent],
+                      name_map: dict[str, str] | None = None) -> str:
+    """按名称或 ID 查找 Agent，返回其 ID。
+
+    查找顺序：精确 ID 匹配 → persona.name 匹配 → AutoGen name 映射。
+    都找不到时原样返回（由调用方处理）。
+
+    Args:
+        name_or_id: Agent 名称或 ID
+        agents: {agent_id: LifeAgent}
+        name_map: {autogen_name: agent_id} 反向映射（可选）
+
+    Returns:
+        匹配到的 agent_id，或原始输入
+    """
+    if name_or_id in agents:
+        return name_or_id
+    for aid, agent in agents.items():
+        if agent.persona.name == name_or_id:
+            return aid
+    if name_map and name_or_id in name_map:
+        return name_map[name_or_id]
+    return name_or_id
 
 
 # =============================================================================
 # WorldEngine
 # =============================================================================
 
-
 class WorldEngine:
-    """世界引擎：管理 tick 推进、事件生成和分发。
-
-    每个 World 对应一个 WorldEngine 实例。
-    Step 09 实现核心 tick 流程；Step 10 补全关系演化。
-
-    用法:
-        engine = WorldEngine(world, agents, db_session)
-        events = await engine.tick()
-    """
+    """世界引擎：管理 tick 推进、事件生成和分发。"""
 
     def __init__(
         self,
@@ -54,7 +72,15 @@ class WorldEngine:
         self._db = db_session
         self._retriever = MemoryRetriever(db_session)
         self.events: list[SimEvent] = []
+        self.relationships: dict[tuple[str, str], float] = {}
         self.current_tick: int = 0
+
+        # AutoGen agent name → LifeAgent UUID 反向映射
+        # （AutoGen 消息的 source 字段是 agent name，不是 UUID）
+        self._name_to_id: dict[str, str] = {}
+        for agent in agents:
+            ag_name = agent.autogen_agent.name
+            self._name_to_id[ag_name] = agent.id
 
         logger.info(
             f"WorldEngine created: world={world.name!r}, "
@@ -69,14 +95,11 @@ class WorldEngine:
         """推进一个 tick，返回本 tick 产生的所有事件。
 
         流程:
-            1. 注入当前世界状态到每个 Agent（context + memories）
-            2. 运行 Agent 交互（solo 或 group chat）
-            3. 解析 tool calls → 更新世界状态（Step 10 补全）
-            4. 更新关系（Step 10 补全）
-            5. 持久化事件到 SQLite
-
-        Returns:
-            本 tick 产生的 SimEvent 列表
+            1. 注入世界状态（context + memories）
+            2. 运行 Agent 交互（solo / group chat）
+            3. 解析 tool calls → 更新世界状态
+            4. 关系分析 → 更新关系分数
+            5. 持久化全部事件到 SQLite
         """
         tick_events: list[SimEvent] = []
 
@@ -94,13 +117,13 @@ class WorldEngine:
         else:
             tick_events += await self._run_group_tick()
 
-        # ---- 3. 应用 tool call 效果（Step 10 补全）——-
-        for event in tick_events:
+        # ---- 3. 应用 tool call 效果 ----
+        for event in list(tick_events):
             if event.type == "agent_action":
-                self._apply_action(event)
+                tick_events.extend(self._apply_action(event))
 
-        # ---- 4. 更新关系（Step 10 补全）——-
-        self._update_relationships(tick_events)
+        # ---- 4. 关系分析 ----
+        tick_events.extend(self._update_relationships(tick_events))
 
         # ---- 5. 持久化 ----
         await self._persist_events(tick_events)
@@ -116,14 +139,7 @@ class WorldEngine:
         return tick_events
 
     async def run(self, max_ticks: int = 30) -> list[SimEvent]:
-        """运行整个模拟——逐 tick 推进直到达到 max_ticks 或被暂停。
-
-        Args:
-            max_ticks: 最大 tick 数（默认 30）
-
-        Returns:
-            全部事件列表
-        """
+        """运行整个模拟。"""
         all_events: list[SimEvent] = []
         for i in range(max_ticks):
             if self.world.status == "paused":
@@ -131,21 +147,30 @@ class WorldEngine:
                 break
             events = await self.tick()
             all_events.extend(events)
-            logger.debug(f"WorldEngine.run: tick {i + 1}/{max_ticks} done")
         return all_events
+
+    # -------------------------------------------------------------------------
+    # GroupChat 构建（公开——供测试和 SSE 使用）
+    # -------------------------------------------------------------------------
+
+    def build_group_chat(self):
+        """创建 AutoGen RoundRobinGroupChat。"""
+        from autogen_agentchat.teams import RoundRobinGroupChat
+
+        participants: list = [a.autogen_agent for a in self.agents.values()]
+        return RoundRobinGroupChat(
+            participants=participants,  # type: ignore[arg-type]
+            max_turns=len(self.agents) * 3,
+        )
 
     # -------------------------------------------------------------------------
     # 世界上下文
     # -------------------------------------------------------------------------
 
     def _build_world_context(self) -> str:
-        """构建当前 tick 的世界上下文文本——注入每个 Agent 的 system prompt。
-
-        从 Scenario.environment_params 提取位置/天气等环境参数。
-        """
+        """构建当前 tick 的世界上下文文本。"""
         params = self.world.scenario.environment_params
         location = params.get("location", "未知")
-        weather = params.get("weather", "晴")
         agent_names = ", ".join(
             a.persona.name or a.id for a in self.agents.values()
         )
@@ -153,11 +178,14 @@ class WorldEngine:
         context = (
             f"⏰ 第 {self.current_tick} 个时间段\n"
             f"📍 地点: {location}\n"
-            f"🌤️ 天气: {weather}\n"
             f"👥 在场人物: {agent_names}\n"
         )
 
-        # 附加最近 3 个事件作为上下文
+        # 天气——只在场景定义时显示，不制造虚假默认值
+        weather = params.get("weather")
+        if weather:
+            context += f"🌤️ 天气: {weather}\n"
+
         recent = self._recent_events_text(3)
         if recent:
             context += f"📋 最近事件:\n{recent}"
@@ -176,15 +204,12 @@ class WorldEngine:
     # -------------------------------------------------------------------------
 
     async def _run_solo_tick(self, agent: LifeAgent) -> list[SimEvent]:
-        """单人模式——Agent 自言自语 / 思考。
-
-        给 Agent 一个"请描述你现在的想法和行动"的提示，
-        让 Agent 通过 think_aloud / observe 等 tool 产生事件流。
-        """
+        """单人模式——Agent 自言自语 / 思考。"""
         from autogen_agentchat.messages import TextMessage
         from autogen_core import CancellationToken
 
         prompt = (
+            f"场景：{self.world.scenario.name} — {self.world.scenario.description}\n"
             f"现在是第 {self.current_tick} 个时间段。"
             f"请描述你现在的想法、感受和打算做的事情。"
             f"使用 think_aloud 记录你的想法，使用 set_goal 设定目标，"
@@ -197,9 +222,7 @@ class WorldEngine:
                 [TextMessage(content=prompt, source="world")],
                 cancellation_token=CancellationToken(),
             )
-            events = self._extract_events_from_response(
-                response, agent.id
-            )
+            events = self._extract_events_from_response(response, agent.id)
         except Exception as e:
             logger.error(f"WorldEngine._run_solo_tick: agent={agent.id} error: {e}")
             events.append(self._make_error_event(agent.id, str(e)))
@@ -207,32 +230,20 @@ class WorldEngine:
         return events
 
     async def _run_group_tick(self) -> list[SimEvent]:
-        """多人模式——AutoGen RoundRobinGroupChat 驱动多 Agent 对话。
-
-        创建一个自动轮流发言的 GroupChat，初始任务来自世界上下文。
-        """
-        from autogen_agentchat.teams import RoundRobinGroupChat
-
-        participants: list = [a.autogen_agent for a in self.agents.values()]
-        team = RoundRobinGroupChat(
-            participants=participants,  # type: ignore[arg-type] — AutoGen 协变类型未标注
-            max_turns=len(self.agents) * 3,
-        )
-
+        """多人模式——AutoGen RoundRobinGroupChat 驱动多 Agent 对话。"""
+        initial_events = self.world.scenario.initial_events
         task = (
             f"场景：{self.world.scenario.name} — {self.world.scenario.description}\n"
+            f"初始事件：{'；'.join(initial_events)}\n"
             f"现在是第 {self.current_tick} 个时间段。"
             f"请根据你的角色设定自然地互动。你可以说话、思考、行动。"
         )
 
         events: list[SimEvent] = []
         try:
+            team = self.build_group_chat()
             result = await team.run(task=task)
-            # result 是 TaskResult，其中 messages 包含了所有 Agent 的消息
             for msg in result.messages:
-                source_id = getattr(msg, "source", "world")
-                if source_id == "world":
-                    continue
                 evt = self._convert_message_to_event(msg)
                 if evt:
                     events.append(evt)
@@ -247,19 +258,69 @@ class WorldEngine:
     # -------------------------------------------------------------------------
 
     def _convert_message_to_event(self, msg) -> SimEvent | None:
-        """将 AutoGen 消息转为 SimEvent。"""
+        """将 AutoGen 消息转为 SimEvent。
+
+        支持 3 种消息类型:
+        - TextMessage → agent_message
+        - ToolCallRequestEvent → agent_action（tool call 请求）
+        - 其他 → 跳过
+        """
+        from autogen_agentchat.messages import ToolCallRequestEvent
+
+        # tool call 事件 → agent_action
+        if isinstance(msg, ToolCallRequestEvent):
+            return self._tool_call_to_event(msg)
+
+        # 普通文本消息 → agent_message
         content = getattr(msg, "content", "")
         if not content:
             return None
 
-        source = getattr(msg, "source", "world")
+        raw_source = getattr(msg, "source", "world")
+        source_id = self._name_to_id.get(raw_source, raw_source)
+
+        # 跳过 world/user 系统消息
+        if source_id in ("world", "user"):
+            return None
+
         return SimEvent(
             id=str(uuid.uuid4()),
             world_id=self.world.id,
             tick=self.current_tick,
             type="agent_message",
-            source_agent_id=source,
+            source_agent_id=source_id,
             description=str(content)[:500],
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+    def _tool_call_to_event(self, msg) -> SimEvent | None:
+        """将 AutoGen ToolCallRequestEvent 转为 SimEvent(agent_action)。"""
+        content = getattr(msg, "content", [])
+        if not content:
+            return None
+
+        fc = content[0]  # 取第一个 function call
+        tool_name = getattr(fc, "name", "")
+        tool_args = {}
+        try:
+            tool_args = json.loads(getattr(fc, "arguments", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        raw_source = getattr(msg, "source", "")
+        source_id = self._name_to_id.get(raw_source, raw_source)
+
+        return SimEvent(
+            id=str(uuid.uuid4()),
+            world_id=self.world.id,
+            tick=self.current_tick,
+            type="agent_action",
+            source_agent_id=source_id,
+            description=f"调用工具: {tool_name}({tool_args})",
+            data={
+                "action": tool_name,
+                **tool_args,
+            },
             created_at=datetime.now(timezone.utc).isoformat(),
         )
 
@@ -268,14 +329,23 @@ class WorldEngine:
     ) -> list[SimEvent]:
         """从 Agent 的响应中提取事件（solo 模式）。
 
-        AutoGen 0.7 的 on_messages 返回 Response 对象，其中 inner_messages 是消息列表。
+        遍历 Response.inner_messages，处理 TextMessage 和 ToolCallRequestEvent。
         """
+        from autogen_agentchat.messages import ToolCallRequestEvent
+
         messages = getattr(response, "inner_messages", [])
         if not messages and hasattr(response, "chat_message"):
             messages = [response.chat_message]
-
         events: list[SimEvent] = []
         for msg in messages:
+            # tool call → agent_action
+            if isinstance(msg, ToolCallRequestEvent):
+                evt = self._tool_call_to_event(msg)
+                if evt:
+                    events.append(evt)
+                continue
+
+            # 普通消息 → thought_stream
             content = getattr(msg, "content", "")
             if content:
                 events.append(
@@ -292,7 +362,6 @@ class WorldEngine:
         return events
 
     def _make_error_event(self, agent_id: str, error: str) -> SimEvent:
-        """生成错误事件——当 Agent 调用失败时。"""
         return SimEvent(
             id=str(uuid.uuid4()),
             world_id=self.world.id,
@@ -304,33 +373,100 @@ class WorldEngine:
         )
 
     # -------------------------------------------------------------------------
-    # Tool call 应用（Step 10 补全）
+    # Tool call 应用
     # -------------------------------------------------------------------------
 
-    def _apply_action(self, event: SimEvent):
-        """将 agent_action 事件施加到世界状态。
+    def _apply_action(self, event: SimEvent) -> list[SimEvent]:
+        """将 agent_action 事件施加到世界状态，返回新生成的事件。"""
+        action = event.data.get("action", "")
+        # tool 参数名可能为 target 或 target_name（send_message 用后者）
+        target = event.data.get("target") or event.data.get("target_name", "")
+        agent = self.agents.get(event.source_agent_id or "")
+        new_events: list[SimEvent] = []
 
-        Step 10 实现：解析 tool call 结果，更新 Agent 状态、发送消息等。
-        当前 stub——仅记录日志。
-        """
-        logger.debug(f"WorldEngine._apply_action (stub): {event.description[:100]}")
-
-    # -------------------------------------------------------------------------
-    # 关系演化（Step 10 补全）
-    # -------------------------------------------------------------------------
-
-    def _update_relationships(self, events: list[SimEvent]):
-        """根据本 tick 的事件更新 Agent 间关系。
-
-        Step 10 实现：分析消息和行动中的人际信号，更新关系分数。
-        当前 stub——仅记录日志。
-        """
-        msg_count = sum(1 for e in events if e.type == "agent_message")
-        if msg_count > 0:
-            logger.debug(
-                f"WorldEngine._update_relationships (stub): "
-                f"{msg_count} messages in tick {self.current_tick}"
+        if action == "send_message" and target:
+            resolved = _resolve_agent_id(target, self.agents, self._name_to_id)
+            new_events.append(
+                SimEvent(
+                    id=str(uuid.uuid4()),
+                    world_id=self.world.id,
+                    tick=self.current_tick,
+                    type="agent_message",
+                    source_agent_id=event.source_agent_id,
+                    target_agent_ids=[resolved],
+                    description=event.data.get("content", event.description),
+                    data={"tone": event.data.get("tone", "neutral")},
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                )
             )
+
+        elif action == "set_goal" and agent:
+            from models.agent import Goal
+
+            agent.goals.append(
+                Goal(
+                    id=f"g{len(agent.goals) + 1}",
+                    description=event.data.get("description", event.description),
+                    priority=event.data.get("priority", 1),
+                    status="active",
+                )
+            )
+            logger.info(f"WorldEngine._apply_action: agent={agent.id} set goal")
+
+        elif action == "observe":
+            new_events.append(
+                SimEvent(
+                    id=str(uuid.uuid4()),
+                    world_id=self.world.id,
+                    tick=self.current_tick,
+                    type="thought_stream",
+                    source_agent_id=event.source_agent_id,
+                    description=f"🔍 观察: {event.data.get('target', event.description)}",
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                )
+            )
+
+        elif action == "think_aloud":
+            new_events.append(
+                SimEvent(
+                    id=str(uuid.uuid4()),
+                    world_id=self.world.id,
+                    tick=self.current_tick,
+                    type="thought_stream",
+                    source_agent_id=event.source_agent_id,
+                    description=event.data.get("thought", event.description),
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                )
+            )
+
+        else:
+            logger.debug(f"WorldEngine._apply_action: unhandled action={action}")
+
+        return new_events
+
+    # -------------------------------------------------------------------------
+    # 关系演化
+    # -------------------------------------------------------------------------
+
+    def _update_relationships(self, events: list[SimEvent]) -> list[SimEvent]:
+        """分析本 tick 事件中的交互信号，更新关系分数。返回 relationship_change 事件。"""
+        changes = extract_relationship_changes(
+            events, all_agent_ids=set(self.agents.keys())
+        )
+        if not changes:
+            return []
+
+        rel_events = apply_relationship_changes(self.relationships, changes)
+        for evt in rel_events:
+            evt.world_id = self.world.id
+            evt.tick = self.current_tick
+            evt.created_at = datetime.now(timezone.utc).isoformat()
+
+        logger.info(
+            f"WorldEngine._update_relationships: tick={self.current_tick}, "
+            f"{len(changes)} changes, {len(rel_events)} rel_events"
+        )
+        return rel_events
 
     # -------------------------------------------------------------------------
     # 持久化
@@ -344,9 +480,6 @@ class WorldEngine:
             orm = Event.from_sim_event(evt)
             self._db.add(orm)
         await self._db.commit()
-        logger.debug(
-            f"WorldEngine._persist_events: {len(events)} events saved"
-        )
 
     # -------------------------------------------------------------------------
     # 注入事件（用户干预——M7 干预台）

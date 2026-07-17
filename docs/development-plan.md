@@ -1044,20 +1044,25 @@ class WorldEngine:
 # 双向量化关系：A→B 和 B→A 可以有不同态度
 # 正值 = 正面（喜欢/信任），负值 = 负面（讨厌/不信任），0 = 中性
 
-def update_relationship(
+# 2026-07-17 实现备注：函数名为 update_relationship_score（区别于符号名），
+# INTERACTION_DELTAS 提升为模块级常量。额外实现了 detect_interaction_type、
+# extract_relationship_changes、apply_relationship_changes 三个辅助函数。
+
+INTERACTION_DELTAS = {
+    "friendly": +0.10,
+    "hostile": -0.15,
+    "cooperative": +0.08,
+    "competitive": -0.05,
+    "neutral": 0.0,
+}
+
+def update_relationship_score(
     current_score: float,
-    interaction_type: str,   # "friendly" | "hostile" | "cooperative" | "competitive" | "neutral"
-    intensity: float = 1.0,  # 交互强度
+    interaction_type: str,
+    intensity: float = 1.0,
 ) -> float:
-    """根据一次交互更新关系分数"""
-    DELTAS = {
-        "friendly": +0.1,
-        "hostile": -0.15,
-        "cooperative": +0.08,
-        "competitive": -0.05,
-        "neutral": 0.0,
-    }
-    delta = DELTAS.get(interaction_type, 0.0) * intensity
+    """根据一次交互更新关系分数（-1.0 ~ 1.0）"""
+    delta = INTERACTION_DELTAS.get(interaction_type, 0.0) * intensity
     return max(-1.0, min(1.0, current_score + delta))
 ```
 
