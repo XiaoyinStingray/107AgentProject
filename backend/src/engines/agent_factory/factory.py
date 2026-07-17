@@ -1,0 +1,238 @@
+"""
+Agent 工厂 — Persona + LLM Client → LifeAgent（AutoGen AssistantAgent 封装）。
+
+核心接口:
+    factory = AgentFactory(model_client)
+    agent = await factory.create_from_description("内向的程序员")
+    # → LifeAgent(id=..., persona=..., _agent=AssistantAgent)
+
+依赖:
+    - engines.persona: PersonaBuilder, build_system_message
+    - models.agent: Persona, Background, Goal, EmotionalState
+    - autogen_agentchat: AssistantAgent
+"""
+
+import re
+import uuid
+
+from loguru import logger
+
+from models.agent import Background, EmotionalState, Goal, Persona
+from models.memory import MemoryResponse
+from engines.persona.builder import PersonaBuilder
+from engines.persona.prompt_templates import build_system_message
+
+
+# =============================================================================
+# 辅助函数
+# =============================================================================
+
+def _sanitize_agent_name(raw: str) -> str:
+    """将任意字符串转为合法的 Python 标识符（AutoGen agent name 要求）。
+
+    策略：
+    - 去除非标识符字符，替换为下划线
+    - 去掉 UUID 中的连字符（AutoGen 内部可能加回）
+    - 不以数字开头
+    """
+    # 去掉 UUID 连字符
+    cleaned = raw.replace("-", "")
+    # 替换非标识符字符
+    cleaned = re.sub(r"[^\w]", "_", cleaned)
+    # 确保以字母或下划线开头
+    if cleaned and cleaned[0].isdigit():
+        cleaned = "_" + cleaned
+    return cleaned or "agent"
+
+
+# =============================================================================
+# LifeAgent — AutoGen AssistantAgent 的薄封装
+# =============================================================================
+
+
+class LifeAgent:
+    """一个自主 Agent 实体——AutoGen AssistantAgent 的薄封装。
+
+    职责:
+        - 保管 Agent 的静态身份（Persona, Background, Goals）
+        - 保管 Agent 的动态状态（EmotionalState, energy）
+        - 封装 AutoGen AssistantAgent，提供统一的系统提示刷新接口
+    """
+
+    def __init__(
+        self,
+        id: str,
+        persona: Persona,
+        background: Background,
+        goals: list[Goal],
+        model_client,  # AutoGen ChatCompletionClient（Any 以避免启动时的 import）
+        tools: list | None = None,
+    ):
+        self.id = id
+        self.persona = persona
+        self.background = background
+        self.goals = goals
+        self.emotional_state = EmotionalState()
+        self.energy = 100.0
+
+        # === 构建 AutoGen AssistantAgent ===
+        from autogen_agentchat.agents import AssistantAgent
+
+        system_message = build_system_message(persona, background, goals)
+        # AutoGen 要求 agent name 是合法的 Python 标识符
+        agent_name = _sanitize_agent_name(persona.name) if persona.name else id
+
+        self._agent = AssistantAgent(
+            name=agent_name,
+            model_client=model_client,
+            system_message=system_message,
+            tools=tools or [],
+            reflect_on_tool_use=True,
+            max_tool_iterations=3,
+        )
+
+        logger.info(f"LifeAgent created: id={id}, name={agent_name}, mbti={persona.mbti}")
+
+    # -------------------------------------------------------------------------
+    # 公开接口
+    # -------------------------------------------------------------------------
+
+    @property
+    def autogen_agent(self):
+        """暴露底层 AutoGen Agent 给 GroupChat / world engine。
+
+        Returns:
+            AssistantAgent: AutoGen 的 AssistantAgent 实例
+        """
+        return self._agent
+
+    def inject_context(self, world_state: str, memories: list[MemoryResponse] | None = None):
+        """每 tick 前刷新系统提示——注入当前世界状态和近期记忆。
+
+        Args:
+            world_state: 当前世界上下文文本（如 "⏰ 第 5 个时间段\n📍 大学宿舍"）
+            memories: 近期记忆列表（可选）
+        """
+        from autogen_core.models import SystemMessage
+
+        new_msg = build_system_message(
+            self.persona,
+            self.background,
+            self.goals,
+            recent_memories=memories,
+            world_context=world_state,
+        )
+        # AutoGen 0.7 的 AssistantAgent 用 _system_messages 列表存储 system prompt
+        self._agent._system_messages = [SystemMessage(content=new_msg)]  # noqa: SLF001
+
+    # -------------------------------------------------------------------------
+    # 便利方法
+    # -------------------------------------------------------------------------
+
+    def to_response(self) -> dict:
+        """导出为 API 响应格式（供 Phase 5 使用）。
+
+        Returns:
+            dict: 可直接序列化为 AgentResponse 的数据
+        """
+        return {
+            "id": self.id,
+            "name": self.persona.name or self.id,
+            "persona": self.persona,
+            "background": self.background,
+            "goals": self.goals,
+            "emotional_state": self.emotional_state,
+            "energy": self.energy,
+        }
+
+    def __repr__(self) -> str:
+        return f"<LifeAgent id={self.id!r} name={self.persona.name!r}>"
+
+
+# =============================================================================
+# AgentFactory — 自然语言 / Persona → LifeAgent
+# =============================================================================
+
+
+class AgentFactory:
+    """Agent 工厂：Persona + LLM Client → LifeAgent。
+
+    两条路径:
+        1. 自然语言描述 → PersonaBuilder → LifeAgent（铸造厂主流程）
+        2. 已有 Persona + Background + Goals → LifeAgent（从数据库恢复）
+
+    用法:
+        factory = AgentFactory(model_client)
+
+        # 路径 1: 从自然语言创建
+        agent = await factory.create_from_description("内向的程序员")
+
+        # 路径 2: 从持久化数据恢复
+        agent = factory.create_from_persona(agent_id, persona, background, goals)
+    """
+
+    def __init__(self, model_client):
+        """注入 LLM 客户端。
+
+        Args:
+            model_client: AutoGen ChatCompletionClient（同时用于 PersonaBuilder 和 AssistantAgent）
+        """
+        self.model_client = model_client
+        self.persona_builder = PersonaBuilder(model_client)
+
+    async def create_from_description(self, description: str) -> LifeAgent:
+        """自然语言描述 → LifeAgent（完整流水线）。
+
+        Step 03 (PersonaBuilder) → Step 04 (build_system_message) → AutoGen AssistantAgent
+
+        Args:
+            description: 自然语言描述，如 "来自小镇的计算机系新生，内向但野心大"
+
+        Returns:
+            LifeAgent: 可直接参与 GroupChat 的 Agent 实例
+
+        Raises:
+            ValueError: PersonaBuilder 两次尝试后仍无法生成有效人格
+        """
+        logger.info(f"AgentFactory.create_from_description: {description[:50]}...")
+        result = await self.persona_builder.build(description)
+
+        agent = LifeAgent(
+            id=str(uuid.uuid4()),
+            persona=result.persona,
+            background=result.background,
+            goals=result.goals,
+            model_client=self.model_client,
+            # tools 留空，Step 06 补充 DEFAULT_AGENT_TOOLS
+        )
+
+        logger.info(f"AgentFactory created agent: {agent}")
+        return agent
+
+    def create_from_persona(
+        self,
+        agent_id: str,
+        persona: Persona,
+        background: Background,
+        goals: list[Goal],
+    ) -> LifeAgent:
+        """已有 Persona → LifeAgent（从数据库恢复 / 手动构造）。
+
+        Args:
+            agent_id: 已有的 agent ID（数据库主键）
+            persona: Persona 对象
+            background: Background 对象
+            goals: Goal 列表
+
+        Returns:
+            LifeAgent: 可直接参与 GroupChat 的 Agent 实例
+        """
+        logger.info(f"AgentFactory.create_from_persona: id={agent_id}, name={persona.name}")
+        return LifeAgent(
+            id=agent_id,
+            persona=persona,
+            background=background,
+            goals=goals,
+            model_client=self.model_client,
+            # tools 留空，Step 06 补充
+        )

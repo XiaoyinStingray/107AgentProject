@@ -260,6 +260,7 @@ class PersonaBuilder:
             big_five = BigFive(**data.get("big_five", {}))
             decision_style = DecisionStyle(**data.get("decision_style", {}))
             persona = Persona(
+                name=name,
                 mbti=data.get("mbti", "INTJ-T"),
                 big_five=big_five,
                 values=data.get("values", []),

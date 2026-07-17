@@ -29,6 +29,7 @@ class DecisionStyle(BaseModel):
 
 class Persona(BaseModel):
     """Agent 人格定义"""
+    name: str = Field(default="", description="LLM 生成的 2-3 字中文名")
     mbti: str = Field(default="INTJ-T")
     big_five: BigFive = Field(default_factory=BigFive)
     values: list[str] = Field(default_factory=list, description='e.g. ["成就", "自由", "安全"]')
