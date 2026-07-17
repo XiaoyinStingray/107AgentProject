@@ -4,6 +4,8 @@ Memory 数据模型 — Agent 记忆存储
 
 from pydantic import BaseModel, Field
 
+from .base import Timestamped
+
 
 class MemoryCreate(BaseModel):
     """创建记忆"""
@@ -13,12 +15,10 @@ class MemoryCreate(BaseModel):
     importance: float = Field(default=0.5, ge=0, le=1)
 
 
-class MemoryResponse(BaseModel):
+class MemoryResponse(Timestamped):
     """记忆响应"""
-    id: str
     agent_id: str
     type: str
     content: str
     importance: float
     keywords: str = Field(default="")
-    created_at: str

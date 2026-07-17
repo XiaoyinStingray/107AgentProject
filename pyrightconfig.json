@@ -1,0 +1,8 @@
+{
+  "include": ["backend/src"],
+  "exclude": ["frontend", "**/node_modules", "**/__pycache__"],
+  "extraPaths": ["backend/src"],
+  "typeCheckingMode": "basic",
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false
+}

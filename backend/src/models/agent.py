@@ -5,6 +5,8 @@ Agent 数据模型 — 人格、背景、目标、情绪状态
 from pydantic import BaseModel, Field
 from typing import Optional
 
+from .base import HasId, MutableTimestamped
+
 
 # ========== 人格结构 ==========
 
@@ -42,9 +44,8 @@ class Background(BaseModel):
     key_events: list[str] = Field(default_factory=list)
 
 
-class Goal(BaseModel):
+class Goal(HasId):
     """层级化目标"""
-    id: str
     description: str
     priority: int = Field(default=1, description="1=最高")
     deadline: Optional[str] = Field(default=None, description="ISO datetime")
@@ -68,14 +69,11 @@ class AgentCreate(BaseModel):
     description: str = Field(..., min_length=3, description="自然语言描述")
 
 
-class AgentResponse(BaseModel):
+class AgentResponse(MutableTimestamped):
     """Agent 的 API 响应"""
-    id: str
     name: str
     persona: Persona
     background: Background
     goals: list[Goal] = Field(default_factory=list)
     emotional_state: EmotionalState = Field(default_factory=EmotionalState)
     energy: float = Field(default=100.0)
-    created_at: str
-    updated_at: str

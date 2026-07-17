@@ -1,3 +1,4 @@
+from .base import HasId, Timestamped, MutableTimestamped
 from .agent import (
     BigFive,
     DecisionStyle,
@@ -14,6 +15,10 @@ from .memory import MemoryCreate, MemoryResponse
 from .simulation import SimulationResponse
 
 __all__ = [
+    # Base
+    "HasId",
+    "Timestamped",
+    "MutableTimestamped",
     # Agent
     "BigFive",
     "DecisionStyle",

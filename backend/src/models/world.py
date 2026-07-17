@@ -4,6 +4,8 @@ World 数据模型 — 场景定义、世界状态
 
 from pydantic import BaseModel, Field
 
+from .base import Timestamped
+
 
 class Scenario(BaseModel):
     """场景定义"""
@@ -21,12 +23,10 @@ class WorldCreate(BaseModel):
     agent_ids: list[str] = Field(default_factory=list)
 
 
-class WorldResponse(BaseModel):
+class WorldResponse(Timestamped):
     """World 的 API 响应"""
-    id: str
     name: str
     scenario: Scenario
     agent_ids: list[str]
     current_tick: int = Field(default=0)
     status: str = Field(default="idle", description="idle | running | paused | finished")
-    created_at: str

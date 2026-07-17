@@ -83,6 +83,7 @@ backend/
 │   ├── db.py                 # SQLite + aiosqlite 连接
 │   ├── models/
 │   │   ├── __init__.py
+│   │   ├── base.py          ← 共享基类 (HasId → Timestamped → MutableTimestamped)
 │   │   ├── agent.py
 │   │   ├── world.py
 │   │   ├── event.py
@@ -295,6 +296,37 @@ class SimulationResponse(BaseModel):
     status: str = "running"
 ```
 
+### 共享基类体系
+
+> **2026-07-17 更新：** Plan 原始方案每个模型独立定义 `id`/`created_at`，导致 6 个类复制粘贴。实际实现引入基类体系，后续所有新模型遵循此模式。
+
+**文件: `backend/src/models/base.py`**
+
+```python
+from pydantic import BaseModel
+
+class HasId(BaseModel):
+    """有 id 的实体基类"""
+    id: str
+
+class Timestamped(HasId):
+    """有 id + created_at"""
+    created_at: str
+
+class MutableTimestamped(Timestamped):
+    """有 id + created_at + updated_at"""
+    updated_at: str
+```
+
+**继承关系：**
+
+| 基类 | 适用模型 | 字段 |
+|------|---------|------|
+| `HasId` | `Goal`, `SimulationResponse` | `id` |
+| `Timestamped` | `WorldResponse`, `SimEvent`, `MemoryResponse` | `id`, `created_at` |
+| `MutableTimestamped` | `AgentResponse` | `id`, `created_at`, `updated_at` |
+| `BaseModel` | `Persona`, `BigFive`, `Scenario`, `MemoryCreate` 等 | 无（不需要 id） |
+
 **验收标准:**
 - [ ] `python -c "from backend.src.models.agent import Persona; print(Persona())"` 成功
 - [ ] 所有模型能 `model_dump()` 序列化为 dict
@@ -333,20 +365,97 @@ class Settings(BaseSettings):
     agent_timeout_seconds: int = 30
 
 settings = Settings()
+
+
+def ensure_dirs() -> None:
+    """确保运行时需要的目录存在。在应用启动时调用，不在 import 时执行。"""
+    _data_dir = Path("backend/data")
+    _data_dir.mkdir(parents=True, exist_ok=True)
 ```
 
 **文件: `backend/src/db.py`**
 
 ```python
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from .config import settings
+from sqlalchemy.orm import DeclarativeBase
+from loguru import logger
+from config import settings
 
-engine = create_async_engine(settings.database_url, echo=settings.debug)
+engine = create_async_engine(
+    settings.database_url, echo=settings.debug,
+    connect_args={"check_same_thread": False},
+)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
+class Base(DeclarativeBase):
+    """所有 ORM 模型继承此类。"""
+    pass
+
 async def get_db() -> AsyncSession:
+    """async with 上下文管理器已自动管理 session 生命周期。"""
     async with async_session() as session:
         yield session
+
+async def init_db():
+    """创建所有未存在的表（启动时调用一次）"""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("Database tables ensured (SQLite)")
+```
+
+### 应用启动入口
+
+> **2026-07-17 更新：** 原来 main.py 没有生命周期管理。实际实现加入 FastAPI `lifespan`（调用 `ensure_dirs()` + `init_db()`），并创建 `run.py` 一键启动脚本。
+
+**文件: `run.py`（项目根目录）**
+
+```python
+"""一键启动: python run.py [--reload] [--port 9000]"""
+import sys
+from pathlib import Path
+_src = Path(__file__).resolve().parent / "backend" / "src"
+sys.path.insert(0, str(_src))
+
+import uvicorn
+
+if __name__ == "__main__":
+    import argparse
+    from config import settings  # pyright: ignore[reportMissingImports]
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--reload", action="store_true")
+    parser.add_argument("--port", type=int, default=settings.api_port)
+    args = parser.parse_args()
+
+    uvicorn.run("main:app", host=settings.api_host, port=args.port,
+                reload=args.reload or settings.debug)
+```
+
+**文件: `backend/src/main.py` 中的 lifespan**
+
+```python
+from contextlib import asynccontextmanager
+from config import ensure_dirs
+from db import init_db
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Starting Life Lab...")
+    ensure_dirs()
+    await init_db()
+    logger.info("Life Lab ready")
+    yield
+    logger.info("Shutting down Life Lab")
+
+app = FastAPI(..., lifespan=lifespan)
+```
+
+**启动方式：**
+
+```
+python run.py              # 生产模式
+python run.py --reload     # 开发模式（热重载）
+python run.py --port 9000  # 指定端口
 ```
 
 ---

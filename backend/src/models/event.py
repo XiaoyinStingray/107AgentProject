@@ -5,18 +5,18 @@ Event 数据模型 — 模拟事件（核心通信单位）
 from pydantic import BaseModel, Field
 from typing import Optional
 
+from .base import Timestamped
 
-class SimEvent(BaseModel):
+
+class SimEvent(Timestamped):
     """模拟事件——这是核心通信单位"""
-    id: str
     world_id: str
     tick: int
-    type: str = Field(..., description="thought | agent_message | agent_action | world_event | relationship_change | tick_boundary")
+    type: str = Field(..., description="thought_stream | agent_message | agent_action | world_event | relationship_change | tick_boundary")
     source_agent_id: Optional[str] = Field(default=None)
     target_agent_ids: list[str] = Field(default_factory=list)
     description: str = Field(default="")
     data: dict = Field(default_factory=dict, description="附加结构数据")
-    created_at: str
 
 
 class ThoughtEvent(SimEvent):
