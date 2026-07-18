@@ -210,6 +210,95 @@ NN 是两位数字序号（00, 01, 02...），和 development-plan.md 的步骤�
 
 ---
 
+## 6. 前端开发补充规则
+
+> **何时适用：** Step 16–25（Phase 7 前端）。后端 Step 不读此节。
+
+### 6.1 设计 Token 先行
+
+任何页面组件**禁止使用裸 CSS 值**。必须使用 `tailwind.config.js` 中定义的 Token：
+
+| 类别 | Token 示例 | 禁止 |
+|------|-----------|------|
+| 颜色 | `bg-bg-primary`, `text-accent-green` | `bg-[#0a0a0f]`, `text-[#00ff88]` |
+| 字体 | `font-mono`, `font-sans` | `font-['JetBrains_Mono']` |
+| 动画 | `animate-slide-in`, `animate-fade-in` | 内联 `@keyframes` |
+| 间距 | Tailwind scale（`p-4`, `m-2`, `gap-6`） | 任意值 `p-[13px]` |
+
+需要新 Token → 先在 `tailwind.config.js` 加，再在组件里用。
+
+### 6.2 共享组件先于页面
+
+新页面开始前，先检查能否拆出共享组件。Phase 7 标准共享组件：
+
+| 组件 | 文件 | 用途 |
+|------|------|------|
+| `Card` | `components/shared/Card.tsx` | 玻璃面板容器 |
+| `Badge` | `components/shared/Badge.tsx` | 状态标签 |
+| `StatusDot` | `components/shared/StatusDot.tsx` | 呼吸指示灯 |
+| `TerminalText` | `components/shared/TerminalText.tsx` | 等宽打字机文字 |
+| `EmptyState` | `components/shared/EmptyState.tsx` | 🚧 建设中占位 |
+
+页面独有逻辑放 `pages/`，跨页面复用的 UI 片断抽到 `components/`。
+
+### 6.3 实现顺序（前端）
+
+```
+1. TS 类型定义（从 frontend/src/types/ 或 plan 取，严禁猜测）
+2. Mock 数据（plan 提供了 MOCK_XXX 的，直接用）
+3. 组件骨架（先写 HTML 结构 + Tailwind 类，不写状态逻辑）
+4. 状态管理（Zustand store / useState / useReducer）
+5. 交互逻辑（事件处理、API 调用、乐观更新）
+6. 动画（最后加——结构不稳时加动画只会让调试更痛苦）
+```
+
+### 6.4 前端代码规范
+
+- 每个 `.tsx` 文件不超过 300 行（超过就拆子组件）
+- 每个组件函数不超过 200 行（React 组件天然比 Python 函数长）
+- Props 必须显式声明 TypeScript 接口（不用 `any`）
+- 用 Tailwind class 而非内联 `style={{}}`（除非值确实需要动态计算）
+- 状态管理：组件内用 `useState`，跨页面用 `zustand` store，服务端缓存用 `@tanstack/react-query`
+- 注释写"为什么"不写"是什么"（同后端规则）
+
+### 6.5 测试 & 验收（前端）
+
+```
+Layer 1: 组件渲染（vitest + @testing-library/react）
+  → 关键交互（按钮点击、表单提交）至少 1 个测试
+
+Layer 2: Mock 模式独立运行
+  → npm run dev → 不连后端也能浏览全部页面
+  → 用 frontend/src/mocks/ 提供的 Mock 数据
+
+Layer 3: 视觉走查（人眼）
+  → 必须在浏览器中实际看到页面
+  → 所有页面统一暗色主题
+  → 动画无闪烁、无卡顿
+  → 响应式不炸（至少 1280px 和 1920px 两档）
+```
+
+**前端 TEST 阶段 = 后端 TEST + 视觉走查。** 测试绿了不代表页面好看。
+
+### 6.6 前端 DONE 模板（追加字段）
+
+在 §5 的 DONE 模板基础上，前端 Step 的 done 文档追加：
+
+```markdown
+## 组件树
+
+（本步新增/修改的组件层级关系，ASCII 树形）
+
+## 视觉走查
+
+- [ ] 暗色主题一致 — ✅
+- [ ] 动画流畅 — ✅
+- [ ] 1280px 不炸 — ✅
+- [ ] Mock 模式可独立浏览 — ✅
+```
+
+---
+
 ## 附录：AI Session 模板
 
 每步开始时的 AI prompt 结构：
