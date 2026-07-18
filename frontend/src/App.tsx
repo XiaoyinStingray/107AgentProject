@@ -3,6 +3,7 @@ import Layout from "./components/layout/Layout";
 import Home from "./pages/Home";
 import AgentFoundry from "./pages/AgentFoundry";
 import SoloTheater from "./pages/SoloTheater";
+import GroupSandbox from "./pages/GroupSandbox";
 import SSEDebug from "./pages/debug/SSEDebug";
 import EmptyState from "./components/shared/EmptyState";
 import Badge from "./components/shared/Badge";
@@ -81,16 +82,7 @@ export default function App() {
           <Route path="theater" element={<SoloTheater />} />
 
           {/* M3 群体沙盒 */}
-          <Route
-            path="sandbox"
-            element={
-              <PlaceholderPage
-                title="M3 群体沙盒"
-                description="群体投放 · Agent 间对话 · 关系演化 · 竞争博弈"
-                tier="P0"
-              />
-            }
-          />
+          <Route path="sandbox" element={<GroupSandbox />} />
 
           {/* M4 竞技场 */}
           <Route

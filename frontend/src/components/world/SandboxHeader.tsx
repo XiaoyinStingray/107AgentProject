@@ -1,0 +1,60 @@
+import type { SandboxSpeed } from "../../types/sandbox";
+import StatusDot from "../shared/StatusDot";
+
+interface SandboxHeaderProps {
+  scenario: string;
+  currentTick: number;
+  connected: boolean;
+  speed: SandboxSpeed;
+  onToggleSpeed: () => void;
+  onToggleRunning: () => void;
+  onReset: () => void;
+}
+
+/** 群体沙盒运行时顶部控制栏。 */
+export default function SandboxHeader({
+  scenario,
+  currentTick,
+  connected,
+  speed,
+  onToggleSpeed,
+  onToggleRunning,
+  onReset,
+}: SandboxHeaderProps) {
+  return (
+    <header className="shrink-0 border-b border-border bg-bg-secondary px-4 py-3 flex items-center gap-4">
+      <div>
+        <p className="text-xs text-text-secondary font-mono">WORLD</p>
+        <h1 className="text-sm text-text-primary font-mono">{scenario}</h1>
+      </div>
+      <span className="text-xs text-text-secondary font-mono">
+        Tick #{currentTick}
+      </span>
+      <span className="ml-auto flex items-center gap-2 text-xs font-mono text-text-secondary">
+        <StatusDot status={connected ? "active" : "idle"} label="" />
+        {connected ? "RUNNING" : "PAUSED"}
+      </span>
+      <button
+        type="button"
+        onClick={onToggleRunning}
+        className="text-xs font-mono text-accent-green hover:text-accent-green/80 transition-colors"
+      >
+        {connected ? "⏸ 暂停" : "▶ 继续"}
+      </button>
+      <button
+        type="button"
+        onClick={onToggleSpeed}
+        className="text-xs font-mono text-accent-blue hover:text-accent-blue/80 transition-colors"
+      >
+        ⏩ Speed {speed}x
+      </button>
+      <button
+        type="button"
+        onClick={onReset}
+        className="text-xs font-mono text-accent-orange hover:text-accent-orange/80 transition-colors"
+      >
+        重置
+      </button>
+    </header>
+  );
+}
