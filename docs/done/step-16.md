@@ -97,3 +97,9 @@ App
 - `useApi.ts` hook 尚未创建——Step 17 需要封装 `fetch` 调 `POST /api/agents`
 - `zustand` 和 `@tanstack/react-query` 已安装未使用——Step 17/18 开始接入
 - 56 项 hash 导航基础设施已就绪——后续模块页面可用 `useLocation().hash` 定位到页内 section
+
+## 补充记录（2026-07-18）
+
+- **Step 20 回溯修改：** Step 20 将 `frontend/src/App.tsx` 中的 `/sandbox` 路由从 `PlaceholderPage` 接入 `GroupSandbox`。这是对 Step 16 产出文件的向后集成修改，原记录内容保持不变。
+- **BREAKING 标记：** 该路由行为变化已在 [Step 20 DONE](step-20.md) 中标记为 `BREAKING`。
+- **回归验证：** 修改后已重新验证 Dashboard、M1 AgentFoundry、M2 SoloTheater 和 Sidebar；TypeScript、前端构建及后端全量测试也均通过。
