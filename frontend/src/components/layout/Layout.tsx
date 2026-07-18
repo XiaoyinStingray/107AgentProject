@@ -1,27 +1,21 @@
 import { Outlet } from "react-router-dom";
+import Sidebar from "./Sidebar";
+import TopBar from "./TopBar";
 
+/**
+ * 全局布局：左侧可折叠 Sidebar + 顶部状态栏 + 主内容区。
+ * 原有顶栏/底栏被提取为 TopBar，底栏（状态条）合并到 TopBar 右侧。
+ */
 export default function Layout() {
   return (
-    <div className="h-screen flex flex-col bg-bg-primary">
-      {/* Top Bar */}
-      <header className="h-12 border-b border-border flex items-center px-4 bg-bg-secondary">
-        <span className="font-mono text-sm text-accent-green">Life Lab v0.1.0</span>
-        <span className="ml-auto font-mono text-xs text-text-secondary">
-          Agent 社会实验平台
-        </span>
-      </header>
-
-      {/* Main Content */}
-      <main className="flex-1 overflow-hidden">
-        <Outlet />
-      </main>
-
-      {/* Bottom Bar */}
-      <footer className="h-6 border-t border-border flex items-center px-4 bg-bg-secondary">
-        <span className="font-mono text-xs text-text-secondary">
-          READY
-        </span>
-      </footer>
+    <div className="h-screen flex flex-col bg-bg-primary overflow-hidden">
+      <TopBar />
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar />
+        <main className="flex-1 overflow-auto">
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }

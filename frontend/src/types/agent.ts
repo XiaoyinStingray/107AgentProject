@@ -16,6 +16,7 @@ export interface DecisionStyle {
 }
 
 export interface Persona {
+  name: string;  // Step05 后端新增，Step16 前端补齐
   mbti: string;
   big_five: BigFive;
   values: string[];

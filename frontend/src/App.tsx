@@ -1,17 +1,54 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import Layout from "./components/layout/Layout";
+import Home from "./pages/Home";
+import EmptyState from "./components/shared/EmptyState";
+import Badge from "./components/shared/Badge";
+import { findItemById } from "./data/menuData";
 
-function Home() {
+/**
+ * 占位页面——解析 URL hash（如 #item-25），显示对应功能项名称。
+ * 后续 Step 逐模块替换为完整页面。
+ */
+function PlaceholderPage({
+  title,
+  description,
+  tier,
+}: {
+  title: string;
+  description: string;
+  tier?: "P0" | "P1" | "P2" | "P3";
+}) {
+  const { hash } = useLocation();
+
+  // 解析 hash: "#item-25" → id=25 → 查找对应功能项
+  const itemId = hash.startsWith("#item-") ? parseInt(hash.slice(6), 10) : null;
+  const selectedItem = itemId ? findItemById(itemId) : null;
+
   return (
-    <div className="flex items-center justify-center h-full">
-      <div className="text-center">
-        <h1 className="text-4xl font-mono text-accent-green mb-4">
-          人生实验室 · Life Lab
-        </h1>
-        <p className="text-text-secondary font-mono">
-          Agent 社会实验平台 v0.1.0
-        </p>
-      </div>
+    <div className="h-full flex items-center justify-center">
+      {selectedItem ? (
+        /* 选中了具体功能项——展示功能名 + 所属模块 */
+        <div className="flex flex-col items-center gap-3">
+          <span className="text-4xl">{selectedItem.emoji}</span>
+          <div className="text-center">
+            <h2 className="text-xl font-mono text-text-primary mb-1">
+              {selectedItem.label}
+            </h2>
+            <p className="text-xs text-text-secondary font-mono mb-3">
+              {selectedItem.sectionTitle}
+              <Badge
+                label={selectedItem.priority}
+                variant={selectedItem.priority}
+                className="ml-2"
+              />
+            </p>
+          </div>
+          <EmptyState title="🚧 建设中" description={description} />
+        </div>
+      ) : (
+        /* 未选中具体功能项——模块默认占位 */
+        <EmptyState title={title} description={description} tier={tier} />
+      )}
     </div>
   );
 }
@@ -21,7 +58,125 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Layout />}>
+          {/* Dashboard */}
           <Route index element={<Home />} />
+
+          {/* M1 铸造厂 */}
+          <Route
+            path="agents"
+            element={
+              <PlaceholderPage
+                title="M1 铸造厂"
+                description="自然语言创建 Agent · 人格引擎 · 背景生成 · 目标系统"
+                tier="P0"
+              />
+            }
+          />
+          <Route
+            path="agents/:id"
+            element={
+              <PlaceholderPage
+                title="Agent 详情"
+                description="人格雷达图、记忆时间线、决策记录"
+                tier="P1"
+              />
+            }
+          />
+
+          {/* M2 单人剧场 */}
+          <Route
+            path="theater"
+            element={
+              <PlaceholderPage
+                title="M2 单人剧场"
+                description="场景投放 · 思维流实时展示 · 目标追逐 · Agent 日记"
+                tier="P0"
+              />
+            }
+          />
+
+          {/* M3 群体沙盒 */}
+          <Route
+            path="sandbox"
+            element={
+              <PlaceholderPage
+                title="M3 群体沙盒"
+                description="群体投放 · Agent 间对话 · 关系演化 · 竞争博弈"
+                tier="P0"
+              />
+            }
+          />
+
+          {/* M4 竞技场 */}
+          <Route
+            path="arena"
+            element={
+              <PlaceholderPage
+                title="M4 竞技场"
+                description="1v1 对抗 · 大乱斗 · 战报生成 · 复盘对比"
+                tier="P1"
+              />
+            }
+          />
+
+          {/* M5 叙事工厂 */}
+          <Route
+            path="narratives"
+            element={
+              <PlaceholderPage
+                title="M5 叙事工厂"
+                description="小说化叙事 · 未来的信 · 平行对话 · 播客脚本"
+                tier="P1"
+              />
+            }
+          />
+
+          {/* M6 控制台 */}
+          <Route
+            path="control"
+            element={
+              <PlaceholderPage
+                title="M6 观察者控制台"
+                description="多 Agent 仪表盘 · 事件热力图 · Agent 搜索 · 决策模式识别"
+                tier="P1"
+              />
+            }
+          />
+
+          {/* M7 干预台 */}
+          <Route
+            path="intervention"
+            element={
+              <PlaceholderPage
+                title="M7 导演干预台"
+                description="事件注入 · 上帝之声 · 时间回溯 · 人格篡改"
+                tier="P2"
+              />
+            }
+          />
+
+          {/* M8 档案馆 */}
+          <Route
+            path="archive"
+            element={
+              <PlaceholderPage
+                title="M8 Agent 档案馆"
+                description="Agent 市场 · 精彩回放 · 实验模板 · 研究报告导出"
+                tier="P2"
+              />
+            }
+          />
+
+          {/* 404 */}
+          <Route
+            path="*"
+            element={
+              <PlaceholderPage
+                title="404"
+                description="这个页面不存在——或者还没建好。"
+              />
+            }
+          />
         </Route>
       </Routes>
     </BrowserRouter>
