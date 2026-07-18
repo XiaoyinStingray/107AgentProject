@@ -75,7 +75,9 @@ function AgentSelection({
               }`}
             >
               <div className="flex items-center gap-2">
-                <span className="text-xl">{agent.name.charAt(0)}</span>
+                <div className="w-10 h-10 rounded-full bg-accent-green/10 border border-accent-green/30 flex items-center justify-center text-lg select-none shrink-0">
+                  {agent.name.charAt(0)}
+                </div>
                 <span className="font-mono text-sm text-text-primary">
                   {agent.name}
                 </span>

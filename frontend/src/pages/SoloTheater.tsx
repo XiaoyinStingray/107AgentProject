@@ -57,7 +57,7 @@ export default function SoloTheater() {
   const [isRunning, setIsRunning] = useState(false);
 
   // SSE 推流（Mock 模式）
-  const { events, connected, start, stop, clear } = useMockSSE();
+  const { events, connected, start, resume, stop, clear } = useMockSSE();
 
   const selectedAgent = availableAgents.find(
     (a) => a.id === selectedAgentId,
@@ -240,7 +240,7 @@ export default function SoloTheater() {
             </button>
           ) : events.length > 0 ? (
             <button
-              onClick={start}
+              onClick={resume}
               className="
                 px-3 py-1 text-sm font-mono rounded
                 bg-accent-green/10 border border-accent-green/30

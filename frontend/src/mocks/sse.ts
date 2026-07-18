@@ -161,9 +161,23 @@ export function useMockSSE() {
     }, 2000);
   }, [appendEvent, storeClear, setConnected, stop]);
 
+  const resume = useCallback(() => {
+    if (indexRef.current >= MOCK_SSE_EVENTS.length) return;
+    setConnected(true);
+    setRunning(true);
+    timerRef.current = setInterval(() => {
+      if (indexRef.current >= MOCK_SSE_EVENTS.length) {
+        stop();
+        return;
+      }
+      appendEvent({ ...MOCK_SSE_EVENTS[indexRef.current] });
+      indexRef.current++;
+    }, 2000);
+  }, [appendEvent, setConnected, stop]);
+
   useEffect(() => {
     return () => stop();
   }, [stop]);
 
-  return { events, connected: running, start, stop, clear: storeClear };
+  return { events, connected: running, start, resume, stop, clear: storeClear };
 }

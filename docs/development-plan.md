@@ -1832,6 +1832,44 @@ interface SSEStore {
 └─────────────────────────────────────────────────────────────┘
 ```
 
+### 7.3.0 前端测试基础设施（Step 20）
+
+> **2026-07-18 Step 20 补充：** 前端组件测试框架。
+
+**依赖 (devDependencies):**
+```json
+{
+  "vitest": "^2.1.9",
+  "@testing-library/react": "^16.1.0",
+  "@testing-library/jest-dom": "^6.6.3",
+  "jsdom": "^25.0.1"
+}
+```
+
+**vite.config.ts 测试配置:**
+```typescript
+test: {
+  environment: "jsdom",
+  globals: true,
+}
+```
+
+**tsconfig.json 类型引用:** `"types": ["vitest/globals"]`
+
+**测试命令:** `npm test`（执行 `vitest run`）
+
+**测试分层（前端）：**
+```
+Layer 1: 组件渲染（vitest + @testing-library/react）
+  → 关键交互（按钮点击、表单提交）至少 1 个测试
+Layer 2: Mock 模式独立运行
+  → npm run dev → 不连后端也能浏览全部页面
+Layer 3: 视觉走查（人眼）
+  → 浏览器实际查看暗色主题/动画/响应式
+```
+
+---
+
 ### 7.3.2a 共享基础设施（Step 16–17）
 
 > **2026-07-18 Step 17 补充：** useApi hook + AgentCard + PersonaRadar 的接口定义。
