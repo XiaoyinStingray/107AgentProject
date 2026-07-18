@@ -80,3 +80,10 @@ GroupSandbox (/sandbox)
 
 - **Step 21（关系网络图）：** 可直接消费本步的 `relationship_change` 事件和 `MOCK_SANDBOX_RELATIONSHIP_EVENTS`，实现 Agent 节点、关系边和关系变化动画。
 - 后续接入真实 World/SSE 时，将 `useSandboxMockSSE` 替换为 Step 18 的真实 `useSSE` 数据源。
+
+## 补充记录（2026-07-18）
+
+- **npm 环境统一：** 根据项目文档统一使用 npm；同步更新并提交 `frontend/package-lock.json`，使其包含本步新增的前端测试依赖。
+- **npm 回归验证：** `npm.cmd test` 通过（5/5），`npm.cmd run build` 通过；保留 Vite chunk 体积警告。
+- **安全审计提示：** npm 报告 5 个依赖漏洞；未执行 `npm audit fix --force`，避免未经确认的 breaking 升级。
+- **锁文件范围：** `frontend/pnpm-lock.yaml` 仍未跟踪、未提交，以保持仓库的 npm 依赖管理约定。
