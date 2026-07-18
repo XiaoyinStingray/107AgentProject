@@ -1100,6 +1100,11 @@ import json
 # autogen_agentchat.messages.ThoughtEvent → thought_stream
 # 自定义 → world_event / relationship_change / tick_boundary
 
+# 2026-07-18 实现备注：实际设计演变为 WorldEngine.tick_stream() 内部完成
+# AutoGen→SimEvent 转换 + SSE 格式化，而非独立的 translate_message/world_event_stream
+# 函数。SSE 端点调用 engine.tick_stream() → api/sse.py 的 _event_to_dict + _sse_event。
+# 详见 docs/done/step-11.md。
+
 async def world_event_stream(world_engine: WorldEngine) -> AsyncGenerator[str, None]:
     """SSE 事件生成器——FastAPI StreamingResponse 的 content"""
     async for autogen_message in world_engine.team.run_stream():
@@ -1285,10 +1290,11 @@ async def inject_event(world_id: str, event: dict):
 **文件: `backend/src/main.py`**
 
 ```python
+# 2026-07-18 实现备注：当前仅挂载 agents + worlds + sse（3 个已实现）。
+# simulations、narratives、arenas、export 待 Phase 6/8/9 实现后追加。
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .api import agents, worlds, simulations, narratives, arenas, sse
-from .config import settings
+from api import agents, worlds, sse
 
 app = FastAPI(title="Life Lab API", version="0.1.0")
 

@@ -11,16 +11,13 @@ SSE 桥接 — WorldEngine.tick_stream() → Server-Sent Events → 前端实时
 """
 
 import json
-import logging
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
+from loguru import logger
 
 from engines.world.engine import WorldEngine
 from models.event import SimEvent
-from models.memory import MemoryResponse
-
-logger = logging.getLogger(__name__)
 
 sse_router = APIRouter(prefix="/api/worlds", tags=["sse"])
 

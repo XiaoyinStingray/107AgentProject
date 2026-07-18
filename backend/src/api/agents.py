@@ -53,11 +53,16 @@ def get_agent_store() -> AgentStore:
     return _agent_store
 
 
-def get_agent_factory() -> AgentFactory:
-    """创建 AgentFactory（注入真实 LLM 客户端）。"""
-    from llm.client import create_model_client
+_agent_factory: AgentFactory | None = None
 
-    return AgentFactory(create_model_client())
+
+def get_agent_factory() -> AgentFactory:
+    """创建 AgentFactory（module-level singleton，避免重复建立 HTTP 连接池）。"""
+    global _agent_factory
+    if _agent_factory is None:
+        from llm.client import create_model_client
+        _agent_factory = AgentFactory(create_model_client())
+    return _agent_factory
 
 
 # =============================================================================

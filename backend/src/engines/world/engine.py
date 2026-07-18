@@ -150,29 +150,48 @@ class WorldEngine:
         return all_events
 
     async def tick_stream(self) -> AsyncGenerator[SimEvent, None]:
-        """流式推进一个 tick——Agent 每完成一轮发言就 yield 一个事件。
+        """流式推进一个 tick——实时 yield Agent 发言，末尾补全管线步骤。
 
         SSE 端点调用此方法，实时推送"思考气泡"给前端。
         事件流末尾自动附带 tick_boundary。
         """
+        tick_events: list[SimEvent] = []
+
+        # ---- 1. 注入世界状态 ----
         context = self._build_world_context()
         for agent in self.agents.values():
             memories = await self._retriever.retrieve(agent.id, context)
             agent.inject_context(context, memories)
 
+        # ---- 2. 流式运行 Agent 交互 ----
         if len(self.agents) == 0:
-            pass  # 无 Agent，跳过
+            pass
         elif len(self.agents) == 1:
             async for event in self._stream_solo_tick(
                 list(self.agents.values())[0]
             ):
+                tick_events.append(event)
                 yield event
         else:
             async for event in self._stream_group_tick():
+                tick_events.append(event)
                 yield event
 
-        # tick_boundary
+        # ---- 3. 应用 tool call 效果 ----
+        for event in list(tick_events):
+            if event.type == "agent_action":
+                tick_events.extend(self._apply_action(event))
+
+        # ---- 4. 关系分析 ----
+        tick_events.extend(self._update_relationships(tick_events))
+
+        # ---- 5. 持久化 ----
+        await self._persist_events(tick_events)
+
+        # 推进时钟 + 事件归档
         self.current_tick += 1
+        self.events.extend(tick_events)
+
         yield SimEvent(
             id=str(uuid.uuid4()),
             world_id=self.world.id,
@@ -213,9 +232,13 @@ class WorldEngine:
             f"初始事件：{'；'.join(initial_events)}\n"
             f"请根据你的角色设定自然地互动。"
         )
+        from autogen_core import CancellationToken
+
         try:
             team = self.build_group_chat()
-            async for msg in team.run_stream(task=task):
+            async for msg in team.run_stream(
+                task=task, cancellation_token=CancellationToken()
+            ):
                 evt = self._stream_message_to_event(msg)
                 if evt:
                     self.events.append(evt)
@@ -227,10 +250,14 @@ class WorldEngine:
             yield err
 
     def _stream_message_to_event(self, msg) -> SimEvent | None:
-        """流式消息转 SimEvent——极简版，只推送有意义的发言。"""
-        from autogen_agentchat.messages import TextMessage
+        """流式消息转 SimEvent——TextMessage + ToolCallRequestEvent。"""
+        from autogen_agentchat.messages import TextMessage, ToolCallRequestEvent
 
-        # 过滤：只推送 TextMessage（Agent 说的话）
+        # tool call → agent_action（stream 路径也需处理，否则 tool 效果丢失）
+        if isinstance(msg, ToolCallRequestEvent):
+            return self._tool_call_to_event(msg)
+
+        # 普通发言
         if not isinstance(msg, TextMessage):
             return None
 

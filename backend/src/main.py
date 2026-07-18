@@ -10,6 +10,9 @@ from loguru import logger
 
 from config import ensure_dirs
 from db import init_db
+from api.agents import router as agents_router
+from api.sse import sse_router
+from api.worlds import router as worlds_router
 
 
 @asynccontextmanager
@@ -36,6 +39,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── API 路由 ──────────────────────────────────────────────────────────────────
+app.include_router(agents_router)
+app.include_router(worlds_router)
+app.include_router(sse_router)
 
 
 @app.get("/health")
