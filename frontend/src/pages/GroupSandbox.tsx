@@ -11,6 +11,7 @@ import { useAgentStore } from "../stores/useAgentStore";
 import AgentStatusPanel from "../components/world/AgentStatusPanel";
 import EventFeed from "../components/world/EventFeed";
 import Timeline from "../components/world/Timeline";
+import RelationshipGraph from "../components/world/RelationshipGraph";
 import SandboxHeader from "../components/world/SandboxHeader";
 import SandboxSetup from "../components/world/SandboxSetup";
 import ThoughtStream from "../components/agent/ThoughtStream";
@@ -97,13 +98,19 @@ export default function GroupSandbox() {
         </aside>
 
         <main className="col-span-6 min-h-0 min-w-0 flex flex-col gap-3">
-          <Card className="shrink-0">
-            <Timeline
+          <div className="shrink-0 grid grid-cols-2 gap-3">
+            <Card>
+              <Timeline
+                events={visibleEvents}
+                selectedTick={selectedTick}
+                onSelectTick={setSelectedTick}
+              />
+            </Card>
+            <RelationshipGraph
+              agents={selectedAgents}
               events={visibleEvents}
-              selectedTick={selectedTick}
-              onSelectTick={setSelectedTick}
             />
-          </Card>
+          </div>
           <Card className="flex-1 min-h-0 overflow-hidden">
             <EventFeed events={visibleEvents} selectedTick={selectedTick} />
           </Card>

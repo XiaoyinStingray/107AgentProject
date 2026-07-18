@@ -5,6 +5,7 @@ import Timeline from "./Timeline";
 import type { SSEEvent } from "../../types/events";
 import SandboxHeader from "./SandboxHeader";
 import SandboxSetup from "./SandboxSetup";
+import RelationshipGraph from "./RelationshipGraph";
 import GroupSandbox from "../../pages/GroupSandbox";
 import { MOCK_AGENTS } from "../../mocks/agents";
 import { MOCK_SANDBOX_SCENARIOS } from "../../mocks/sandbox";
@@ -33,6 +34,62 @@ const events: SSEEvent[] = [
     data: { change: -0.05, score: 0.1 },
   },
 ];
+
+describe("Step 21 RelationshipGraph", () => {
+  const relEvents: SSEEvent[] = [
+    {
+      type: "relationship_change",
+      tick: 2,
+      agent_id: "mock-2",
+      agent_name: "小红",
+      description: "关系变化",
+      data: {
+        agent_a: "mock-1",
+        agent_b: "mock-2",
+        change: 0.15,
+        score: 0.25,
+        interaction: "friendly",
+      },
+    },
+    {
+      type: "relationship_change",
+      tick: 3,
+      agent_id: "mock-3",
+      agent_name: "小刚",
+      description: "关系变化",
+      data: {
+        agent_a: "mock-3",
+        agent_b: "mock-1",
+        change: -0.1,
+        score: -0.1,
+        interaction: "competitive",
+      },
+    },
+  ];
+
+  it("renders edges with correct score labels", () => {
+    render(
+      <RelationshipGraph agents={MOCK_AGENTS} events={relEvents} />,
+    );
+    expect(screen.getByText("+0.25")).toBeInTheDocument();
+    expect(screen.getByText("-0.10")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /关系网络图/ })).toBeInTheDocument();
+  });
+
+  it("shows placeholder when fewer than 2 agents", () => {
+    render(
+      <RelationshipGraph agents={MOCK_AGENTS.slice(0, 1)} events={relEvents} />,
+    );
+    expect(screen.getByText(/至少 2 个 Agent/)).toBeInTheDocument();
+  });
+
+  it("renders legend labels", () => {
+    render(<RelationshipGraph agents={MOCK_AGENTS} events={[]} />);
+    expect(screen.getByText("友好")).toBeInTheDocument();
+    expect(screen.getByText("中立")).toBeInTheDocument();
+    expect(screen.getByText("敌对")).toBeInTheDocument();
+  });
+});
 
 describe("Step 20 world components", () => {
   it("groups timeline events and selects a tick", () => {
