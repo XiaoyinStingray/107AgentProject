@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import Layout from "./components/layout/Layout";
 import Home from "./pages/Home";
 import AgentFoundry from "./pages/AgentFoundry";
+import SoloTheater from "./pages/SoloTheater";
 import SSEDebug from "./pages/debug/SSEDebug";
 import EmptyState from "./components/shared/EmptyState";
 import Badge from "./components/shared/Badge";
@@ -77,16 +78,7 @@ export default function App() {
           />
 
           {/* M2 单人剧场 */}
-          <Route
-            path="theater"
-            element={
-              <PlaceholderPage
-                title="M2 单人剧场"
-                description="场景投放 · 思维流实时展示 · 目标追逐 · Agent 日记"
-                tier="P0"
-              />
-            }
-          />
+          <Route path="theater" element={<SoloTheater />} />
 
           {/* M3 群体沙盒 */}
           <Route

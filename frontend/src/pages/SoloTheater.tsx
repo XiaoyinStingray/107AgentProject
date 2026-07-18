@@ -1,0 +1,372 @@
+import { useState, useMemo } from "react";
+import type { AgentResponse } from "../types/agent";
+import { MOCK_AGENTS } from "../mocks/agents";
+import { useAgentStore } from "../stores/useAgentStore";
+import { useMockSSE } from "../mocks/sse";
+import AgentStatusPanel from "../components/world/AgentStatusPanel";
+import ThoughtStream from "../components/agent/ThoughtStream";
+import Card from "../components/shared/Card";
+import StatusDot from "../components/shared/StatusDot";
+
+/* ================================================================
+   M2 单人剧场——SoloTheater
+   P0：场景投放 + 思维流实时展示
+
+   两阶段交互：
+   1. 投放前——选择 Agent + 场景 → 点击「开始投放」
+   2. 投放后——三栏布局：左(Agent状态) 中(思维流) 右(事件统计)
+   ================================================================ */
+
+/** 内置场景（与后端 BUILTIN_SCENARIOS 对应） */
+const BUILTIN_SCENARIOS = [
+  {
+    name: "新生报到",
+    emoji: "🏫",
+    description: "大学开学第一天，4人一间宿舍",
+    timeRange: "1-20",
+  },
+  {
+    name: "期末周",
+    emoji: "📚",
+    description: "期末考试周，图书馆座位紧张",
+    timeRange: "1-30",
+  },
+  {
+    name: "毕业选择",
+    emoji: "🎓",
+    description: "保研/考研/工作/出国的十字路口",
+    timeRange: "1-25",
+  },
+] as const;
+
+type ScenarioName = (typeof BUILTIN_SCENARIOS)[number]["name"];
+
+export default function SoloTheater() {
+  // Agent 来源：铸造厂创建的 + Mock 预设
+  const storeAgents = useAgentStore((s) => s.agents);
+  const availableAgents = useMemo(
+    () => [...storeAgents, ...MOCK_AGENTS],
+    [storeAgents],
+  );
+
+  const [selectedAgentId, setSelectedAgentId] = useState<string>(
+    availableAgents[0]?.id ?? "",
+  );
+  const [selectedScenario, setSelectedScenario] =
+    useState<ScenarioName>("期末周");
+  const [isRunning, setIsRunning] = useState(false);
+
+  // SSE 推流（Mock 模式）
+  const { events, connected, start, stop, clear } = useMockSSE();
+
+  const selectedAgent = availableAgents.find(
+    (a) => a.id === selectedAgentId,
+  );
+
+  // 统计
+  const currentTick = events.length > 0 ? events[events.length - 1].tick : 0;
+  const thoughtCount = events.filter(
+    (e) => e.type === "thought_stream",
+  ).length;
+  const actionCount = events.filter(
+    (e) => e.type === "agent_action",
+  ).length;
+  const messageCount = events.filter(
+    (e) => e.type === "agent_message",
+  ).length;
+
+  const handleStart = () => {
+    if (!selectedAgent) return;
+    setIsRunning(true);
+    start();
+  };
+
+  const handleStop = () => {
+    stop();
+    setIsRunning(false);
+  };
+
+  const handleReset = () => {
+    handleStop();
+    clear();
+    setIsRunning(false);
+  };
+
+  // ── 投放前：设置区 ──
+  if (!isRunning) {
+    return (
+      <div className="p-6 max-w-2xl mx-auto animate-fade-in">
+        <div className="mb-6">
+          <h1 className="text-xl font-mono text-accent-green">
+            M2 单人剧场
+          </h1>
+          <p className="text-sm text-text-secondary font-mono mt-1">
+            选一个 Agent 投放到场景中，观察它的独白与决策
+          </p>
+        </div>
+
+        {/* Agent 选择 */}
+        <Card className="mb-4">
+          <label className="block text-sm text-text-secondary font-mono mb-2">
+            选择 Agent
+          </label>
+          <div className="grid grid-cols-1 gap-2">
+            {availableAgents.map((agent) => {
+              const isSelected = agent.id === selectedAgentId;
+              return (
+                <button
+                  key={agent.id}
+                  onClick={() => setSelectedAgentId(agent.id)}
+                  className={`
+                    text-left p-3 rounded-lg border transition-colors
+                    ${
+                      isSelected
+                        ? "border-accent-green/60 bg-accent-green/5 ring-1 ring-accent-green/20"
+                        : "border-border bg-bg-card hover:border-text-secondary/40"
+                    }
+                  `}
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-full bg-accent-green/10 border border-accent-green/30 flex items-center justify-center text-sm select-none">
+                      {agent.name.charAt(0)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <span className="font-mono text-sm text-text-primary">
+                        {agent.name}
+                      </span>
+                      <span className="ml-2 text-xs font-mono text-accent-purple/70">
+                        {agent.persona.mbti}
+                      </span>
+                    </div>
+                    {isSelected && (
+                      <span className="text-xs text-accent-green font-mono">
+                        ✓
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-text-secondary mt-1 line-clamp-2 pl-10">
+                    {agent.persona.narrative}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        </Card>
+
+        {/* 场景选择 */}
+        <Card className="mb-6">
+          <label className="block text-sm text-text-secondary font-mono mb-2">
+            选择场景
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            {BUILTIN_SCENARIOS.map((s) => {
+              const isSelected = s.name === selectedScenario;
+              return (
+                <button
+                  key={s.name}
+                  onClick={() => setSelectedScenario(s.name)}
+                  className={`
+                    text-center p-3 rounded-lg border transition-colors
+                    ${
+                      isSelected
+                        ? "border-accent-blue/60 bg-accent-blue/5 ring-1 ring-accent-blue/20"
+                        : "border-border bg-bg-card hover:border-text-secondary/40"
+                    }
+                  `}
+                >
+                  <span className="text-2xl block mb-1">{s.emoji}</span>
+                  <p className="text-sm font-mono text-text-primary">
+                    {s.name}
+                  </p>
+                  <p className="text-xs text-text-secondary mt-0.5">
+                    {s.description}
+                  </p>
+                  <p className="text-xs text-text-secondary/50 mt-1 font-mono">
+                    Tick {s.timeRange}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        </Card>
+
+        {/* 开始按钮 */}
+        <button
+          onClick={handleStart}
+          disabled={!selectedAgent}
+          className="
+            w-full py-3 text-sm font-mono rounded-lg
+            bg-accent-green/10 border border-accent-green/30
+            text-accent-green hover:bg-accent-green/20
+            disabled:opacity-30 disabled:cursor-not-allowed
+            transition-all duration-200
+          "
+        >
+          🎬 开始投放
+        </button>
+      </div>
+    );
+  }
+
+  // ── 投放后：三栏运行区 ──
+  return (
+    <div className="h-full flex flex-col animate-fade-in">
+      {/* 顶栏 */}
+      <div className="shrink-0 flex items-center gap-3 px-4 py-2 border-b border-border bg-bg-secondary">
+        <span className="text-2xl select-none">
+          {BUILTIN_SCENARIOS.find((s) => s.name === selectedScenario)?.emoji}
+        </span>
+        <div className="flex-1 min-w-0">
+          <h1 className="text-sm font-mono text-text-primary">
+            {selectedAgent?.name} · {selectedScenario}
+          </h1>
+          <p className="text-xs text-text-secondary font-mono">
+            Tick #{currentTick} · {events.length} 条事件
+          </p>
+        </div>
+        <StatusDot status={connected ? "active" : "idle"} />
+        <div className="flex gap-2">
+          {connected ? (
+            <button
+              onClick={stop}
+              className="
+                px-3 py-1 text-sm font-mono rounded
+                bg-accent-orange/10 border border-accent-orange/30
+                text-accent-orange hover:bg-accent-orange/20
+                transition-colors
+              "
+            >
+              ⏸ 暂停
+            </button>
+          ) : events.length > 0 ? (
+            <button
+              onClick={start}
+              className="
+                px-3 py-1 text-sm font-mono rounded
+                bg-accent-green/10 border border-accent-green/30
+                text-accent-green hover:bg-accent-green/20
+                transition-colors
+              "
+            >
+              ▶ 继续
+            </button>
+          ) : null}
+          <button
+            onClick={handleReset}
+            className="
+              px-3 py-1 text-sm font-mono rounded
+              bg-bg-card border border-border
+              text-text-secondary hover:text-text-primary
+              transition-colors
+            "
+          >
+            ↺ 重置
+          </button>
+        </div>
+      </div>
+
+      {/* 三栏主体 */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* 左栏：Agent 状态面板 */}
+        <div className="w-[260px] shrink-0 border-r border-border overflow-y-auto p-3">
+          {selectedAgent && (
+            <AgentStatusPanel agent={selectedAgent} events={events} />
+          )}
+        </div>
+
+        {/* 中栏：思维流 */}
+        <ThoughtStream events={events} className="flex-1" />
+
+        {/* 右栏：事件统计 */}
+        <div className="w-[200px] shrink-0 border-l border-border overflow-y-auto p-3">
+          <Card>
+            <h3 className="text-sm font-mono text-text-secondary mb-3">
+              📊 事件统计
+            </h3>
+            <div className="space-y-3">
+              <StatRow
+                icon="⏰"
+                label="当前 Tick"
+                value={`#${currentTick}`}
+              />
+              <StatRow
+                icon="💭"
+                label="思考"
+                value={String(thoughtCount)}
+                color="text-accent-blue"
+              />
+              <StatRow
+                icon="💬"
+                label="对话"
+                value={String(messageCount)}
+                color="text-accent-purple"
+              />
+              <StatRow
+                icon="⚡"
+                label="行动"
+                value={String(actionCount)}
+                color="text-accent-green"
+              />
+              <StatRow
+                icon="📋"
+                label="总事件"
+                value={String(events.length)}
+              />
+            </div>
+          </Card>
+
+          {/* 场景信息 */}
+          <Card className="mt-3">
+            <h3 className="text-sm font-mono text-text-secondary mb-2">
+              🌍 场景
+            </h3>
+            <p className="text-sm text-text-primary font-mono">
+              {selectedScenario}
+            </p>
+            <p className="text-xs text-text-secondary mt-1">
+              {
+                BUILTIN_SCENARIOS.find(
+                  (s) => s.name === selectedScenario,
+                )?.description
+              }
+            </p>
+          </Card>
+
+          {/* 人格画像摘要 */}
+          {selectedAgent && (
+            <Card className="mt-3">
+              <h3 className="text-sm font-mono text-text-secondary mb-2">
+                🧠 人格画像
+              </h3>
+              <p className="text-sm text-text-primary leading-relaxed line-clamp-6">
+                {selectedAgent.persona.narrative}
+              </p>
+            </Card>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── 统计行子组件 ── */
+function StatRow({
+  icon,
+  label,
+  value,
+  color = "text-text-primary",
+}: {
+  icon: string;
+  label: string;
+  value: string;
+  color?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between text-sm">
+      <span className="text-text-secondary">
+        {icon} {label}
+      </span>
+      <span className={`font-mono ${color}`}>{value}</span>
+    </div>
+  );
+}
