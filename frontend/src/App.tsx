@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import Layout from "./components/layout/Layout";
 import Home from "./pages/Home";
+import AgentFoundry from "./pages/AgentFoundry";
 import EmptyState from "./components/shared/EmptyState";
 import Badge from "./components/shared/Badge";
 import { findItemById } from "./data/menuData";
@@ -62,16 +63,7 @@ export default function App() {
           <Route index element={<Home />} />
 
           {/* M1 铸造厂 */}
-          <Route
-            path="agents"
-            element={
-              <PlaceholderPage
-                title="M1 铸造厂"
-                description="自然语言创建 Agent · 人格引擎 · 背景生成 · 目标系统"
-                tier="P0"
-              />
-            }
-          />
+          <Route path="agents" element={<AgentFoundry />} />
           <Route
             path="agents/:id"
             element={

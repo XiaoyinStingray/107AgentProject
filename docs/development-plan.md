@@ -1786,6 +1786,60 @@ export const useSSEStore = create<SSEStore>((set) => ({
 └─────────────────────────────────────────────────────────────┘
 ```
 
+### 7.3.2a 共享基础设施（Step 16–17）
+
+> **2026-07-18 Step 17 补充：** useApi hook + AgentCard + PersonaRadar 的接口定义。
+
+**文件: `frontend/src/hooks/useApi.ts`**
+
+```typescript
+// 通用 fetch 封装 + Mock 拦截
+// 设计：手动触发、泛型化、Mock 模式（传入 mockData 则模拟延迟）、API 模式（走 Vite proxy）
+interface UseApiOptions<TResponse> {
+  mockData?: TResponse;   // 传入则走 Mock 模式
+  mockDelay?: number;      // Mock 延迟 ms，默认 1500
+}
+
+function useApi<TResponse, TBody = void>(
+  method: "GET" | "POST" | "PUT" | "DELETE",
+  url: string,
+  options?: UseApiOptions<TResponse>,
+): {
+  data: TResponse | null;
+  loading: boolean;
+  error: string | null;
+  execute: (body?: TBody) => Promise<TResponse | null>;
+  reset: () => void;
+}
+```
+
+**AgentCard Props:**
+```typescript
+interface AgentCardProps {
+  agent: AgentResponse;
+  className?: string;
+}
+// 展示：姓名 + MBTI + 状态灯 + 精力条 + 情绪标签 + 目标列表
+```
+
+**PersonaRadar Props:**
+```typescript
+interface PersonaRadarProps {
+  bigFive: BigFive;
+  className?: string;
+}
+// 展示：Recharts RadarChart 五维雷达图 + 决策风格参数
+```
+
+**AgentFoundry 状态:**
+```typescript
+// 内部状态
+interface FoundryState {
+  input: string;                        // 输入描述
+  createdAgents: AgentResponse[];       // 已创建列表（为 Step 25 档案馆准备）
+}
+```
+
 **验收标准 (Phase 7):**
 - [ ] `npm run dev` → 能看到完整 UI 骨架 + 56 项菜单
 - [ ] 铸造厂 Mock 数据 → 完整创建流程
