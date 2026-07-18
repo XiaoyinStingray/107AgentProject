@@ -9,10 +9,10 @@ WorldEngine — 世界引擎：tick 推进 + 事件分发 + 关系演化。
 
 import json
 import uuid
+from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 
 from loguru import logger
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.event import Event, SimEvent
@@ -148,6 +148,110 @@ class WorldEngine:
             events = await self.tick()
             all_events.extend(events)
         return all_events
+
+    async def tick_stream(self) -> AsyncGenerator[SimEvent, None]:
+        """流式推进一个 tick——Agent 每完成一轮发言就 yield 一个事件。
+
+        SSE 端点调用此方法，实时推送"思考气泡"给前端。
+        事件流末尾自动附带 tick_boundary。
+        """
+        context = self._build_world_context()
+        for agent in self.agents.values():
+            memories = await self._retriever.retrieve(agent.id, context)
+            agent.inject_context(context, memories)
+
+        if len(self.agents) == 0:
+            pass  # 无 Agent，跳过
+        elif len(self.agents) == 1:
+            async for event in self._stream_solo_tick(
+                list(self.agents.values())[0]
+            ):
+                yield event
+        else:
+            async for event in self._stream_group_tick():
+                yield event
+
+        # tick_boundary
+        self.current_tick += 1
+        yield SimEvent(
+            id=str(uuid.uuid4()),
+            world_id=self.world.id,
+            tick=self.current_tick - 1,
+            type="tick_boundary",
+            description=f"Tick {self.current_tick - 1} 完成",
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+    async def _stream_solo_tick(self, agent: LifeAgent) -> AsyncGenerator[SimEvent, None]:
+        """单人模式流式——暂时走同步 on_messages，后续可升级为 on_messages_stream。"""
+        from autogen_agentchat.messages import TextMessage
+        from autogen_core import CancellationToken
+
+        prompt = (
+            f"场景：{self.world.scenario.name}\n"
+            f"请描述你现在的想法和打算做的事情。"
+        )
+        try:
+            response = await agent.autogen_agent.on_messages(
+                [TextMessage(content=prompt, source="world")],
+                cancellation_token=CancellationToken(),
+            )
+            for evt in self._extract_events_from_response(response, agent.id):
+                self.events.append(evt)
+                yield evt
+        except Exception as e:
+            logger.error(f"stream solo error: {e}")
+            err = self._make_error_event(agent.id, str(e))
+            self.events.append(err)
+            yield err
+
+    async def _stream_group_tick(self) -> AsyncGenerator[SimEvent, None]:
+        """多人模式——AutoGen run_stream 逐条推送 Agent 发言。"""
+        initial_events = self.world.scenario.initial_events
+        task = (
+            f"场景：{self.world.scenario.name} — {self.world.scenario.description}\n"
+            f"初始事件：{'；'.join(initial_events)}\n"
+            f"请根据你的角色设定自然地互动。"
+        )
+        try:
+            team = self.build_group_chat()
+            async for msg in team.run_stream(task=task):
+                evt = self._stream_message_to_event(msg)
+                if evt:
+                    self.events.append(evt)
+                    yield evt
+        except Exception as e:
+            logger.error(f"stream group error: {e}")
+            err = self._make_error_event("world", str(e))
+            self.events.append(err)
+            yield err
+
+    def _stream_message_to_event(self, msg) -> SimEvent | None:
+        """流式消息转 SimEvent——极简版，只推送有意义的发言。"""
+        from autogen_agentchat.messages import TextMessage
+
+        # 过滤：只推送 TextMessage（Agent 说的话）
+        if not isinstance(msg, TextMessage):
+            return None
+
+        content = getattr(msg, "content", "")
+        if not content:
+            return None
+
+        raw_source = getattr(msg, "source", "world")
+        source_id = self._name_to_id.get(raw_source, raw_source)
+        if source_id in ("world", "user"):
+            return None
+
+        return SimEvent(
+            id=str(uuid.uuid4()),
+            world_id=self.world.id,
+            tick=self.current_tick,
+            type="agent_message",
+            source_agent_id=source_id,
+            description=str(content)[:500],
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
 
     # -------------------------------------------------------------------------
     # GroupChat 构建（公开——供测试和 SSE 使用）
