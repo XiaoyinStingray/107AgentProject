@@ -35,12 +35,12 @@ export default function TopBar() {
       </Link>
 
       {/* 面包屑 */}
-      <span className="ml-6 text-xs text-text-secondary font-mono">
+      <span className="ml-6 text-sm text-text-secondary font-mono">
         / {pageLabel}
       </span>
 
       {/* 右侧状态 */}
-      <span className="ml-auto font-mono text-xs text-text-secondary flex items-center gap-2">
+      <span className="ml-auto font-mono text-sm text-text-secondary flex items-center gap-2">
         <span className="w-1.5 h-1.5 rounded-full bg-accent-green shadow-[0_0_6px_#00ff88]" />
         READY
       </span>

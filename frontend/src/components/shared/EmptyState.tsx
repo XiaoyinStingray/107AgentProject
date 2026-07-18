@@ -26,7 +26,7 @@ export default function EmptyState({
         <p className="text-sm max-w-md text-center mb-3">{description}</p>
       )}
       {tier && (
-        <span className="text-xs text-text-secondary/50 font-mono">
+        <span className="text-sm text-text-secondary/50 font-mono">
           {tier} — 演示后可继续开发
         </span>
       )}

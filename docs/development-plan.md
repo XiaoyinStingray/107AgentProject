@@ -1690,71 +1690,117 @@ export const MOCK_AGENT_RESPONSE: AgentResponse = {
 
 ---
 
-### 7.3.4 SSE Hook（关键基础设施）
+### 7.3.4 SSE Hook + 思维流组件（关键基础设施）
 
-**文件: `frontend/src/hooks/useSSE.ts`**
+> **2026-07-18 Step 18 更新：** 视觉风格定为群聊气泡——Agent 头像 + 阶段标签 + 消息体 + 自动滚底。
+> 新增 `/debug/sse` 隐藏测试路由（Mock 驱动，不连后端），Step 19 完成后可移除。
 
+**文件清单：**
+
+| 文件 | 说明 |
+|------|------|
+| `mocks/sse.ts` | Mock SSE 数据 + `useMockSSE` hook（定时器推事件） |
+| `stores/useSSEStore.ts` | Zustand：`events[]`（上限 500）+ `connected` |
+| `hooks/useSSE.ts` | 真 EventSource hook，连后端 SSE 端点 |
+| `components/agent/ThoughtBubble.tsx` | 单条思维气泡（Agent + 阶段 + 消息体） |
+| `components/agent/ThoughtStream.tsx` | 自滚动容器 + Tick 分隔线 |
+| `pages/debug/SSEDebug.tsx` | 隐藏测试页面（`/debug/sse`，Mock 驱动） |
+
+**群聊气泡视觉规格：**
+
+```
+┌──────────────────────────────────────────────┐
+│  思维流                                       │
+│                                              │
+│  ┌──────────────────────────────────────┐    │
+│  │ 🟢 小明  ·  💭 思考          14:30:02│    │
+│  │ ┌──────────────────────────────────┐ │    │
+│  │ │ 我注意到小红今天没来上课…         │ │    │
+│  │ │ 她是不是在准备比赛？             │ │    │
+│  │ └──────────────────────────────────┘ │    │
+│  └──────────────────────────────────────┘    │
+│                                              │
+│  ┌──────────────────────────────────────┐    │
+│  │ 🟢 小明  ·  ⚡ 行动          14:30:08│    │
+│  │ ┌──────────────────────────────────┐ │    │
+│  │ │ → send_message(小红, "...")       │ │    │
+│  │ └──────────────────────────────────┘ │    │
+│  └──────────────────────────────────────┘    │
+│                                              │
+│  ══════════ Tick #42 ════════════════════    │
+│                                              │
+│  ▼ 自动滚底                                   │
+└──────────────────────────────────────────────┘
+```
+
+**阶段配色规则：**
+
+| 阶段 | 图标 | 气泡底色 | Agent 颜色 |
+|------|------|----------|------------|
+| `thought_stream` | 💭 思考 | `bg-accent-blue/5 border-accent-blue/20` | 蓝 |
+| `agent_message` | 💬 对话 | `bg-accent-purple/5 border-accent-purple/20` | 紫 |
+| `agent_action` | ⚡ 行动 | `bg-accent-green/5 border-accent-green/20` | 绿 |
+| `world_event` | 🌐 事件 | `bg-accent-orange/5 border-accent-orange/20` | 橙 |
+| `tick_boundary` | — | 分隔线（全宽），不做气泡 | — |
+
+**ThoughtBubble Props：**
 ```typescript
-import { useEffect, useRef, useCallback } from "react";
-import { useSSEStore } from "../stores/useSSEStore";
-import type { SSEEvent } from "../types/events";
-
-export function useSSE(worldId: string | null) {
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const { events, appendEvent, clear, setConnected } = useSSEStore();
-
-  const connect = useCallback(() => {
-    if (!worldId) return;
-
-    const es = new EventSource(`/api/worlds/${worldId}/stream`);
-
-    es.onopen = () => setConnected(true);
-    es.onerror = () => {
-      setConnected(false);
-      // EventSource 自动重连，不需要手动处理
-    };
-    es.onmessage = (e) => {
-      const event: SSEEvent = JSON.parse(e.data);
-      appendEvent(event);
-    };
-
-    eventSourceRef.current = es;
-  }, [worldId]);
-
-  const disconnect = useCallback(() => {
-    eventSourceRef.current?.close();
-    setConnected(false);
-  }, []);
-
-  useEffect(() => {
-    return () => disconnect(); // cleanup
-  }, []);
-
-  return { events, connect, disconnect, clear };
+interface ThoughtBubbleProps {
+  event: SSEEvent;
+  /** 同一 Agent 连续消息时不重复显示头像区域 */
+  compact?: boolean;
 }
 ```
 
-**文件: `frontend/src/stores/useSSEStore.ts`**
-
+**ThoughtStream Props：**
 ```typescript
-import { create } from "zustand";
-import type { SSEEvent } from "../types/events";
+interface ThoughtStreamProps {
+  events: SSEEvent[];
+  /** 是否自动滚底——手动上滚时暂停，回到底部后恢复 */
+  autoScroll?: boolean;
+  className?: string;
+}
+```
 
+**useSSE hook（与原 Plan 一致，接口不变）：**
+```typescript
+function useSSE(worldId: string | null): {
+  events: SSEEvent[];
+  connected: boolean;
+  connect: () => void;
+  disconnect: () => void;
+  clear: () => void;
+}
+```
+
+**useMockSSE hook（Step 18 测试用，Step 19 后废弃）：**
+```typescript
+function useMockSSE(): {
+  events: SSEEvent[];
+  connected: boolean;
+  start: () => void;
+  stop: () => void;
+  clear: () => void;
+}
+// 实现：每 2s 从 MOCK_SSE_EVENTS 中推一条，循环 15 条后停止
+```
+
+**useSSEStore（Zustand，与原 Plan 一致）：**
+```typescript
 interface SSEStore {
   events: SSEEvent[];
   connected: boolean;
-  appendEvent: (e: SSEEvent) => void;
+  appendEvent: (e: SSEEvent) => void;  // 上限 500 条
   clear: () => void;
   setConnected: (c: boolean) => void;
 }
+```
 
-export const useSSEStore = create<SSEStore>((set) => ({
-  events: [],
-  connected: false,
-  appendEvent: (e) => set((s) => ({ events: [...s.events.slice(-500), e] })), // 最多保留 500 条
-  clear: () => set({ events: [] }),
-  setConnected: (c) => set({ connected: c }),
-}));
+**隐藏测试路由：**
+```typescript
+// App.tsx 中追加（Step 19 完成后可移除）
+<Route path="debug/sse" element={<SSEDebug />} />
+// 不在 Sidebar 中链接，手动输入 URL 访问
 ```
 
 ---

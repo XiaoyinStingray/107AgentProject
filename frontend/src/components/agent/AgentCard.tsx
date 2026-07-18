@@ -19,14 +19,14 @@ export default function AgentCard({ agent, className = "" }: AgentCardProps) {
       <div className="flex items-center gap-2 mb-3">
         <StatusDot status={energyStatus} label="" />
         <h3 className="font-mono text-base text-accent-green">{agent.name}</h3>
-        <span className="ml-auto font-mono text-xs text-accent-purple/80 bg-accent-purple/10 px-1.5 py-0.5 rounded">
+        <span className="ml-auto font-mono text-sm text-accent-purple/80 bg-accent-purple/10 px-1.5 py-0.5 rounded">
           {agent.persona.mbti}
         </span>
       </div>
 
       {/* 精力条 */}
       <div className="mb-3">
-        <div className="flex justify-between text-xs text-text-secondary mb-1">
+        <div className="flex justify-between text-sm text-text-secondary mb-1">
           <span>⚡ 精力</span>
           <span className="font-mono">{agent.energy}%</span>
         </div>
@@ -40,19 +40,19 @@ export default function AgentCard({ agent, className = "" }: AgentCardProps) {
 
       {/* 情绪标签 */}
       <div className="flex items-center gap-2 mb-3">
-        <span className="text-xs text-text-secondary">情绪:</span>
+        <span className="text-sm text-text-secondary">情绪:</span>
         <Badge label={EMOTION_LABELS[agent.emotional_state.label] ?? agent.emotional_state.label} />
       </div>
 
       {/* 目标列表 */}
       {agent.goals.length > 0 && (
         <div>
-          <p className="text-xs text-text-secondary mb-1.5">🎯 目标</p>
+          <p className="text-sm text-text-secondary mb-1.5">🎯 目标</p>
           <ul className="space-y-1">
             {agent.goals.slice(0, 3).map((g) => (
               <li
                 key={g.id}
-                className="flex items-center gap-1.5 text-xs text-text-primary font-mono"
+                className="flex items-center gap-1.5 text-sm text-text-primary font-mono"
               >
                 <span
                   className={`w-1.5 h-1.5 rounded-full ${

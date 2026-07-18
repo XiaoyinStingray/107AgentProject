@@ -21,7 +21,7 @@ export default function Card({
   return (
     <div
       className={`
-        bg-bg-card border border-border rounded-lg p-4
+        bg-bg-card border border-border rounded-lg p-5
         ${hover ? "hover:border-text-secondary transition-colors duration-200" : ""}
         ${onClick ? "cursor-pointer" : ""}
         ${className}

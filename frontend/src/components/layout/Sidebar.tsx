@@ -77,7 +77,7 @@ export default function Sidebar() {
         >
           <LayoutDashboard size={16} className="shrink-0" />
           {!collapsed && (
-            <span className="flex-1 text-left font-mono text-xs tracking-wide">
+            <span className="flex-1 text-left font-mono text-sm tracking-wide">
               Dashboard
             </span>
           )}
@@ -114,7 +114,7 @@ export default function Sidebar() {
                 <span className="shrink-0">{SECTION_ICONS[section.title]}</span>
                 {!collapsed && (
                   <>
-                    <span className="flex-1 text-left font-mono text-xs tracking-wide">
+                    <span className="flex-1 text-left font-mono text-sm tracking-wide">
                       {section.title}
                     </span>
                     {isExpanded ? (
@@ -134,7 +134,7 @@ export default function Sidebar() {
                       key={item.id}
                       onClick={() => navigate(`${section.route}#item-${item.id}`)}
                       className="
-                        w-full flex items-center gap-2 pl-10 pr-3 py-1.5 text-xs
+                        w-full flex items-center gap-2 pl-10 pr-3 py-1.5 text-sm
                         text-text-secondary hover:text-text-primary hover:bg-bg-card/30
                         transition-colors duration-100
                       "
@@ -154,10 +154,10 @@ export default function Sidebar() {
       {/* 底部提示 */}
       {!collapsed && (
         <div className="border-t border-border px-3 py-2">
-          <p className="text-[10px] font-mono text-text-secondary/60 leading-relaxed">
+          <p className="text-xs font-mono text-text-secondary/60 leading-relaxed">
             P0: 6 · P1: 14 · P2: 19 · P3: 17
           </p>
-          <p className="text-[10px] font-mono text-text-secondary/40">
+          <p className="text-xs font-mono text-text-secondary/40">
             共 56 项功能菜单
           </p>
         </div>

@@ -41,3 +41,20 @@ export interface AgentActionEvent extends SimEvent {
   target: string;
   result: string;
 }
+
+/** SSE 流中的事件格式——useSSE / useMockSSE 消费的类型 */
+export interface SSEEvent {
+  type: SSEEventType;
+  agent_id?: string;
+  agent_name?: string;
+  phase?: string;
+  content?: string;
+  message?: string;
+  subtext?: string;
+  tone?: string;
+  action?: string;
+  target?: string;
+  description?: string;
+  tick: number;
+  data?: Record<string, unknown>;
+}

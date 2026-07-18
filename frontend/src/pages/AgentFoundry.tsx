@@ -62,7 +62,7 @@ export default function AgentFoundry() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-mono text-accent-green">M1 铸造厂</h1>
-          <p className="text-xs text-text-secondary font-mono mt-1">
+          <p className="text-sm text-text-secondary font-mono mt-1">
             用一句话描述你想要的角色，AI 会生成完整人格
           </p>
         </div>
@@ -91,7 +91,7 @@ export default function AgentFoundry() {
           "
         />
         <div className="flex items-center justify-between mt-2">
-          <span className="text-xs text-text-secondary/60 font-mono">
+          <span className="text-sm text-text-secondary/60 font-mono">
             {input.length}/200 · Enter 发送
           </span>
           <button
@@ -122,7 +122,7 @@ export default function AgentFoundry() {
         <div className="flex flex-col items-center py-12 text-text-secondary">
           <div className="w-8 h-8 border-2 border-accent-green/30 border-t-accent-green rounded-full animate-spin mb-3" />
           <p className="text-sm font-mono">正在构建人格…</p>
-          <p className="text-xs text-text-secondary/60 mt-1">
+          <p className="text-sm text-text-secondary/60 mt-1">
             LLM 正在推理角色设定、背景故事和价值观
           </p>
         </div>
@@ -139,14 +139,14 @@ export default function AgentFoundry() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <AgentCard agent={displayedAgent} />
             <Card>
-              <h3 className="font-mono text-xs text-text-secondary mb-2">
+              <h3 className="font-mono text-sm text-text-secondary mb-2">
                 大五人格
               </h3>
               <PersonaRadar bigFive={displayedAgent.persona.big_five} />
               {/* 决策风格摘要 */}
               <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
                 {DECISION_LABELS.map(([key, label]) => (
-                  <div key={key} className="flex justify-between text-xs">
+                  <div key={key} className="flex justify-between text-sm">
                     <span className="text-text-secondary">{label}</span>
                     <span className="font-mono text-text-primary">
                       {DECISION_VALUE_LABELS[
@@ -164,7 +164,7 @@ export default function AgentFoundry() {
           {/* 人格画像 + 背景故事 */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <Card>
-              <h3 className="font-mono text-xs text-text-secondary mb-2">
+              <h3 className="font-mono text-sm text-text-secondary mb-2">
                 人格画像
               </h3>
               <p className="text-sm text-text-primary leading-relaxed">
@@ -172,10 +172,10 @@ export default function AgentFoundry() {
               </p>
             </Card>
             <Card>
-              <h3 className="font-mono text-xs text-text-secondary mb-2">
+              <h3 className="font-mono text-sm text-text-secondary mb-2">
                 背景故事
               </h3>
-              <dl className="space-y-2 text-xs">
+              <dl className="space-y-2 text-sm">
                 <div className="flex justify-between">
                   <dt className="text-text-secondary">家乡</dt>
                   <dd className="text-text-primary font-mono">
@@ -197,14 +197,14 @@ export default function AgentFoundry() {
               </dl>
               {displayedAgent.background.key_events.length > 0 && (
                 <div className="mt-3">
-                  <p className="text-xs text-text-secondary mb-1">
+                  <p className="text-sm text-text-secondary mb-1">
                     关键事件
                   </p>
                   <ul className="space-y-0.5">
                     {displayedAgent.background.key_events.map((ev, i) => (
                       <li
                         key={i}
-                        className="text-xs text-text-primary font-mono pl-3 border-l border-border"
+                        className="text-sm text-text-primary font-mono pl-3 border-l border-border"
                       >
                         {ev}
                       </li>
@@ -217,14 +217,14 @@ export default function AgentFoundry() {
 
           {/* 核心价值观 */}
           <Card>
-            <h3 className="font-mono text-xs text-text-secondary mb-2">
+            <h3 className="font-mono text-sm text-text-secondary mb-2">
               核心价值观
             </h3>
             <div className="flex flex-wrap gap-2">
               {displayedAgent.persona.values.map((v) => (
                 <span
                   key={v}
-                  className="text-xs font-mono text-accent-blue/80 bg-accent-blue/10 border border-accent-blue/20 px-2 py-0.5 rounded"
+                  className="text-sm font-mono text-accent-blue/80 bg-accent-blue/10 border border-accent-blue/20 px-2 py-0.5 rounded"
                 >
                   {v}
                 </span>
@@ -261,23 +261,23 @@ export default function AgentFoundry() {
                     <span className="font-mono text-sm text-text-primary">
                       {agent.name}
                     </span>
-                    <span className="text-[10px] font-mono text-accent-purple/70 bg-accent-purple/10 px-1 py-0.5 rounded">
+                    <span className="text-xs font-mono text-accent-purple/70 bg-accent-purple/10 px-1 py-0.5 rounded">
                       {agent.persona.mbti}
                     </span>
                     {isLatest && (
-                      <span className="ml-auto text-[10px] text-accent-green font-mono">
+                      <span className="ml-auto text-xs text-accent-green font-mono">
                         最新
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-text-secondary line-clamp-2 mb-2">
+                  <p className="text-sm text-text-secondary line-clamp-3 mb-2">
                     {agent.persona.narrative.slice(0, 80)}…
                   </p>
                   <div className="flex flex-wrap gap-1">
                     {agent.persona.values.slice(0, 3).map((v) => (
                       <span
                         key={v}
-                        className="text-[10px] text-text-secondary/70 bg-bg-primary/50 px-1.5 py-0.5 rounded"
+                        className="text-xs text-text-secondary/70 bg-bg-primary/50 px-1.5 py-0.5 rounded"
                       >
                         {v}
                       </span>

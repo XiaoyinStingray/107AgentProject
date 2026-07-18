@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import Layout from "./components/layout/Layout";
 import Home from "./pages/Home";
 import AgentFoundry from "./pages/AgentFoundry";
+import SSEDebug from "./pages/debug/SSEDebug";
 import EmptyState from "./components/shared/EmptyState";
 import Badge from "./components/shared/Badge";
 import { findItemById } from "./data/menuData";
@@ -35,7 +36,7 @@ function PlaceholderPage({
             <h2 className="text-xl font-mono text-text-primary mb-1">
               {selectedItem.label}
             </h2>
-            <p className="text-xs text-text-secondary font-mono mb-3">
+            <p className="text-sm text-text-secondary font-mono mb-3">
               {selectedItem.sectionTitle}
               <Badge
                 label={selectedItem.priority}
@@ -158,6 +159,9 @@ export default function App() {
               />
             }
           />
+
+          {/* 隐藏测试路由——Step 19 完成后移除 */}
+          <Route path="debug/sse" element={<SSEDebug />} />
 
           {/* 404 */}
           <Route

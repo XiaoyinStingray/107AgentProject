@@ -24,7 +24,7 @@ export default function Badge({
   return (
     <span
       className={`
-        inline-block text-[10px] font-mono px-1.5 py-0.5 rounded border
+        inline-block text-xs font-mono px-1.5 py-0.5 rounded border
         ${variantStyles[variant]}
         ${className}
       `.trim()}

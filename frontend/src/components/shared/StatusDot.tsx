@@ -28,7 +28,7 @@ export default function StatusDot({
   return (
     <span className={`inline-flex items-center gap-1.5 ${className}`}>
       <span className={cssClass} aria-hidden="true" />
-      <span className="text-xs text-text-secondary font-mono">
+      <span className="text-sm text-text-secondary font-mono">
         {label ?? defaultLabel}
       </span>
     </span>
