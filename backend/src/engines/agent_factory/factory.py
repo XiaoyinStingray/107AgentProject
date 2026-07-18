@@ -14,10 +14,11 @@ Agent 工厂 — Persona + LLM Client → LifeAgent（AutoGen AssistantAgent 封
 
 import re
 import uuid
+from datetime import datetime, timezone
 
 from loguru import logger
 
-from models.agent import Background, EmotionalState, Goal, Persona
+from models.agent import AgentResponse, Background, EmotionalState, Goal, Persona
 from models.memory import MemoryResponse
 from engines.persona.builder import PersonaBuilder
 from engines.persona.prompt_templates import build_system_message
@@ -75,6 +76,8 @@ class LifeAgent:
         self.goals = goals
         self.emotional_state = EmotionalState()
         self.energy = 100.0
+        self.created_at = datetime.now(timezone.utc).isoformat()
+        self.updated_at = self.created_at
 
         # === 构建 AutoGen AssistantAgent ===
         from autogen_agentchat.agents import AssistantAgent
@@ -130,21 +133,19 @@ class LifeAgent:
     # 便利方法
     # -------------------------------------------------------------------------
 
-    def to_response(self) -> dict:
-        """导出为 API 响应格式（供 Phase 5 使用）。
-
-        Returns:
-            dict: 可直接序列化为 AgentResponse 的数据
-        """
-        return {
-            "id": self.id,
-            "name": self.persona.name or self.id,
-            "persona": self.persona,
-            "background": self.background,
-            "goals": self.goals,
-            "emotional_state": self.emotional_state,
-            "energy": self.energy,
-        }
+    def to_response(self) -> AgentResponse:
+        """导出为 AgentResponse（供 Phase 5 API 使用）。"""
+        return AgentResponse(
+            id=self.id,
+            name=self.persona.name or self.id,
+            persona=self.persona,
+            background=self.background,
+            goals=self.goals,
+            emotional_state=self.emotional_state,
+            energy=self.energy,
+            created_at=self.created_at,
+            updated_at=self.updated_at,
+        )
 
     def __repr__(self) -> str:
         return f"<LifeAgent id={self.id!r} name={self.persona.name!r}>"

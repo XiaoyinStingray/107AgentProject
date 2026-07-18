@@ -242,10 +242,12 @@ async def test_to_response_contains_all_fields(factory):
     agent = await factory.create_from_description("测试角色")
 
     resp = agent.to_response()
-    assert resp["id"] == agent.id
-    assert resp["name"] == agent.persona.name
-    assert resp["energy"] == 100.0
-    assert resp["emotional_state"].label == "neutral"
-    assert isinstance(resp["persona"], Persona)
-    assert isinstance(resp["background"], Background)
-    assert len(resp["goals"]) == 1
+    assert resp.id == agent.id
+    assert resp.name == agent.persona.name
+    assert resp.energy == 100.0
+    assert resp.emotional_state.label == "neutral"
+    assert isinstance(resp.persona, Persona)
+    assert isinstance(resp.background, Background)
+    assert len(resp.goals) == 1
+    assert resp.created_at  # 时间戳已初始化
+    assert resp.updated_at
