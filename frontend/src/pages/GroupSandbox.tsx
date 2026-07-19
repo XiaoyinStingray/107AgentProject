@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import type { AgentResponse } from "../types/agent";
 import type { SSEEvent } from "../types/events";
 import type { SandboxSpeed } from "../types/sandbox";
@@ -19,12 +20,14 @@ import Card from "../components/shared/Card";
 
 /** Step 20 群体沙盒主页面。 */
 export default function GroupSandbox() {
+  const location = useLocation();
+  const initialScenario = (location.state as { scenario?: string } | null)?.scenario;
   const agents = useAvailableAgents();
   const [phase, setPhase] = useState<"setup" | "running">("setup");
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>(
     agents.map((agent) => agent.id),
   );
-  const [selectedScenario, setSelectedScenario] = useState("期末周");
+  const [selectedScenario, setSelectedScenario] = useState(initialScenario ?? "期末周");
   const [selectedTick, setSelectedTick] = useState<number | null>(null);
   const [speed, setSpeed] = useState<SandboxSpeed>(1);
   const { events, connected, start, resume, stop, clear } =
