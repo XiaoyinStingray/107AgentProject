@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 import EventFeed from "./EventFeed";
 import Timeline from "./Timeline";
 import type { SSEEvent } from "../../types/events";
@@ -192,7 +193,11 @@ describe("Step 20 world components", () => {
 
   it("starts the mock runtime and changes speed without losing the stream", () => {
     vi.useFakeTimers();
-    render(<GroupSandbox />);
+    render(
+      <MemoryRouter>
+        <GroupSandbox />
+      </MemoryRouter>
+    );
 
     fireEvent.click(screen.getByRole("button", { name: /Agents/ }));
     expect(screen.getByText("RUNNING")).toBeInTheDocument();

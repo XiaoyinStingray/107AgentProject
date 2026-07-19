@@ -8,6 +8,7 @@ import Arena from "./pages/Arena";
 import NarrativeFactory from "./pages/NarrativeFactory";
 import ControlPanel from "./pages/ControlPanel";
 import DirectorIntervention from "./pages/DirectorIntervention";
+import Archive from "./pages/Archive";
 import SSEDebug from "./pages/debug/SSEDebug";
 import EmptyState from "./components/shared/EmptyState";
 import Badge from "./components/shared/Badge";
@@ -101,16 +102,7 @@ export default function App() {
           <Route path="intervention" element={<DirectorIntervention />} />
 
           {/* M8 档案馆 */}
-          <Route
-            path="archive"
-            element={
-              <PlaceholderPage
-                title="M8 Agent 档案馆"
-                description="Agent 市场 · 精彩回放 · 实验模板 · 研究报告导出"
-                tier="P2"
-              />
-            }
-          />
+          <Route path="archive" element={<Archive />} />
 
           {/* 隐藏测试路由——Step 19 完成后移除 */}
           <Route path="debug/sse" element={<SSEDebug />} />
