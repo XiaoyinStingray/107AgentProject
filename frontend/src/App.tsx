@@ -4,6 +4,7 @@ import Home from "./pages/Home";
 import AgentFoundry from "./pages/AgentFoundry";
 import SoloTheater from "./pages/SoloTheater";
 import GroupSandbox from "./pages/GroupSandbox";
+import Arena from "./pages/Arena";
 import SSEDebug from "./pages/debug/SSEDebug";
 import EmptyState from "./components/shared/EmptyState";
 import Badge from "./components/shared/Badge";
@@ -85,16 +86,7 @@ export default function App() {
           <Route path="sandbox" element={<GroupSandbox />} />
 
           {/* M4 竞技场 */}
-          <Route
-            path="arena"
-            element={
-              <PlaceholderPage
-                title="M4 竞技场"
-                description="1v1 对抗 · 大乱斗 · 战报生成 · 复盘对比"
-                tier="P1"
-              />
-            }
-          />
+          <Route path="arena" element={<Arena />} />
 
           {/* M5 叙事工厂 */}
           <Route
