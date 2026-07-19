@@ -1,108 +1,286 @@
 import type { AgentResponse } from "../types/agent";
+import type {
+  ArenaConfig,
+  ArenaMode,
+  ArenaModeOption,
+  ArenaPresentationResult,
+  ArenaScoreBreakdown,
+  ArenaTranscriptEntry,
+} from "../types/arena";
 
-/* ================================================================
-   Step 22 — 竞技场 Mock 数据
-   预置一场辩论赛完整结果，供前端独立开发。
-   Phase 8 才会接真实 ArenaEngine。
-   ================================================================ */
+type ArenaSide = "agent_a" | "agent_b";
 
-export interface ArenaScore {
-  agentId: string;
-  logic: number;        // 论点质量 0–10
-  eloquence: number;     // 表达能力 0–10
-  adaptability: number;  // 应变能力 0–10
-  character: number;     // 人设一致性 0–10
-  total: number;         // 总分 0–40
-}
-
-export interface ArenaTranscriptRound {
+interface MockTranscriptTemplate {
   round: number;
-  speakerId: string;
-  speakerName: string;
+  speaker: ArenaSide;
   content: string;
 }
 
-export interface ArenaJudgeComment {
-  winnerId: string;
-  winnerName: string;
-  scores: ArenaScore[];
-  reasoning: string;
-  transcript: ArenaTranscriptRound[];
+interface MockArenaScript {
+  transcript: MockTranscriptTemplate[];
+  scores: Record<ArenaSide, number>;
+  score_breakdowns: Record<ArenaSide, ArenaScoreBreakdown>;
+  winner: ArenaSide;
+  judge_reasoning: string;
 }
 
-/** 预置辩题 */
-export const ARENA_TOPICS = [
-  "期末该不该熬夜复习？",
-  "大学教育应该更注重理论还是实践？",
-  "AI 会取代人类的创造力吗？",
+function scoreBreakdown(
+  argument_quality: number,
+  expression: number,
+  adaptability: number,
+  character_consistency: number,
+): ArenaScoreBreakdown {
+  return {
+    argument_quality,
+    expression,
+    adaptability,
+    character_consistency,
+    total: argument_quality + expression + adaptability + character_consistency,
+  };
+}
+
+/** Step 26 默认轮数；Step 22 Mock 固定按三轮展示。 */
+export const MOCK_ARENA_ROUNDS = 3;
+
+/** 蓝图明确规定的三种 1v1 竞技模式。 */
+export const ARENA_MODE_OPTIONS: ArenaModeOption[] = [
+  {
+    value: "debate",
+    label: "辩论赛",
+    description: "围绕同一主题交锋，比较论点、表达与应变能力。",
+    default_topic: "大学生应优先追求稳定，还是主动承担风险？",
+  },
+  {
+    value: "interview",
+    label: "面试竞争",
+    description: "竞争同一岗位，比较经历、能力与岗位匹配度。",
+    default_topic: "校园 AI 产品经理实习岗位",
+  },
+  {
+    value: "pitch",
+    label: "创业路演",
+    description: "陈述同一创业方向，比较洞察、方案与落地能力。",
+    default_topic: "面向大学生的 AI 学习伙伴",
+  },
 ];
 
-/** 小明 vs 小刚 辩论赛完整结果 */
-export const MOCK_ARENA_RESULT: ArenaJudgeComment = {
-  winnerId: "mock-1",
-  winnerName: "小明",
-  scores: [
-    {
-      agentId: "mock-1",
-      logic: 8.5,
-      eloquence: 7.0,
-      adaptability: 8.0,
-      character: 9.0,
-      total: 32.5,
-    },
-    {
-      agentId: "mock-3",
-      logic: 7.5,
-      eloquence: 8.0,
-      adaptability: 6.5,
-      character: 7.5,
-      total: 29.5,
-    },
+/** 各竞技模式的可编辑预设主题，保留自定义输入能力。 */
+export const ARENA_TOPICS: Record<ArenaMode, string[]> = {
+  debate: [
+    "大学生应优先追求稳定，还是主动承担风险？",
+    "大学教育应该更注重理论还是实践？",
+    "AI 会取代人类的创造力吗？",
   ],
-  reasoning:
-    `小明的论点以实证研究为基础，逻辑严密，引用了睡眠科学的具体数据支撑「规律作息比熬夜临时抱佛脚更有效」的主张。小刚虽然表达更流畅、气场更强，但过度依赖个人经验，未能有效回应小明提出的睡眠剥夺对记忆固化的影响这一核心论据。在角色一致性上，小明的理性、计划性强的人格特质贯穿始终，而小刚在第三轮明显偏离了平日的竞争型风格——他罕见地承认了对方的优点，与 ESTJ 的赢家心态不符。总的来说，小明以内容深度取胜，小刚以表达技巧占优，但深度比技巧更难替代。`,
-  transcript: [
-    {
-      round: 1,
-      speakerId: "mock-3",
-      speakerName: "小刚",
-      content:
-        "熬夜复习是大学的必修课。我在投行实习时，每天只睡 4 个小时，一样拿了最高评价。效率比睡眠时间重要得多——你若是把时间花在睡觉上，别人就比你多 6 小时刷题。这个世界只问结果，不问过程。",
-    },
-    {
-      round: 1,
-      speakerId: "mock-1",
-      speakerName: "小明",
-      content:
-        "我理解小刚的拼搏精神，但科学告诉我们：睡眠不足会严重损害记忆固化。研究显示，海马体在深度睡眠期间负责将短期记忆转化为长期记忆。你熬夜学了 6 小时，第二天可能忘了 40%。这不是'努力'，这是低效的自我感动。",
-    },
-    {
-      round: 2,
-      speakerId: "mock-3",
-      speakerName: "小刚",
-      content:
-        "你说的那些研究是实验室里的大样本平均值，不代表每个人。我自己的 GPA 就是最好的反例——熬夜复习拿到了专业第一。如果你总是躲在'科学'背后，永远到不了顶尖。顶尖的人制定规则，其他人遵守规则。",
-    },
-    {
-      round: 2,
-      speakerId: "mock-1",
-      speakerName: "小明",
-      content:
-        "个人经验不等于普遍规律，这是统计学基础。你的 GPA 第一值得敬佩，但我们讨论的不是'小刚能不能'，而是'大多数人该不该'。另外，我想问小刚一个问题——你拿了专业第一，但代价是什么？身体、社交、还是那些被你归类为'无效率'的思考时间？人生不是只有成绩单。",
-    },
-    {
-      round: 3,
-      speakerId: "mock-3",
-      speakerName: "小刚",
-      content:
-        "小明你这个问题问得好…（停顿）好吧，我承认代价确实存在。但在这个阶段，成绩就是硬通货。保研、投行、咨询——第一轮筛的都是 GPA。你可以有你的生活平衡，我选择把全部筹码押在一件事上。这不代表我错了，只是我们选择了不同的战场。",
-    },
-    {
-      round: 3,
-      speakerId: "mock-1",
-      speakerName: "小明",
-      content:
-        "尊重你的选择，小刚。但我想修正一个前提：GPA 的边际效用是递减的。3.9 和 4.0 之间的差距，远小于健康作息带来的持久学习力。大学不是 100 米冲刺，是马拉松。今天熬夜拿到的那 0.1 分，可能让你在毕业前燃烧殆尽。与其争夺同一条跑道，不如找到适合自己的节奏。",
-    },
+  interview: [
+    "校园 AI 产品经理实习岗位",
+    "学生创新实验室项目负责人",
+    "AI 教育产品用户研究实习生",
+  ],
+  pitch: [
+    "面向大学生的 AI 学习伙伴",
+    "帮助新生适应校园生活的智能服务",
+    "低成本校园心理支持平台",
   ],
 };
+
+/**
+ * Step 22 的确定性 Mock 脚本。
+ *
+ * 分数使用 development-plan.md 的四项 1-10 分标准，总分 0-40。
+ */
+export const MOCK_ARENA_SCRIPTS: Record<ArenaMode, MockArenaScript> = {
+  debate: {
+    transcript: [
+      {
+        round: 1,
+        speaker: "agent_a",
+        content: "我支持主动承担风险。面对「{topic}」，尝试本身会带来无法从稳定路径获得的信息。",
+      },
+      {
+        round: 1,
+        speaker: "agent_b",
+        content: "我更看重稳定积累。风险只有在承受能力和退出方案清晰时，才不是冲动。",
+      },
+      {
+        round: 2,
+        speaker: "agent_a",
+        content: "稳定并不等于安全，环境变化也会让原有路径失效。小规模试错可以控制成本。",
+      },
+      {
+        round: 2,
+        speaker: "agent_b",
+        content: "小规模试错值得认可，但它仍应建立在基本能力和资源储备之上。",
+      },
+      {
+        round: 3,
+        speaker: "agent_a",
+        content: "我的结论是先设止损线，再主动行动；可控风险比被动等待更有成长价值。",
+      },
+      {
+        round: 3,
+        speaker: "agent_b",
+        content: "我的结论是先建立稳定底座，再选择高价值机会；准备充分能提高冒险成功率。",
+      },
+    ],
+    scores: { agent_a: 35, agent_b: 33 },
+    score_breakdowns: {
+      agent_a: scoreBreakdown(9, 8, 9, 9),
+      agent_b: scoreBreakdown(8, 9, 8, 8),
+    },
+    winner: "agent_a",
+    judge_reasoning:
+      "{agent_a}的论点推进更完整，并正面回应了稳定路径的优势；{agent_b}的风险控制观点清晰，但反驳力度略弱。",
+  },
+  interview: {
+    transcript: [
+      {
+        round: 1,
+        speaker: "agent_a",
+        content: "应聘「{topic}」，我的优势是能把模糊需求拆成可验证的问题，并快速组织实验。",
+      },
+      {
+        round: 1,
+        speaker: "agent_b",
+        content: "我的优势是持续跟进用户反馈，并协调设计、工程和业务团队完成交付。",
+      },
+      {
+        round: 2,
+        speaker: "agent_a",
+        content: "如果首周留存下降，我会先分群定位流失环节，再用最小改动验证原因。",
+      },
+      {
+        round: 2,
+        speaker: "agent_b",
+        content: "我会同时访谈流失用户，避免只看指标而忽略他们真正遇到的阻力。",
+      },
+      {
+        round: 3,
+        speaker: "agent_a",
+        content: "我能提供结构化分析和快速试验，让团队在信息不足时仍然稳定推进。",
+      },
+      {
+        round: 3,
+        speaker: "agent_b",
+        content: "我能把数据判断与用户理解结合起来，让产品决策既可验证，也能被团队执行。",
+      },
+    ],
+    scores: { agent_a: 32, agent_b: 36 },
+    score_breakdowns: {
+      agent_a: scoreBreakdown(8, 8, 8, 8),
+      agent_b: scoreBreakdown(9, 9, 9, 9),
+    },
+    winner: "agent_b",
+    judge_reasoning:
+      "{agent_b}同时覆盖用户研究、跨团队协作和数据验证，与岗位要求的匹配更全面；{agent_a}分析清晰，但案例维度稍窄。",
+  },
+  pitch: {
+    transcript: [
+      {
+        round: 1,
+        speaker: "agent_a",
+        content: "针对「{topic}」，我会从学习计划失控和反馈不及时两个高频问题切入。",
+      },
+      {
+        round: 1,
+        speaker: "agent_b",
+        content: "我会先聚焦考试复习场景，用更明确的周期和结果降低首次使用门槛。",
+      },
+      {
+        round: 2,
+        speaker: "agent_a",
+        content: "产品通过每日目标、即时解释和复盘建议形成闭环，并用完成率衡量效果。",
+      },
+      {
+        round: 2,
+        speaker: "agent_b",
+        content: "我会提供课程资料整理和错题追踪，先证明单一场景中的真实价值。",
+      },
+      {
+        round: 3,
+        speaker: "agent_a",
+        content: "先在一个院系验证四周，达到留存目标后再扩展课程，控制模型和运营成本。",
+      },
+      {
+        round: 3,
+        speaker: "agent_b",
+        content: "我会与校园社团合作获取首批用户，通过考试周期验证付费意愿和传播效率。",
+      },
+    ],
+    scores: { agent_a: 37, agent_b: 34 },
+    score_breakdowns: {
+      agent_a: scoreBreakdown(9, 9, 10, 9),
+      agent_b: scoreBreakdown(9, 8, 8, 9),
+    },
+    winner: "agent_a",
+    judge_reasoning:
+      "{agent_a}对问题、产品闭环和验证指标的说明更完整，落地路径也更清晰；{agent_b}的获客方案具体，但产品差异化不足。",
+  },
+};
+
+/** 使用所选 Agent 和竞技配置生成可独立播放的完整 Mock 结果。 */
+export function buildMockArenaResult(
+  config: ArenaConfig,
+  agentA: AgentResponse,
+  agentB: AgentResponse,
+): ArenaPresentationResult {
+  if (agentA.id !== config.agent_a_id || agentB.id !== config.agent_b_id) {
+    throw new Error("竞技配置与所选 Agent 不一致");
+  }
+  if (agentA.id === agentB.id) {
+    throw new Error("1v1 竞技必须选择两个不同的 Agent");
+  }
+  if (!config.topic.trim()) {
+    throw new Error("竞技主题不能为空");
+  }
+  if (config.rounds !== MOCK_ARENA_ROUNDS) {
+    throw new Error(`Step 22 Mock 仅支持 ${MOCK_ARENA_ROUNDS} 轮竞技`);
+  }
+
+  const script = MOCK_ARENA_SCRIPTS[config.mode];
+  const transcript: ArenaTranscriptEntry[] = script.transcript.map(
+    (entry, index) => {
+      const speaker = entry.speaker === "agent_a" ? agentA : agentB;
+      return {
+        id: `${config.mode}-${entry.round}-${index + 1}`,
+        round: entry.round,
+        speaker_id: speaker.id,
+        speaker_name: speaker.name,
+        content: formatTemplate(entry.content, config.topic.trim(), agentA, agentB),
+      };
+    },
+  );
+
+  return {
+    winner_id: script.winner === "agent_a" ? agentA.id : agentB.id,
+    scores: {
+      [agentA.id]: script.scores.agent_a,
+      [agentB.id]: script.scores.agent_b,
+    },
+    score_breakdowns: {
+      [agentA.id]: script.score_breakdowns.agent_a,
+      [agentB.id]: script.score_breakdowns.agent_b,
+    },
+    judge_reasoning: formatTemplate(
+      script.judge_reasoning,
+      config.topic.trim(),
+      agentA,
+      agentB,
+    ),
+    transcript,
+  };
+}
+
+function formatTemplate(
+  template: string,
+  topic: string,
+  agentA: AgentResponse,
+  agentB: AgentResponse,
+): string {
+  return template
+    .split("{topic}")
+    .join(topic)
+    .split("{agent_a}")
+    .join(agentA.name)
+    .split("{agent_b}")
+    .join(agentB.name);
+}
