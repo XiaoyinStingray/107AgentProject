@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
@@ -19,6 +19,7 @@ import {
 } from "../mocks/archive";
 import type { ArchiveTab } from "../types/archive";
 import type { AgentResponse } from "../types/agent";
+import type { WorldResponse } from "../types/world";
 
 /* ================================================================
    Step 25 — 档案馆页面 (M8)
@@ -246,17 +247,51 @@ function AchievementsPanel() {
 
 /* ================================================================
    研究报告导出面板
+   Step 27 更新：支持真实 API 导出（world-based）+ Mock 降级。
    ================================================================ */
 
 function ExportPanel() {
   const agents = useAvailableAgents();
+  const worlds = useAvailableWorlds();
+  const [mode, setMode] = useState<"api" | "mock">(worlds.length > 0 ? "api" : "mock");
   const [selectedAgentId, setSelectedAgentId] = useState("");
+  const [selectedWorldId, setSelectedWorldId] = useState("");
   const [format, setFormat] = useState<"markdown" | "json">("markdown");
   const [exported, setExported] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const selectedAgent = agents.find((a) => a.id === selectedAgentId);
+  const selectedWorld = worlds.find((w) => w.id === selectedWorldId);
 
-  const handleExport = useCallback(() => {
+  const handleApiExport = useCallback(async () => {
+    if (!selectedWorldId) return;
+    setExporting(true);
+    setError(null);
+    try {
+      const ext = format === "markdown" ? "" : "/json";
+      const url = `/api/export/report/${selectedWorldId}${ext}`;
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        const detail = await resp.json().catch(() => ({ detail: resp.statusText }));
+        throw new Error(detail.detail || "导出失败");
+      }
+      const blob = await resp.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `report-${selectedWorldId}.${format === "markdown" ? "md" : "json"}`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      setExported(true);
+      setTimeout(() => setExported(false), 2000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "导出失败");
+    } finally {
+      setExporting(false);
+    }
+  }, [selectedWorldId, format, selectedWorld]);
+
+  const handleMockExport = useCallback(() => {
     if (!selectedAgent) return;
     const content = format === "markdown"
       ? generateMockReport(selectedAgent.name)
@@ -275,34 +310,101 @@ function ExportPanel() {
       </h2>
 
       <Card className="mb-6">
-        {/* Agent 选择 */}
+        {/* 数据源切换 */}
         <div className="mb-4">
-          <label className="text-sm font-mono text-text-primary block mb-2">选择 Agent</label>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-            {agents.map((agent) => (
-              <button
-                key={agent.id}
-                type="button"
-                onClick={() => setSelectedAgentId(agent.id)}
-                className={`
-                  text-left p-3 rounded-lg border transition-colors
-                  ${agent.id === selectedAgentId
-                    ? "border-accent-green/60 bg-accent-green/5 ring-1 ring-accent-green/20"
-                    : "border-border bg-bg-card hover:border-text-secondary/40"
-                  }
-                `.trim()}
-              >
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-full bg-accent-green/10 border border-accent-green/30 flex items-center justify-center text-xs select-none">
-                    {agent.name.charAt(0)}
-                  </div>
-                  <span className="font-mono text-sm text-text-primary">{agent.name}</span>
-                  <span className="ml-auto text-xs font-mono text-accent-purple/70">{agent.persona.mbti}</span>
-                </div>
-              </button>
-            ))}
+          <label className="text-sm font-mono text-text-primary block mb-2">数据来源</label>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={worlds.length === 0}
+              onClick={() => setMode("api")}
+              className={`
+                px-4 py-2 rounded-lg text-sm font-mono transition-colors border
+                ${mode === "api"
+                  ? "border-accent-green/60 bg-accent-green/5 text-accent-green"
+                  : "border-border text-text-secondary hover:border-text-secondary/40"
+                }
+                ${worlds.length === 0 ? "opacity-50 cursor-not-allowed" : ""}
+              `.trim()}
+            >
+              🌐 模拟数据 ({worlds.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("mock")}
+              className={`
+                px-4 py-2 rounded-lg text-sm font-mono transition-colors border
+                ${mode === "mock"
+                  ? "border-accent-green/60 bg-accent-green/5 text-accent-green"
+                  : "border-border text-text-secondary hover:border-text-secondary/40"
+                }
+              `.trim()}
+            >
+              🎭 Agent 数据 (Mock)
+            </button>
           </div>
+          {worlds.length === 0 && (
+            <p className="text-xs text-text-secondary/60 mt-1 font-mono">
+              暂无运行中的模拟——使用 Mock 模式体验导出功能
+            </p>
+          )}
         </div>
+
+        {/* 选择目标 */}
+        {mode === "api" ? (
+          <div className="mb-4">
+            <label className="text-sm font-mono text-text-primary block mb-2">选择模拟世界</label>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+              {worlds.map((w) => (
+                <button
+                  key={w.id}
+                  type="button"
+                  onClick={() => setSelectedWorldId(w.id)}
+                  className={`
+                    text-left p-3 rounded-lg border transition-colors
+                    ${w.id === selectedWorldId
+                      ? "border-accent-green/60 bg-accent-green/5 ring-1 ring-accent-green/20"
+                      : "border-border bg-bg-card hover:border-text-secondary/40"
+                    }
+                  `.trim()}
+                >
+                  <div className="font-mono text-sm text-text-primary">{w.name}</div>
+                  <div className="text-xs text-text-secondary mt-1">
+                    Tick {w.current_tick} · {w.status}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="mb-4">
+            <label className="text-sm font-mono text-text-primary block mb-2">选择 Agent</label>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+              {agents.map((agent) => (
+                <button
+                  key={agent.id}
+                  type="button"
+                  onClick={() => setSelectedAgentId(agent.id)}
+                  className={`
+                    text-left p-3 rounded-lg border transition-colors
+                    ${agent.id === selectedAgentId
+                      ? "border-accent-green/60 bg-accent-green/5 ring-1 ring-accent-green/20"
+                      : "border-border bg-bg-card hover:border-text-secondary/40"
+                    }
+                  `.trim()}
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-full bg-accent-green/10 border border-accent-green/30 flex items-center justify-center text-xs select-none">
+                      {agent.name.charAt(0)}
+                    </div>
+                    <span className="font-mono text-sm text-text-primary">{agent.name}</span>
+                    <span className="ml-auto text-xs font-mono text-accent-purple/70">{agent.persona.mbti}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* 格式选择 */}
         <div className="mb-4">
@@ -331,21 +433,26 @@ function ExportPanel() {
         <div className="flex items-center gap-4">
           <button
             type="button"
-            disabled={!selectedAgent}
-            onClick={handleExport}
+            disabled={mode === "api" ? (!selectedWorld || exporting) : !selectedAgent}
+            onClick={mode === "api" ? handleApiExport : handleMockExport}
             className={`
               px-6 py-2 rounded-lg text-sm font-mono transition-all
-              ${selectedAgent
+              ${(mode === "api" ? selectedWorld && !exporting : selectedAgent)
                 ? "bg-accent-green text-bg-primary hover:bg-accent-green/90"
                 : "bg-bg-secondary border border-border text-text-secondary/40 cursor-not-allowed"
               }
             `.trim()}
           >
-            📥 导出报告
+            {exporting ? "⏳ 导出中..." : "📥 导出报告"}
           </button>
           {exported && (
             <span className="text-sm font-mono text-accent-green animate-fade-in">
               ✓ 报告已下载
+            </span>
+          )}
+          {error && (
+            <span className="text-sm font-mono text-accent-red animate-fade-in">
+              ✗ {error}
             </span>
           )}
         </div>
@@ -366,4 +473,16 @@ function useAvailableAgents(): AgentResponse[] {
     [...MOCK_AGENTS, ...createdAgents].forEach((a) => byId.set(a.id, a));
     return [...byId.values()];
   }, [createdAgents]);
+}
+
+/** 模拟世界列表——从 API 获取，无后端时返回空数组（降级到 Mock 模式）。 */
+function useAvailableWorlds(): WorldResponse[] {
+  const [worlds, setWorlds] = useState<WorldResponse[]>([]);
+  useEffect(() => {
+    fetch("/api/worlds")
+      .then((r) => r.ok ? r.json() : [])
+      .then((data: WorldResponse[]) => setWorlds(data))
+      .catch(() => setWorlds([]));
+  }, []);
+  return worlds;
 }
