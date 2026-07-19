@@ -5,6 +5,7 @@ import AgentFoundry from "./pages/AgentFoundry";
 import SoloTheater from "./pages/SoloTheater";
 import GroupSandbox from "./pages/GroupSandbox";
 import Arena from "./pages/Arena";
+import NarrativeFactory from "./pages/NarrativeFactory";
 import SSEDebug from "./pages/debug/SSEDebug";
 import EmptyState from "./components/shared/EmptyState";
 import Badge from "./components/shared/Badge";
@@ -89,16 +90,7 @@ export default function App() {
           <Route path="arena" element={<Arena />} />
 
           {/* M5 叙事工厂 */}
-          <Route
-            path="narratives"
-            element={
-              <PlaceholderPage
-                title="M5 叙事工厂"
-                description="小说化叙事 · 未来的信 · 平行对话 · 播客脚本"
-                tier="P1"
-              />
-            }
-          />
+          <Route path="narratives" element={<NarrativeFactory />} />
 
           {/* M6 控制台 */}
           <Route
