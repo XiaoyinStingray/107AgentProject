@@ -34,9 +34,9 @@
 | 19 | 7.4 | 单人剧场 (M2) | 18 | SoloTheater.tsx |
 | 20 | 7.5 | 主观察界面 (M3) | 19 | GroupSandbox.tsx |
 | 21 | 7.6 | 关系网络图 | 20 | RelationshipGraph.tsx |
-| 22 | 7.7 | 竞技场页面 (M4) | 16 | Arena.tsx |
-| 23 | 7.8 | 叙事页面 (M5) | 15, 16 | NarrativeFactory.tsx |
-| 24 | 7.9 | 控制台 + 干预台 (M6/M7) | 20 | ControlPanel + Intervention |
+| 22 | 7.7 | 竞技场页面 (M4) | 16 | Arena.tsx + ArenaSetup/Match/ResultPanel 子组件 + 3 模式 Mock（辩论/面试/路演）+ hash 分流 |
+| 23 | 7.8 | 叙事页面 (M5) | 15, 16 | NarrativeFactory.tsx + 4 风格 × 3 Agent Mock 叙事库 + 复制/下载 |
+| 24 | 7.9 | 控制台 + 干预台 (M6/M7) | 20 | ControlPanel（4 Tab 可用 + 3 占位）+ DirectorIntervention（事件注入 + 历史） |
 | 25 | 7.10 | 档案馆 (M8) | 16 | Archive.tsx |
 | 26 | 8.1 | 竞技引擎 | 05, 09 | ArenaEngine (debate/1v1) |
 | 27 | 9.1 | 56 菜单铺量 + 报告导出 | 25 | 占位页 + PDF 导出 |
@@ -1616,10 +1616,15 @@ body {
 | 7.3.4 | 单人剧场页面 (M2) | `SoloTheater.tsx`, `AgentStatusPanel.tsx` |
 | 7.3.5 | 主观察界面 (M3 核心) | `GroupSandbox.tsx`, `Timeline.tsx`, `EventFeed.tsx` |
 | 7.3.6 | 关系网络图 | `RelationshipGraph.tsx` |
-| 7.3.7 | 竞技场页面 (M4) | `Arena.tsx` |
-| 7.3.8 | 叙事页面 (M5) | `NarrativeFactory.tsx` |
-| 7.3.9 | 控制台 + 干预台 (M6, M7) | `ControlPanel.tsx`, `DirectorIntervention.tsx` |
+| 7.3.7 | 竞技场页面 (M4) | `Arena.tsx`, `ArenaSetup.tsx`, `ArenaMatch.tsx`, `ArenaResultPanel.tsx`, `types/arena.ts`, `mocks/arena.ts`（三种模式 Mock + hash 分流） |
+| 7.3.8 | 叙事页面 (M5) | `NarrativeFactory.tsx`, `mocks/narratives.ts`（4 风格 × 3 Agent Mock 库 + 复制/下载） |
+| 7.3.9 | 控制台 + 干预台 (M6, M7) | `ControlPanel.tsx`（4 Tab 可用 + 3 占位）, `DirectorIntervention.tsx`（事件注入 + 历史）, `types/control.ts`, `types/intervention.ts`, `mocks/control.ts`, `mocks/intervention.ts`, `AgentDashboard.tsx`, `EventHeatmap.tsx`, `AgentSearch.tsx`, `DecisionPatterns.tsx` |
 | 7.3.10 | 档案馆 (M8) | `Archive.tsx` |
+
+> **2026-07-19 实现备注（Step 22–24）：**
+> - **Arena（Step 22）：** 页面拆为 ArenaSetup/ArenaMatch/ArenaResultPanel 三个子组件，状态机由父组件 Arena 编排。三种竞技模式（debate/interview/pitch）各有独立 Mock 脚本，通过 `buildMockArenaResult(config, agentA, agentB)` 生成完整结果。Sidebar hash 分流——`#item-23` 到 `#item-28` 各对应一个 M4 子功能项，当前均为占位。Arena 路由接 `/arena`。
+> - **NarrativeFactory（Step 23）：** 4 种核心风格（story/diary/letter/podcast）+ 3 种 P3 占位。Mock 叙事库覆盖 3 Agent × 4 风格 = 12 份完整内容，支持复制（clipboard API）和下载（Blob .md）。`needsTarget` 控制 letter/podcast 的收信人/主题输入框显隐。路由接 `/narratives`。
+> - **ControlPanel + DirectorIntervention（Step 24）：** M6 控制台 7 Tab（仪表盘/热力图/搜索/决策模式可用 + 3 占位），数据源复用 MOCK_SANDBOX_EVENTS。M7 干预台以事件注入为主功能（4 种注入类型 + needsTarget 逻辑 + 2s 成功反馈 + 历史记录），5 个 P3 面板占位。路由接 `/control` 和 `/intervention`。
 
 ---
 
