@@ -1,6 +1,6 @@
-import { Outlet } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import TopBar from "./TopBar";
+import FeatureRouteBoundary from "./FeatureRouteBoundary";
 
 /**
  * 全局布局：左侧可折叠 Sidebar + 顶部状态栏 + 主内容区。
@@ -13,7 +13,7 @@ export default function Layout() {
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
         <main className="flex-1 overflow-auto">
-          <Outlet />
+          <FeatureRouteBoundary />
         </main>
       </div>
     </div>

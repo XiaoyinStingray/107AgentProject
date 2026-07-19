@@ -1,4 +1,5 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
 /* ================================================================
    useApi — 通用 fetch 封装 + Mock 拦截
@@ -33,8 +34,96 @@ interface UseApiOptions<TResponse> {
   mockDelay?: number;
 }
 
+type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
+type ApiStateSetter<T> = Dispatch<SetStateAction<UseApiState<T>>>;
+
+interface ExecuteApiArgs<TResponse, TBody> {
+  method: HttpMethod;
+  url: string;
+  body?: TBody;
+  options?: UseApiOptions<TResponse>;
+  mountedRef: MutableRefObject<boolean>;
+  cancelRef: MutableRefObject<AbortController | null>;
+  setState: ApiStateSetter<TResponse>;
+}
+
+async function requestJson<TResponse, TBody>(
+  method: HttpMethod,
+  url: string,
+  body: TBody | undefined,
+  controller: AbortController,
+): Promise<TResponse> {
+  const fetchOptions: RequestInit = {
+    method,
+    headers: { "Content-Type": "application/json" },
+    signal: controller.signal,
+  };
+  if (method !== "GET" && method !== "DELETE" && body !== undefined) {
+    fetchOptions.body = JSON.stringify(body);
+  }
+
+  const response = await fetch(url, fetchOptions);
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "Unknown error");
+    throw new Error(`${response.status} ${response.statusText}: ${detail}`);
+  }
+  return response.json() as Promise<TResponse>;
+}
+
+async function executeApi<TResponse, TBody>({
+  method,
+  url,
+  body,
+  options,
+  mountedRef,
+  cancelRef,
+  setState,
+}: ExecuteApiArgs<TResponse, TBody>): Promise<TResponse | null> {
+  setState((state) => ({ ...state, loading: true, error: null }));
+
+  if (options?.mockData !== undefined) {
+    await new Promise((resolve) => setTimeout(resolve, options.mockDelay ?? 1500));
+    if (!mountedRef.current) return null;
+    setState({ data: options.mockData, loading: false, error: null });
+    return options.mockData;
+  }
+
+  const controller = new AbortController();
+  cancelRef.current?.abort();
+  cancelRef.current = controller;
+  try {
+    const data = await requestJson<TResponse, TBody>(method, url, body, controller);
+    if (!mountedRef.current || controller.signal.aborted) return null;
+    setState({ data, loading: false, error: null });
+    return data;
+  } catch (error: unknown) {
+    if (!mountedRef.current || controller.signal.aborted) return null;
+    const message = error instanceof Error ? error.message : "Unknown error";
+    setState({ data: null, loading: false, error: message });
+    return null;
+  } finally {
+    if (cancelRef.current === controller) cancelRef.current = null;
+  }
+}
+
+function useRequestLifecycle() {
+  const mountedRef = useRef(true);
+  const cancelRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      cancelRef.current?.abort();
+      cancelRef.current = null;
+    };
+  }, []);
+
+  return { mountedRef, cancelRef };
+}
+
 export function useApi<TResponse, TBody = void>(
-  method: "GET" | "POST" | "PUT" | "DELETE",
+  method: HttpMethod,
   url: string,
   options?: UseApiOptions<TResponse>,
 ): UseApiReturn<TResponse, TBody> {
@@ -44,67 +133,22 @@ export function useApi<TResponse, TBody = void>(
     error: null,
   });
 
-  // 防止组件卸载后 setState（React 18 StrictMode 下无实际风险，但好习惯）
-  const mountedRef = useRef(true);
-  const cancelRef = useRef<AbortController | null>(null);
+  const { mountedRef, cancelRef } = useRequestLifecycle();
 
   const reset = useCallback(() => {
     setState({ data: null, loading: false, error: null });
   }, []);
 
   const execute = useCallback(
-    async (body?: TBody): Promise<TResponse | null> => {
-      // 取消上一次请求（防竞态）
-      cancelRef.current?.abort();
-      const controller = new AbortController();
-      cancelRef.current = controller;
-
-      setState((s) => ({ ...s, loading: true, error: null }));
-
-      // === Mock 模式 ===
-      if (options?.mockData !== undefined) {
-        const delay = options.mockDelay ?? 1500;
-        await new Promise((r) => setTimeout(r, delay));
-
-        if (!mountedRef.current || controller.signal.aborted) return null;
-
-        setState({ data: options.mockData, loading: false, error: null });
-        return options.mockData;
-      }
-
-      // === 真 API 模式 ===
-      try {
-        const fetchOptions: RequestInit = {
-          method,
-          headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
-        };
-        if (method !== "GET" && method !== "DELETE" && body !== undefined) {
-          fetchOptions.body = JSON.stringify(body);
-        }
-
-        const res = await fetch(url, fetchOptions);
-
-        if (!res.ok) {
-          const errorText = await res.text().catch(() => "Unknown error");
-          throw new Error(`${res.status} ${res.statusText}: ${errorText}`);
-        }
-
-        const json: TResponse = await res.json();
-
-        if (!mountedRef.current || controller.signal.aborted) return null;
-
-        setState({ data: json, loading: false, error: null });
-        return json;
-      } catch (err: unknown) {
-        if (!mountedRef.current || controller.signal.aborted) return null;
-
-        const message =
-          err instanceof Error ? err.message : "Unknown error";
-        setState({ data: null, loading: false, error: message });
-        return null;
-      }
-    },
+    (body?: TBody) => executeApi({
+      method,
+      url,
+      body,
+      options,
+      mountedRef,
+      cancelRef,
+      setState,
+    }),
     [method, url, options?.mockData, options?.mockDelay],
   );
 

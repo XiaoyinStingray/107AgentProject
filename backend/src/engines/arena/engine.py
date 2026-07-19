@@ -100,18 +100,15 @@ class ArenaEngine:
         """
         logger.info(f"ArenaEngine.run_debate: topic={topic!r}, rounds={rounds}")
 
-        # 1. 创建裁判
-        judge = self._create_judge(topic)
-
-        # 2. 构建 GroupChat
+        # 1. 构建仅包含辩手的 GroupChat；裁判在辩论结束后单独评分。
         from autogen_agentchat.teams import RoundRobinGroupChat
 
         team = RoundRobinGroupChat(
-            participants=[agent_a.autogen_agent, agent_b.autogen_agent, judge],
-            max_turns=rounds * 2 + 2,
+            participants=[agent_a.autogen_agent, agent_b.autogen_agent],
+            max_turns=rounds * 2,
         )
 
-        # 3. 运行辩论
+        # 2. 运行辩论
         task = f"辩论主题: {topic}\n\n{agent_a.persona.name}为正方，{agent_b.persona.name}为反方。请开始辩论。"
         transcript: list[dict] = []
 
@@ -120,11 +117,11 @@ class ArenaEngine:
 
             result = await team.run(task=task, cancellation_token=CancellationToken())
 
-            # 4. 收集 transcript
+            # 3. 收集 transcript
             for i, msg in enumerate(result.messages):
                 content = getattr(msg, "content", "")
                 source = getattr(msg, "source", "")
-                if content and source not in ("user",):
+                if content and source not in ("user", "judge"):
                     transcript.append({
                         "turn": i,
                         "speaker": source,
@@ -142,7 +139,7 @@ class ArenaEngine:
                 rounds=rounds,
             )
 
-        # 5. 裁判评分
+        # 4. 裁判评分
         scoring = await self._judge_score(agent_a, agent_b, transcript)
 
         return ArenaResult(

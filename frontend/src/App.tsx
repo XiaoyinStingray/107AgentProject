@@ -104,8 +104,10 @@ export default function App() {
           {/* M8 档案馆 */}
           <Route path="archive" element={<Archive />} />
 
-          {/* 隐藏测试路由——Step 19 完成后移除 */}
-          <Route path="debug/sse" element={<SSEDebug />} />
+          {/* 调试入口仅在开发服务器开放，不进入生产路由。 */}
+          {import.meta.env.DEV && (
+            <Route path="debug/sse" element={<SSEDebug />} />
+          )}
 
           {/* 404 */}
           <Route
