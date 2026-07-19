@@ -6,6 +6,8 @@ import SoloTheater from "./pages/SoloTheater";
 import GroupSandbox from "./pages/GroupSandbox";
 import Arena from "./pages/Arena";
 import NarrativeFactory from "./pages/NarrativeFactory";
+import ControlPanel from "./pages/ControlPanel";
+import DirectorIntervention from "./pages/DirectorIntervention";
 import SSEDebug from "./pages/debug/SSEDebug";
 import EmptyState from "./components/shared/EmptyState";
 import Badge from "./components/shared/Badge";
@@ -93,28 +95,10 @@ export default function App() {
           <Route path="narratives" element={<NarrativeFactory />} />
 
           {/* M6 控制台 */}
-          <Route
-            path="control"
-            element={
-              <PlaceholderPage
-                title="M6 观察者控制台"
-                description="多 Agent 仪表盘 · 事件热力图 · Agent 搜索 · 决策模式识别"
-                tier="P1"
-              />
-            }
-          />
+          <Route path="control" element={<ControlPanel />} />
 
           {/* M7 干预台 */}
-          <Route
-            path="intervention"
-            element={
-              <PlaceholderPage
-                title="M7 导演干预台"
-                description="事件注入 · 上帝之声 · 时间回溯 · 人格篡改"
-                tier="P2"
-              />
-            }
-          />
+          <Route path="intervention" element={<DirectorIntervention />} />
 
           {/* M8 档案馆 */}
           <Route
