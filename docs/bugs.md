@@ -91,3 +91,21 @@
 - **期望结果**：Mock 模式不受 AbortController 影响（或 abort 后不检查 signal），每次创建请求都能正常返回 mock 数据。
 - **修复方向**：Mock 分支中移除 `controller.signal.aborted` 检查，仅保留 `mountedRef.current` 防卸载后 setState。
 - **关联位置**：`frontend/src/hooks/useApi.ts` 第 69 行
+
+---
+
+## BUG-006：ArenaEngine 裁判参与 GroupChat 轮转导致辩论中断
+
+- **状态**：待处理
+- **优先级**：P1（裁判在辩论过程中插话，破坏辩论流程）
+- **发现日期**：2026-07-19
+- **环境**：后端 ArenaEngine
+- **复现步骤**：
+  1. 创建 ArenaEngine 并调用 `run_debate(agent_a, agent_b, topic, rounds=3)`。
+  2. 观察 GroupChat 的对话轮次。
+- **实际结果**：`RoundRobinGroupChat` 的 participants 包含 [辩手A, 辩手B, 裁判] 三人。RoundRobin 按顺序轮转：A → B → 裁判 → A → B → 裁判 → ...。裁判在每轮都会有机会发言，而不是仅在辩论结束后做一次总结评分。这导致辩论被裁判的插话打断，transcript 中混入裁判发言。
+- **期望结果**：辩手 A 和 B 完成全部 rounds 轮辩论后，裁判再单独发言一次。不应将裁判放入 GroupChat 的轮转 participants 中。Plan §2.6 明确说"最后追加一个'裁判 Agent'来评分"。
+- **修复方向**：
+  1. GroupChat participants 仅包含辩手 A 和 B（`max_turns = rounds * 2`）。
+  2. 辩论结束后，单独调用裁判 Agent 或 `model_client.create()` 生成评分（当前 `_judge_score` 已经走 `model_client.create`，只需把裁判从 GroupChat 中移除即可）。
+- **关联位置**：`backend/src/engines/arena/engine.py` 第 109–112 行（GroupChat participants 包含 judge）
