@@ -97,23 +97,25 @@ export default function GroupSandbox() {
           ))}
         </aside>
 
-        <main className="col-span-6 min-h-0 min-w-0 flex flex-col gap-3">
-          <div className="shrink-0 grid grid-cols-2 gap-3">
-            <Card>
-              <Timeline
+        <main className="col-span-6 min-h-0 min-w-0 overflow-hidden">
+          <div className="h-full flex flex-col gap-3">
+            <div className="shrink-0 grid grid-cols-2 gap-3">
+              <Card>
+                <Timeline
+                  events={visibleEvents}
+                  selectedTick={selectedTick}
+                  onSelectTick={setSelectedTick}
+                />
+              </Card>
+              <RelationshipGraph
+                agents={selectedAgents}
                 events={visibleEvents}
-                selectedTick={selectedTick}
-                onSelectTick={setSelectedTick}
               />
+            </div>
+            <Card className="flex-1 min-h-0 overflow-hidden flex flex-col">
+              <EventFeed events={visibleEvents} selectedTick={selectedTick} />
             </Card>
-            <RelationshipGraph
-              agents={selectedAgents}
-              events={visibleEvents}
-            />
           </div>
-          <Card className="flex-1 min-h-0 overflow-hidden">
-            <EventFeed events={visibleEvents} selectedTick={selectedTick} />
-          </Card>
         </main>
 
         <aside className="col-span-3 min-h-0 min-w-0 overflow-hidden">

@@ -55,10 +55,37 @@ function edgeWidth(score: number): number {
   return 1.5 + Math.abs(score) * 3.5;
 }
 
-/** 从 SSE 事件流中聚合关系边——取每对 Agent 的最新 score。 */
-function aggregateEdges(events: SSEEvent[]): RelationshipEdge[] {
+/** 从 Agent 列表生成默认中立边——确保关系图从一开始就有所有节点连线。 */
+function defaultEdges(agents: AgentResponse[]): RelationshipEdge[] {
+  const edges: RelationshipEdge[] = [];
+  for (let i = 0; i < agents.length; i++) {
+    for (let j = i + 1; j < agents.length; j++) {
+      edges.push({
+        agentAId: agents[i].id,
+        agentBId: agents[j].id,
+        score: 0,
+        lastInteraction: "neutral",
+        lastChange: 0,
+      });
+    }
+  }
+  return edges;
+}
+
+/** 从 SSE 事件流中聚合关系边——取每对 Agent 的最新 score，未出现过的 pair 保留默认中立值。 */
+function aggregateEdges(
+  events: SSEEvent[],
+  agents: AgentResponse[],
+): RelationshipEdge[] {
   const map = new Map<string, RelationshipEdge>();
 
+  // 先填入所有 Agent pair 的默认中立边
+  for (const edge of defaultEdges(agents)) {
+    const key = [edge.agentAId, edge.agentBId].sort().join("::");
+    map.set(key, edge);
+  }
+
+  // 事件数据覆盖默认值
   for (const event of events) {
     if (event.type !== "relationship_change" || !event.data) continue;
     const agentA = event.data.agent_a as string | undefined;
@@ -104,7 +131,7 @@ export default function RelationshipGraph({
   events,
   className = "",
 }: RelationshipGraphProps) {
-  const edges = useMemo(() => aggregateEdges(events), [events]);
+  const edges = useMemo(() => aggregateEdges(events, agents), [events, agents]);
   const positions = useMemo(() => computePositions(agents), [agents]);
 
   // 最近一条关系变化事件触发的边高亮
