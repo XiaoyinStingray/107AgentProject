@@ -1105,6 +1105,17 @@ import json
 # 函数。SSE 端点调用 engine.tick_stream() → api/sse.py 的 _event_to_dict + _sse_event。
 # 详见 docs/done/step-11.md。
 
+# ⚠️ 2026-07-19 架构决策——SSE 事件粒度：
+# LLM 的 token 级流式输出（~50 tokens/s）如果每个 token 都推一个 SSE 事件，
+# 前端 Zustand store 会每秒 50 次 state 更新 → 全量 re-render → 卡顿。
+# 决策：后端在 AutoGen 翻译层做聚合，按语义边界推送——
+#   - agent_message：一句话或一个完整对话气泡完成后推送一条
+#   - thought_stream：一个思考段落完成后推送一条
+#   - agent_action / relationship_change / world_event：本身就是完整事件，不变
+# 这样前端无需 token 级流式支持，现有架构直接可用。
+# 如果未来确实需要打字机效果，在前端对已到达的 content 字符串做 CSS 逐字动画，
+# 而不是通过事件流实现。
+
 async def world_event_stream(world_engine: WorldEngine) -> AsyncGenerator[str, None]:
     """SSE 事件生成器——FastAPI StreamingResponse 的 content"""
     async for autogen_message in world_engine.team.run_stream():
