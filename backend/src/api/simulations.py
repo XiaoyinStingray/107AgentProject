@@ -41,7 +41,7 @@ _simulations: dict[str, SimulationRecord] = {}
 # =============================================================================
 
 
-@router.get("/", response_model=list[SimulationRecord])
+@router.get("", response_model=list[SimulationRecord])
 async def list_simulations(world_id: str | None = None):
     """列出模拟记录。可选 world_id 筛选。"""
     if world_id:

@@ -38,6 +38,17 @@ def unregister_world(world_id: str):
     _active_worlds.pop(world_id, None)
 
 
+def reset_world(world_id: str):
+    """重置 World——取消注册引擎 + 标记状态为 idle。
+
+    由 worlds.py 的 POST /{id}/reset 端点调用。
+    """
+    engine = _active_worlds.pop(world_id, None)
+    if engine:
+        engine.world.status = "idle"
+        logger.info(f"World {world_id} reset (engine unregistered)")
+
+
 def get_world_engine(world_id: str) -> WorldEngine:
     """按 ID 获取 WorldEngine 实例。"""
     engine = _active_worlds.get(world_id)
@@ -62,17 +73,17 @@ async def stream_world(world_id: str):
 
     async def event_generator():
         # 发送初始连接确认
-        yield _sse_event("connected", {"world_id": world_id, "tick": engine.current_tick})
+        yield _sse_event({"type": "connected", "world_id": world_id, "tick": engine.current_tick})
 
         try:
-            async for event in engine.tick_stream():
-                yield _sse_event(event.type, _event_to_dict(event))
-                # tick_boundary 后等待下一个 tick
-                if event.type == "tick_boundary":
-                    continue
+            # 连续推流：while 循环驱动多个 tick，直到 World 暂停/结束或客户端断开
+            while engine.world.status == "running":
+                async for event in engine.tick_stream():
+                    yield _sse_event(_event_to_dict(event))
+                # tick_stream 结束一个 tick → 自动进入下一个 tick
         except Exception as e:
             logger.error(f"SSE stream error for world {world_id}: {e}")
-            yield _sse_event("error", {"message": str(e)})
+            yield _sse_event({"type": "error", "message": str(e)})
 
     return StreamingResponse(
         event_generator(),
@@ -90,29 +101,50 @@ async def stream_world(world_id: str):
 # =============================================================================
 
 
-def _sse_event(event_type: str, data: dict) -> str:
+def _sse_event(data: dict) -> str:
     """构建一条 SSE 格式的消息。
 
+    统一走默认 message 通道（无 event: 前缀），type 包含在 JSON data 中。
+    前端 EventSource.onmessage 可以直接接收所有事件。
+
     格式:
-        event: {type}
         data: {json}
 
         （空行表示一条消息结束）
     """
     payload = json.dumps(data, ensure_ascii=False)
-    return f"event: {event_type}\ndata: {payload}\n\n"
+    return f"data: {payload}\n\n"
 
 
 def _event_to_dict(event: SimEvent) -> dict:
-    """将 SimEvent 序列化为前端可消费的字典。"""
-    return {
+    """将 SimEvent 序列化为前端 SSEEvent 格式。
+
+    字段映射（后端 → 前端）:
+        source_agent_id → agent_id
+        description → content（thought_stream）/ 保留 description（其他类型）
+        data 中的业务字段平铺到顶层（phase, message, action 等）
+    """
+    base = {
         "id": event.id,
         "world_id": event.world_id,
         "tick": event.tick,
         "type": event.type,
-        "source_agent_id": event.source_agent_id,
-        "target_agent_ids": event.target_agent_ids,
+        "agent_id": event.source_agent_id,
         "description": event.description,
         "data": event.data,
-        "created_at": event.created_at,
     }
+
+    # 按事件类型平铺业务字段
+    if event.type == "thought_stream":
+        base["content"] = event.description
+        base["phase"] = event.data.get("phase", "") if event.data else ""
+    elif event.type == "agent_message":
+        base["message"] = event.data.get("message", event.description) if event.data else event.description
+        base["subtext"] = event.data.get("subtext", "") if event.data else ""
+        base["tone"] = event.data.get("tone", "neutral") if event.data else "neutral"
+    elif event.type == "agent_action":
+        base["action"] = event.data.get("action", "") if event.data else ""
+        base["target"] = event.data.get("target", "") if event.data else ""
+        base["result"] = event.data.get("result", "") if event.data else ""
+
+    return base

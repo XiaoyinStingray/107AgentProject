@@ -90,10 +90,10 @@ class TestSSEFormatting:
     def test_sse_event_format(self):
         from api.sse import _sse_event
 
-        result = _sse_event("agent_message", {"content": "你好"})
-        assert "event: agent_message" in result
+        result = _sse_event({"type": "agent_message", "content": "你好"})
         assert "data:" in result
         assert "你好" in result
+        assert "agent_message" in result
         assert result.endswith("\n\n")
 
     def test_event_to_dict_all_fields(self):

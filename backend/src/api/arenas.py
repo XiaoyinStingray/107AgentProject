@@ -126,7 +126,7 @@ async def get_arena_result(arena_id: str):
     )
 
 
-@router.get("/", response_model=list[ArenaResultResponse])
+@router.get("", response_model=list[ArenaResultResponse])
 async def list_arenas():
     """列出所有竞技记录。"""
     return [

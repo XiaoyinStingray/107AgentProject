@@ -56,3 +56,24 @@
   - `frontend/src/pages/Archive.tsx` — AchievementsPanel 消费 `MOCK_ACHIEVEMENTS`
   - `frontend/src/mocks/archive.ts` — 静态 Mock 数据
   - 缺少：共享成就追踪 Store + 各页面埋点
+  
+  ---
+  
+  ## BUG-005：LLM API Key 无效时错误提示不友好
+  
+  - **状态**：待处理
+  - **优先级**：P2（不阻塞代码运行，但影响用户体验）
+  - **发现日期**：2026-07-21
+  - **环境**：后端 `POST /api/agents`，DeepSeek API
+  - **复现步骤**：
+    1. 在 `.env` 中配置无效的 LLM API Key。
+    2. 启动后端，访问 M1 铸造厂。
+    3. 输入描述，点击「创建 Agent」。
+  - **实际结果**：前端显示红色错误「failed to fetch」，后端日志显示 `401 Authentication Fails`。用户无法判断是网络问题、后端问题还是 API Key 问题。
+  - **期望结果**：前端应显示明确的错误提示，如「LLM API Key 无效，请检查 .env 配置」。后端应返回结构化的错误信息（如 `{error: "invalid_api_key", message: "..."}`），而非通用 400/500。
+  - **影响范围**：M1 铸造厂、M2 单人剧场、M3 群体沙盒、M4 竞技场、M5 叙事工厂——所有依赖 LLM 的功能。
+  - **关联位置**：
+    - `backend/src/api/agents.py` — `create_agent` 错误处理
+    - `backend/src/llm/client.py` — LLM 客户端初始化
+    - `frontend/src/api/client.ts` — 错误展示逻辑
+  - **临时解决方案**：确保 `.env` 中的 `LLM_API_KEY` 有效。

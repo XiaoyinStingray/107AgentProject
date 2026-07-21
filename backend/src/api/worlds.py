@@ -19,7 +19,7 @@ from sqlalchemy import select
 
 from db import async_session
 from api.agents import AgentStore, get_agent_store
-from api.sse import register_world as sse_register, _active_worlds
+from api.sse import register_world as sse_register, reset_world as sse_reset, _active_worlds
 from engines.world.engine import WorldEngine
 from engines.world.scenarios import get_scenario_by_name
 from models.event import Event, SimEvent
@@ -89,7 +89,7 @@ async def _build_world_engine(
 # =============================================================================
 
 
-@router.post("/", response_model=WorldResponse, status_code=201)
+@router.post("", response_model=WorldResponse, status_code=201)
 async def create_world(
     req: WorldCreate,
     store: WorldStore = Depends(get_world_store),
@@ -113,7 +113,7 @@ async def create_world(
     return world
 
 
-@router.get("/", response_model=list[WorldResponse])
+@router.get("", response_model=list[WorldResponse])
 async def list_worlds(store: WorldStore = Depends(get_world_store)):
     return store.list_all()
 
@@ -191,6 +191,23 @@ async def inject_event(
 
     engine.inject_event(event.get("description", str(event)))
     return {"status": "injected"}
+
+
+@router.post("/{world_id}/reset")
+async def reset_world_endpoint(
+    world_id: str,
+    store: WorldStore = Depends(get_world_store),
+):
+    """重置模拟——停止引擎、标记 idle，前端可重新开始。"""
+    world = store.get(world_id)
+    if not world:
+        raise HTTPException(status_code=404, detail=f"World {world_id!r} not found")
+
+    # 取消注册引擎 + 标记 idle
+    sse_reset(world_id)
+    world.status = "idle"
+    world.current_tick = 0
+    return {"status": "reset", "world_id": world_id}
 
 
 # =============================================================================

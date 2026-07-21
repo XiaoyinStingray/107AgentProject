@@ -70,7 +70,7 @@ def get_agent_factory() -> AgentFactory:
 # =============================================================================
 
 
-@router.post("/", response_model=AgentResponse, status_code=201)
+@router.post("", response_model=AgentResponse, status_code=201)
 async def create_agent(
     req: AgentCreate,
     store: AgentStore = Depends(get_agent_store),
@@ -86,7 +86,7 @@ async def create_agent(
     return agent.to_response()
 
 
-@router.get("/", response_model=list[AgentResponse])
+@router.get("", response_model=list[AgentResponse])
 async def list_agents(store: AgentStore = Depends(get_agent_store)):
     return [a.to_response() for a in store.list_all()]
 

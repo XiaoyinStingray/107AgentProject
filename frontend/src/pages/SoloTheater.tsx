@@ -1,8 +1,7 @@
 import { useState, useMemo } from "react";
-import type { AgentResponse } from "../types/agent";
-import { MOCK_AGENTS } from "../mocks/agents";
-import { useAgentStore } from "../stores/useAgentStore";
-import { useMockSSE } from "../mocks/sse";
+import { useAgents } from "../api/agents";
+import { useCreateWorld, useStartWorld, usePauseWorld, useResetWorld } from "../api/worlds";
+import { useSSE } from "../hooks/useSSE";
 import AgentStatusPanel from "../components/world/AgentStatusPanel";
 import ThoughtStream from "../components/agent/ThoughtStream";
 import Card from "../components/shared/Card";
@@ -42,25 +41,29 @@ const BUILTIN_SCENARIOS = [
 type ScenarioName = (typeof BUILTIN_SCENARIOS)[number]["name"];
 
 export default function SoloTheater() {
-  // Agent 来源：铸造厂创建的 + Mock 预设
-  const storeAgents = useAgentStore((s) => s.agents);
-  const availableAgents = useMemo(
-    () => [...storeAgents, ...MOCK_AGENTS],
-    [storeAgents],
-  );
+  // Agent 列表：从后端拉取（铸造厂创建的真 Agent）
+  const { data: agents = [], isLoading: agentsLoading } = useAgents();
 
   const [selectedAgentId, setSelectedAgentId] = useState<string>(
-    availableAgents[0]?.id ?? "",
+    agents[0]?.id ?? "",
   );
   const [selectedScenario, setSelectedScenario] =
     useState<ScenarioName>("期末周");
+  const [worldId, setWorldId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
 
-  // SSE 推流（Mock 模式）
-  const { events, connected, start, resume, stop, clear } = useMockSSE();
+  // API Mutations
+  const createWorld = useCreateWorld();
+  const startWorld = useStartWorld();
+  const pauseWorld = usePauseWorld();
+  const resetWorld = useResetWorld();
 
-  const selectedAgent = availableAgents.find(
-    (a) => a.id === selectedAgentId,
+  // 真 SSE 推流——worldId 变化时自动连接/断开
+  const { events, connected, disconnect, clear } = useSSE(worldId);
+
+  const selectedAgent = useMemo(
+    () => agents.find((a) => a.id === selectedAgentId),
+    [agents, selectedAgentId],
   );
 
   // 统计
@@ -75,20 +78,62 @@ export default function SoloTheater() {
     (e) => e.type === "agent_message",
   ).length;
 
-  const handleStart = () => {
+  /** 开始投放：创建 World → 启动 → 自动连 SSE */
+  const handleStart = async () => {
     if (!selectedAgent) return;
-    setIsRunning(true);
-    start();
+
+    try {
+      // 1. 创建 World
+      const world = await createWorld.mutateAsync({
+        name: `单人剧场 - ${selectedAgent.name}`,
+        scenario: { name: selectedScenario },
+        agent_ids: [selectedAgent.id],
+      });
+
+      // 2. 启动模拟
+      await startWorld.mutateAsync(world.id);
+
+      // 3. 设置 worldId → useSSE 自动连接
+      setWorldId(world.id);
+      setIsRunning(true);
+    } catch (err) {
+      console.error("启动失败:", err);
+    }
   };
 
-  const handleStop = () => {
-    stop();
-    setIsRunning(false);
+  /** 暂停 */
+  const handlePause = async () => {
+    if (!worldId) return;
+    try {
+      await pauseWorld.mutateAsync(worldId);
+      disconnect();
+    } catch (err) {
+      console.error("暂停失败:", err);
+    }
   };
 
-  const handleReset = () => {
-    handleStop();
+  /** 继续——重新连接 SSE（后端仍在运行） */
+  const handleResume = () => {
+    if (!worldId) return;
+    // 先断开旧连接，再重连（useSSE 会在 worldId 不变时通过 connect 重连）
+    disconnect();
+    // 通过短暂清空 worldId 再恢复来触发 useEffect 重连
+    setWorldId(null);
+    setTimeout(() => setWorldId(worldId), 0);
+  };
+
+  /** 重置：调后端 reset → 断开 SSE → 清空前端状态 */
+  const handleReset = async () => {
+    if (worldId) {
+      try {
+        await resetWorld.mutateAsync(worldId);
+      } catch (err) {
+        console.error("重置后端失败:", err);
+      }
+    }
+    disconnect();
     clear();
+    setWorldId(null);
     setIsRunning(false);
   };
 
@@ -109,9 +154,15 @@ export default function SoloTheater() {
         <Card className="mb-4">
           <label className="block text-sm text-text-secondary font-mono mb-2">
             选择 Agent
+            {agentsLoading && <span className="ml-2 text-xs">加载中...</span>}
           </label>
           <div className="grid grid-cols-1 gap-2">
-            {availableAgents.map((agent) => {
+            {agents.length === 0 && !agentsLoading && (
+              <p className="text-sm text-text-secondary py-4 text-center">
+                暂无 Agent，请先去「铸造厂」创建
+              </p>
+            )}
+            {agents.map((agent) => {
               const isSelected = agent.id === selectedAgentId;
               return (
                 <button
@@ -193,7 +244,7 @@ export default function SoloTheater() {
         {/* 开始按钮 */}
         <button
           onClick={handleStart}
-          disabled={!selectedAgent}
+          disabled={!selectedAgent || createWorld.isPending || startWorld.isPending}
           className="
             w-full py-3 text-sm font-mono rounded-lg
             bg-accent-green/10 border border-accent-green/30
@@ -202,7 +253,7 @@ export default function SoloTheater() {
             transition-all duration-200
           "
         >
-          🎬 开始投放
+          {createWorld.isPending || startWorld.isPending ? "启动中..." : "🎬 开始投放"}
         </button>
       </div>
     );
@@ -228,19 +279,21 @@ export default function SoloTheater() {
         <div className="flex gap-2">
           {connected ? (
             <button
-              onClick={stop}
+              onClick={handlePause}
+              disabled={pauseWorld.isPending}
               className="
                 px-3 py-1 text-sm font-mono rounded
                 bg-accent-orange/10 border border-accent-orange/30
                 text-accent-orange hover:bg-accent-orange/20
                 transition-colors
+                disabled:opacity-50
               "
             >
               ⏸ 暂停
             </button>
           ) : events.length > 0 ? (
             <button
-              onClick={resume}
+              onClick={handleResume}
               className="
                 px-3 py-1 text-sm font-mono rounded
                 bg-accent-green/10 border border-accent-green/30
