@@ -15,10 +15,14 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
+from sqlalchemy import select
+
+from db import async_session
 from api.agents import AgentStore, get_agent_store
-from api.sse import register_world as sse_register
+from api.sse import register_world as sse_register, _active_worlds
 from engines.world.engine import WorldEngine
 from engines.world.scenarios import get_scenario_by_name
+from models.event import Event, SimEvent
 from models.world import Scenario, WorldCreate, WorldResponse
 
 router = APIRouter(prefix="/api/worlds", tags=["worlds"])
@@ -187,3 +191,56 @@ async def inject_event(
 
     engine.inject_event(event.get("description", str(event)))
     return {"status": "injected"}
+
+
+# =============================================================================
+# 事件查询 + 关系快照
+# =============================================================================
+
+
+@router.get("/{world_id}/events", response_model=list[SimEvent])
+async def get_world_events(
+    world_id: str,
+    tick_from: int = 0,
+    tick_to: int | None = None,
+    type: str | None = None,
+):
+    """查询指定世界的历史事件（从 SQLite events 表）。"""
+    stmt = (
+        select(Event)
+        .where(Event.world_id == world_id)
+        .where(Event.tick >= tick_from)
+        .order_by(Event.tick, Event.created_at)
+    )
+    if tick_to is not None:
+        stmt = stmt.where(Event.tick <= tick_to)
+    if type is not None:
+        stmt = stmt.where(Event.type == type)
+
+    async with async_session() as session:
+        result = await session.execute(stmt)
+        orm_events = result.scalars().all()
+
+    return [e.to_response() for e in orm_events]
+
+
+@router.get("/{world_id}/relationships")
+async def get_world_relationships(world_id: str):
+    """获取当前世界的关系网络快照——供前端 RelationshipGraph 首次加载。"""
+    engine = _active_worlds.get(world_id)
+    if engine is None:
+        return {"nodes": [], "edges": []}
+
+    relationships = getattr(engine, "relationships", {})
+    # relationships: dict[tuple[str, str], float] → nodes + edges
+    agent_names: dict[str, str] = {}
+    for agent in engine.agents.values():
+        agent_names[agent.id] = agent.persona.name or agent.id
+
+    nodes = [{"id": aid, "name": name} for aid, name in agent_names.items()]
+    edges = [
+        {"source": src, "target": dst, "score": round(score, 2)}
+        for (src, dst), score in relationships.items()
+    ]
+
+    return {"nodes": nodes, "edges": edges}

@@ -53,7 +53,7 @@
 | **🔌 Phase 10: 前后端联通** | | | | |
 | 29 | 10.1 | Agent 创建链路 + API 层初始化 | 2026-07-20 | ✅ |
 | 30 | 10.2 | Narratives API 路由 | 2026-07-20 | ✅ |
-| 31 | 10.3 | Arenas + Events + Relationships API | — | ⬜ |
+| 31 | 10.3 | Arenas + Events + Relationships API | 2026-07-20 | ✅ |
 | 32 | 10.4 | 单人剧场 SSE 打通 | — | ⬜ |
 | 33 | 10.5 | 群体沙盒 SSE + 竞争博弈 | — | ⬜ |
 | 34 | 10.6 | 叙事 + 竞技 + 干预联通 | — | ⬜ |

@@ -12,7 +12,6 @@ Agent 工厂 — Persona + LLM Client → LifeAgent（AutoGen AssistantAgent 封
     - autogen_agentchat: AssistantAgent
 """
 
-import re
 import uuid
 from datetime import datetime, timezone
 
@@ -28,24 +27,6 @@ from engines.agent_factory.tools import DEFAULT_AGENT_TOOLS
 # =============================================================================
 # 辅助函数
 # =============================================================================
-
-def _sanitize_agent_name(raw: str) -> str:
-    """将任意字符串转为合法的 Python 标识符（AutoGen agent name 要求）。
-
-    策略：
-    - 去除非标识符字符，替换为下划线
-    - 去掉 UUID 中的连字符（AutoGen 内部可能加回）
-    - 不以数字开头
-    """
-    # 去掉 UUID 连字符
-    cleaned = raw.replace("-", "")
-    # 替换非标识符字符
-    cleaned = re.sub(r"[^\w]", "_", cleaned)
-    # 确保以字母或下划线开头
-    if cleaned and cleaned[0].isdigit():
-        cleaned = "_" + cleaned
-    return cleaned or "agent"
-
 
 # =============================================================================
 # LifeAgent — AutoGen AssistantAgent 的薄封装
@@ -84,7 +65,7 @@ class LifeAgent:
 
         system_message = build_system_message(persona, background, goals)
         # AutoGen 要求 agent name 是合法的 Python 标识符
-        agent_name = _sanitize_agent_name(persona.name) if persona.name else id
+        agent_name = f"agent_{id.replace('-', '')[-8:]}"
 
         self._agent = AssistantAgent(
             name=agent_name,

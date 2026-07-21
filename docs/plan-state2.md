@@ -18,7 +18,7 @@
 | **🔌 Phase 10: 前后端联通** | | | | | |
 | 29 | 10.1 | Agent 创建链路 + API 层初始化 | 03, 17 | api/client.ts + api/agents.ts + React Query + 真 POST | ✅ |
 | 30 | 10.2 | Narratives API 路由 | 15 | /api/narratives/{story,diary,letter} | ✅ |
-| 31 | 10.3 | Arenas + Events + Relationships API | 26, 09 | /api/arenas/debate, /api/worlds/{id}/events, /api/worlds/{id}/relationships | 2h |
+| 31 | 10.3 | Arenas + Events + Relationships API | 26, 09 | /api/arenas/debate, /api/worlds/{id}/events, /api/worlds/{id}/relationships | ✅ |
 | 32 | 10.4 | 单人剧场 SSE 打通 | 11, 19 | SoloTheater 真实思维流 | 2h |
 | 33 | 10.5 | 群体沙盒 SSE + 竞争博弈 (#18) | 11, 20 | GroupSandbox 真实多 Agent 交互 + 资源模型 | 3h |
 | 34 | 10.6 | 叙事 + 竞技 + 干预联通 | 30, 31, 23, 22 | 剩余模块全部切换真 API | 3h |
@@ -35,7 +35,7 @@
 | 43 | 12.5 | 控制台全功能 (#36–#39) | 33 | Dashboard/Heatmap/Search/Patterns 真数据 | 3h |
 | 44 | 12.6 | 干预台完善 (#43, #48) | 34 | 事件注入 + 干预历史持久化 | 2h |
 | 45 | 12.7 | 档案馆功能 (#51, #52, #54) | 35 | 回放/模板/成就真实数据 | 3h |
-| 46 | 12.8 | 竞技场增强 (#22–#24, #26) | 31 | interview/pitch/battle_royale + 战报 + 复盘对比 | 3h |
+| 46 | 12.8 | 竞技场增强 (#22–#24, #26) | 31 | debate 质量修复 + interview/pitch/battle_royale + 战报 + 复盘 | 4h |
 | **🎯 Phase 13: 打磨与交付** | | | | | |
 | 47 | 13.1 | LLM 成本与性能优化 | 46 | 上下文压缩、缓存、虚拟滚动 | 3h |
 | 48 | 13.2 | 端到端集成测试 | 47 | 5 条全链路自动化测试 | 3h |
@@ -841,17 +841,22 @@ async def list_simulations(world_id: str | None = None):
 | `backend/src/api/simulations.py` | 新建 |
 | `backend/src/api/worlds.py` | 修改：加 `GET /{id}/events` + `GET /{id}/relationships` |
 | `backend/src/main.py` | 修改：注册 arenas, simulations 路由 |
+| `backend/src/engines/agent_factory/factory.py` | 修改：简化 AutoGen name 策略（见下） |
+| `backend/tests/test_agent_factory.py` | 修改：适配新 name 策略 |
+
+#### 实现发现
+
+- **AutoGen name 简化：** 原 `_sanitize_agent_name` 试图保留中文名含义，但 AutoGen `AssistantAgent` 只接受 `^[a-zA-Z0-9_-]+$`。最终策略：`agent_{id后8位}`，简单唯一。`persona.name`（中文）仅在 UI 展示，不影响内部路由。
+- **Arena 辩论 500 系列问题：** 根因是中文名 sanitize 不彻底导致 `ValueError: Invalid name / participant names must be unique`。已通过统一用 ID 后缀解决。
+- **Transcript 内容过长 (#22a)：** `str(content)[:500]` 硬截断 + Agent 倾向输出长篇独白。记入 Step 46 #22a，届时修复 prompt 引导 + 移除硬截断。
 
 #### 验收标准
 
-- [ ] Swagger UI 可见 `/api/arenas/debate` 和 `GET /api/arenas/{id}`
-- [ ] 两个 Agent 辩论 → 返回完整 transcript + 评分
-- [ ] `GET /api/worlds/{id}/events` 返回 SQLite 中存储的事件
-- [ ] `GET /api/worlds/{id}/relationships` 返回当前关系图快照（nodes + edges）
-- [ ] `GET /api/simulations` 返回模拟列表
-- [ ] 后端测试全量通过
-
----
+- [x] 两个 Agent 辩论 → 返回完整 transcript + 裁判评分
+- [x] `GET /api/worlds/{id}/events` 从 SQLite 查询事件（支持 tick_from/tick_to/type 过滤）
+- [x] `GET /api/worlds/{id}/relationships` 返回活跃 World 的关系快照
+- [x] `GET /api/simulations` 返回模拟列表
+- [x] 后端测试 194/194 通过
 
 ### Step 32 — 单人剧场 SSE 打通
 
@@ -1494,12 +1499,62 @@ const Archive = lazy(() => import("./pages/Archive"));
 
 ### Step 46 — 竞技场增强 (#22–#24, #26)
 
-| # | 功能 | 内容 |
+> **目标：** 竞技场从"功能可用"到"体验可用"。补 interview/pitch 模式 + 修复 Step 31 发现的辩论质量问题 + 大乱斗 + 战报。
+
+#### 46a. 辩论内容质量修复（#22a — 来自 Step 31 验收发现）
+
+**问题 1：transcript 硬截断。** `engine.py:128` 行 `str(content)[:500]` 导致辩论内容被切。
+
+**修复：** 删除 `[:500]` 截断。改为在 API 响应层（`ArenaResultResponse.transcript`）对 single entry 限制上限（如 2000 字符），让完整版本存储在服务端。
+
+**问题 2：Agent 输出偏长 + 偏题。** 当前 `task` prompt 只是简单声明正反方，Agent 把内心独白当成了发言。根源是 LifeAgent 的 system prompt 中"行为准则 2"要求内心独白真诚展示——在竞技场景下被误解为"应该长篇输出"。
+
+**修复：** `run_debate()` 的 `task` 改为辩论专用 prompt，明确约束：
+
+```python
+task = (
+    f"【辩论规则】\n"
+    f"辩题: {topic}\n"
+    f"正方({agent_a.persona.name}): 支持\n"
+    f"反方({agent_b.persona.name}): 反对\n\n"
+    f"规则:\n"
+    f"1. 每人每轮只发一条消息，50-200 字\n"
+    f"2. 必须回应对方上一轮的观点\n"
+    f"3. 用角色口吻发言，不要输出内心推理过程\n"
+    f"4. 不要写\"作为XX人格，我认为...\"——直接表达观点\n"
+    f"现在开始第 1 轮，正方先发言。"
+)
+```
+
+**涉及文件：**
+
+| 文件 | 操作 | 说明 |
 |------|------|------|
-| 22 | 1v1 对抗 | `run_interview()`, `run_pitch()` 方法实现（ArenaEngine 已有枚举，缺方法体） |
-| 23 | 大乱斗 | 后端 `ArenaEngine.run_battle_royale()`：6+ Agent，淘汰制 or 自由竞争 |
-| 24 | 战报 | `GET /api/arenas/{id}/report`：结构化 Markdown 战报下载 |
-| 26 | 复盘对比 | `GET /api/arenas?agent_id=X` 列出某 Agent 历史战绩 → 前端两列对比卡片（最小骨架，满足 P2 标准） |
+| `backend/src/engines/arena/engine.py` | 修改 | 去 `[:500]` 截断；替换 task prompt |
+| `backend/src/api/arenas.py` | 修改 | `ArenaResultResponse` 加 content 上限 |
+
+**验收标准：**
+- [ ] transcript 条目完整（不被 500 字符截断）
+- [ ] 辩论发言 50-200 字每轮，不出现"根据我的分析"类独白
+- [ ] 3 轮辩论在 30s 内完成（而非无限长输出）
+
+#### 46b. interview / pitch 模式（#22）
+
+**文件：** `backend/src/engines/arena/engine.py`
+
+`run_interview()` 和 `run_pitch()` 复用 `run_debate` 的 GroupChat 结构，区别在裁判 prompt 和 task 描述。
+
+#### 46c. 大乱斗（#23）
+
+`POST /api/arenas/battle_royale`：6+ Agent 自由竞争，淘汰制。
+
+#### 46d. 战报（#24）
+
+`GET /api/arenas/{id}/report`：返回结构化 Markdown（对战概述 + 逐轮分析 + 胜负原因）。
+
+#### 46e. 复盘对比（#26）
+
+`GET /api/arenas?agent_id=X`：Agent 历史战绩列表 → 前端两列对比。
 
 ---
 

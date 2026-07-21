@@ -3,6 +3,7 @@ AgentFactory + LifeAgent 单元测试 — Mock LLM + Mock AutoGen Client。
 """
 
 import json
+import re
 
 import pytest
 
@@ -110,7 +111,8 @@ async def test_create_from_description_has_autogen_agent(factory):
 
     ag = agent.autogen_agent
     assert ag is not None
-    assert ag.name == "小明"  # persona.name → agent name
+    # AutoGen 要求 ASCII-only name，中文名被 _sanitize_agent_name 替换
+    assert re.match(r"^[a-zA-Z_][\w_]*$", ag.name)
     # system_message 由 build_system_message 生成，非空
     assert len(ag._system_messages) > 0
     assert "小明" in ag._system_messages[0].content
@@ -151,7 +153,8 @@ def test_create_from_persona_uses_persona_name_for_agent(factory):
         agent_id="a1", persona=persona,
         background=make_background(), goals=make_goals(),
     )
-    assert agent.autogen_agent.name == "小红"
+    # AutoGen 要求 ASCII-only name，中文名被 _sanitize_agent_name 替换
+    assert re.match(r"^[a-zA-Z_][\w_]*$", agent.autogen_agent.name)
 
 
 def test_create_from_persona_falls_back_to_id_when_name_empty(factory):
@@ -163,7 +166,8 @@ def test_create_from_persona_falls_back_to_id_when_name_empty(factory):
         agent_id="agent_42", persona=persona,
         background=make_background(), goals=make_goals(),
     )
-    assert agent.autogen_agent.name == "agent_42"
+    # AutoGen name = agent_ + ID 后 8 位（去除连字符后的 UUID）
+    assert agent.autogen_agent.name == "agent_agent_42"
 
 
 # =============================================================================
