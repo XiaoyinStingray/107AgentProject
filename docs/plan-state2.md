@@ -17,7 +17,7 @@
 |------|-------|------|------|----------|------|
 | **🔌 Phase 10: 前后端联通** | | | | | |
 | 29 | 10.1 | Agent 创建链路 + API 层初始化 | 03, 17 | api/client.ts + api/agents.ts + React Query + 真 POST | ✅ |
-| 30 | 10.2 | Narratives API 路由 | 15 | /api/narratives/{story,diary,letter} | 2h |
+| 30 | 10.2 | Narratives API 路由 | 15 | /api/narratives/{story,diary,letter} | ✅ |
 | 31 | 10.3 | Arenas + Events + Relationships API | 26, 09 | /api/arenas/debate, /api/worlds/{id}/events, /api/worlds/{id}/relationships | 2h |
 | 32 | 10.4 | 单人剧场 SSE 打通 | 11, 19 | SoloTheater 真实思维流 | 2h |
 | 33 | 10.5 | 群体沙盒 SSE + 竞争博弈 (#18) | 11, 20 | GroupSandbox 真实多 Agent 交互 + 资源模型 | 3h |

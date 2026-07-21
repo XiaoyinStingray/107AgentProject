@@ -12,6 +12,7 @@ from config import ensure_dirs
 from db import init_db
 from api.agents import router as agents_router
 from api.export import router as export_router
+from api.narratives import router as narratives_router
 from api.sse import sse_router
 from api.worlds import router as worlds_router
 
@@ -44,6 +45,7 @@ app.add_middleware(
 # ── API 路由 ──────────────────────────────────────────────────────────────────
 app.include_router(agents_router)
 app.include_router(worlds_router)
+app.include_router(narratives_router)
 app.include_router(sse_router)
 app.include_router(export_router)
 
