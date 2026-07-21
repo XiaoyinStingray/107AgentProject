@@ -25,6 +25,8 @@ class WorldCreate(BaseModel):
 
 class WorldResponse(Timestamped):
     """World 的 API 响应"""
+    id: str  # 显式声明，解决 Pyright 继承解析问题
+    created_at: str  # 显式声明，解决 Pyright 继承解析问题
     name: str
     scenario: Scenario
     agent_ids: list[str]
