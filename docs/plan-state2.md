@@ -16,7 +16,7 @@
 | Step | Phase | 名称 | 依赖 | 核心产出 | 估时 |
 |------|-------|------|------|----------|------|
 | **🔌 Phase 10: 前后端联通** | | | | | |
-| 29 | 10.1 | Agent 创建链路 + API 层初始化 | 03, 17 | api/client.ts + api/agents.ts + React Query + 真 POST | 2h |
+| 29 | 10.1 | Agent 创建链路 + API 层初始化 | 03, 17 | api/client.ts + api/agents.ts + React Query + 真 POST | ✅ |
 | 30 | 10.2 | Narratives API 路由 | 15 | /api/narratives/{story,diary,letter} | 2h |
 | 31 | 10.3 | Arenas + Events + Relationships API | 26, 09 | /api/arenas/debate, /api/worlds/{id}/events, /api/worlds/{id}/relationships | 2h |
 | 32 | 10.4 | 单人剧场 SSE 打通 | 11, 19 | SoloTheater 真实思维流 | 2h |
@@ -523,12 +523,16 @@ SSE Event 到达前端
 | 文件 | 操作 | 说明 |
 |------|------|------|
 | `frontend/src/api/client.ts` | **新建** | 基础 fetch 封装（base URL, JSON parse, error） |
-| `frontend/src/api/queryKeys.ts` | **新建** | 所有 query key 工厂函数（先建 agentKeys） |
-| `frontend/src/api/agents.ts` | **新建** | `useAgents()`, `useCreateAgent()`, `useAgent(id)` |
-| `frontend/src/pages/AgentFoundry.tsx` | 修改 | 用 `useCreateAgent` + `useAgents` 替换旧的 `useApi(mockData)` |
-| `frontend/package.json` | 修改 | 加 `@tanstack/react-query` 依赖 |
-| `frontend/src/App.tsx` | 修改 | 包裹 `<QueryClientProvider>` |
-| `backend/.env` | 检查 | 确认 LLM_API_KEY / LLM_BASE_URL 配置正确 |
+| `frontend/src/api/queryKeys.ts` | **新建** | 所有 query key 工厂函数（先建 agentKeys, worldKeys） |
+| `frontend/src/api/agents.ts` | **新建** | `useAgents()`, `useCreateAgent()`, `useAgent(id)`, `useDeleteAgent(id)` |
+| `frontend/src/main.tsx` | 修改 | 包裹 `<QueryClientProvider>`（非 App.tsx——App 在 main.tsx 内部已嵌套） |
+| `frontend/src/pages/AgentFoundry.tsx` | 修改 | 用 `useCreateAgent` + `useAgents` 替换旧的 `useApi(mockData)`；Zustand 双写过渡 |
+| `frontend/src/pages/Arena.test.tsx` | 修改 | 补 `QueryClientProvider` 包裹 `render(<App />)` |
+| `backend/src/llm/client.py` | 修改 | 加 `model_info` TypedDict——DeepSeek 等非 OpenAI 模型必须传此参数 |
+| `.env` | **新建** | LLM 配置模板（`LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`） |
+
+> **实现发现：** `@tanstack/react-query` 已在 State 1 预装（v5.51.0），无需修改 `package.json`。
+> AutoGen `OpenAIChatCompletionClient` 对非 OpenAI 模型必须通过 `**kwargs` 传入 `model_info: {vision, function_calling, json_output, family, structured_output}`，否则抛出 `ValueError: model_info is required`。
 
 #### 新建文件详情
 

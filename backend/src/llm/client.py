@@ -18,10 +18,22 @@ def create_model_client():
     """
     from autogen_ext.models.openai import OpenAIChatCompletionClient
 
+    # 非 OpenAI 官方模型（如 DeepSeek）需要显式提供 model_info
+    # 这是一个 TypedDict，所有 Required 字段必须存在
+    model_info = {
+        "vision": False,
+        "function_calling": True,
+        "json_output": True,
+        "family": "unknown",
+        "structured_output": False,
+        # multiple_system_messages 是 Optional，DeepSeek 支持多条 system message
+    }
+
     return OpenAIChatCompletionClient(
         model=settings.llm_model,
         api_key=settings.llm_api_key,
         base_url=settings.llm_base_url,
         temperature=settings.llm_temperature_think,
         max_tokens=settings.llm_max_tokens,
+        model_info=model_info,
     )

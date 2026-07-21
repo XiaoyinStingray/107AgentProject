@@ -1,44 +1,34 @@
 import { useState } from "react";
 import type { AgentResponse } from "../types/agent";
-import { MOCK_AGENT_RESPONSE } from "../mocks/agents";
-import { useApi } from "../hooks/useApi";
+import { useAgents, useCreateAgent } from "../api/agents";
 import { useAgentStore } from "../stores/useAgentStore";
 import AgentCard from "../components/agent/AgentCard";
 import PersonaRadar from "../components/agent/PersonaRadar";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
 
-/** Step 17 铸造厂主页面 */
+/** Step 29 — Agent 创建链路打通，切到真实 POST /api/agents */
 export default function AgentFoundry() {
   const [input, setInput] = useState("");
-  // Zustand 全局存储——跨页面导航不丢失（刷新页面后清空）
-  const { agents: createdAgents, addAgent } = useAgentStore();
-  // 当前详情中展示的 Agent——默认最新，点击列表可切换
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Mock 模式创建 Agent（切 API 时删 mockData 这行即可）
-  const {
-    execute: createAgent,
-    loading,
-    error,
-    data,
-    reset,
-  } = useApi<AgentResponse, { description: string }>(
-    "POST",
-    "/api/agents",
-    { mockData: MOCK_AGENT_RESPONSE, mockDelay: 1500 },
-  );
+  // React Query：服务端数据缓存（新架构）
+  const { data: serverAgents } = useAgents();
+  const createAgent = useCreateAgent();
+
+  // Zustand：过渡兼容——Step 36 统一移除，在此之前仍写一份保证其他页面可用
+  const addAgent = useAgentStore((s) => s.addAgent);
 
   const handleCreate = async () => {
-    if (!input.trim() || loading) return;
-    const result = await createAgent({ description: input.trim() });
-    if (result) {
-      // Mock 模式所有结果 id 相同，追加序号保证唯一
-      const unique = { ...result, id: `${result.id}-${Date.now()}` };
-      addAgent(unique);
-      setSelectedId(unique.id);
+    if (!input.trim() || createAgent.isPending) return;
+    try {
+      const result = await createAgent.mutateAsync(input.trim());
+      // 过渡双写：Zustand store 供其他 6 个页面兼容（Step 36 移除）
+      addAgent(result);
+      setSelectedId(result.id);
       setInput("");
-      reset(); // 清空 data/error，准备下一次创建
+    } catch {
+      // 错误由 createAgent.error 展示
     }
   };
 
@@ -49,12 +39,14 @@ export default function AgentFoundry() {
     }
   };
 
-  // 详情中展示的 Agent：默认取列表最后一个，创建后自动选中新 Agent
-  const displayedAgent =
-    createdAgents.find((a) => a.id === selectedId) ??
-    (createdAgents.length > 0
-      ? createdAgents[createdAgents.length - 1]
-      : data);
+  // 详情展示：优先选中项 → 最新服务端数据 → 刚创建结果
+  const agents = serverAgents ?? [];
+  const displayedAgent: AgentResponse | null =
+    agents.find((a) => a.id === selectedId) ??
+    (agents.length > 0 ? agents[agents.length - 1] : null) ??
+    (createAgent.data ?? null);
+
+  const loading = createAgent.isPending;
 
   return (
     <div className="p-6 max-w-4xl mx-auto animate-fade-in">
@@ -66,9 +58,9 @@ export default function AgentFoundry() {
             用一句话描述你想要的角色，AI 会生成完整人格
           </p>
         </div>
-        {createdAgents.length > 0 && (
+        {agents.length > 0 && (
           <Badge
-            label={`已创建 ${createdAgents.length} 个 Agent`}
+            label={`已创建 ${agents.length} 个 Agent`}
             variant="P0"
           />
         )}
@@ -111,9 +103,9 @@ export default function AgentFoundry() {
       </Card>
 
       {/* 错误提示 */}
-      {error && (
+      {createAgent.error && (
         <div className="mb-4 px-4 py-2 border border-accent-red/30 bg-accent-red/10 rounded text-sm text-accent-red font-mono">
-          {error}
+          {(createAgent.error as Error)?.message ?? "创建失败，请检查后端是否启动"}
         </div>
       )}
 
@@ -235,15 +227,15 @@ export default function AgentFoundry() {
       )}
 
       {/* 已创建列表 */}
-      {createdAgents.length > 0 && (
+      {agents.length > 0 && (
         <div className="mt-8">
           <h2 className="text-sm font-mono text-text-secondary uppercase tracking-wider mb-3">
-            已创建的 Agent · {createdAgents.length} 个
+            已创建的 Agent · {agents.length} 个
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-            {createdAgents.map((agent) => {
+            {agents.map((agent) => {
               const isSelected = agent.id === selectedId;
-              const isLatest = agent.id === createdAgents[createdAgents.length - 1]?.id;
+              const isLatest = agent.id === agents[agents.length - 1]?.id;
               return (
                 <button
                   key={agent.id}

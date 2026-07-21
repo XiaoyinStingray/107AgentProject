@@ -1,11 +1,24 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Link, MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "../App";
 import { MOCK_AGENTS } from "../mocks/agents";
 import { ARENA_MODE_OPTIONS } from "../mocks/arena";
 import { useAgentStore } from "../stores/useAgentStore";
 import Arena from "./Arena";
+
+const testQueryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false } },
+});
+
+function renderApp() {
+  return render(
+    <QueryClientProvider client={testQueryClient}>
+      <App />
+    </QueryClientProvider>,
+  );
+}
 
 const TRANSCRIPT_INTERVAL_MS = 800;
 const JUDGE_DELAY_MS = 1200;
@@ -212,13 +225,13 @@ describe("Step 16 Arena route regression", () => {
     ["/narratives", "M5 叙事工厂"],
   ])("keeps the existing %s route mounted", (path, heading) => {
     window.history.pushState({}, "", path);
-    render(<App />);
+    renderApp();
     expect(screen.getByRole("heading", { name: heading })).toBeInTheDocument();
   });
 
   it("mounts the Step 22 page through App at /arena", () => {
     window.history.pushState({}, "", "/arena#item-22");
-    render(<App />);
+    renderApp();
     expect(
       screen.getByRole("heading", { name: "1v1 Agent 对抗" }),
     ).toBeInTheDocument();
