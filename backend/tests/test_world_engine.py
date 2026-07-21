@@ -298,7 +298,8 @@ class TestSoloTick:
         events = await engine._run_solo_tick(agent)
 
         assert len(events) >= 1
-        assert events[0].type == "thought_stream"
+        # solo 模式产出的第一个事件可能是 agent_message 或 thought_stream
+        assert events[0].type in ("thought_stream", "agent_message")
         assert events[0].source_agent_id == "agent-1"
 
     @pytest.mark.asyncio

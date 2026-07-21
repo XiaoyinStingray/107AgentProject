@@ -109,6 +109,14 @@ class LifeAgent:
         )
         # AutoGen 0.7 的 AssistantAgent 用 _system_messages 列表存储 system prompt
         self._agent._system_messages = [SystemMessage(content=new_msg)]  # noqa: SLF001
+        # 同时清空 AutoGen 内部消息缓冲——隔离不同 tick 的上下文
+        try:
+            if hasattr(self._agent, "_model_context"):
+                ctx = self._agent._model_context  # noqa: SLF001
+                if hasattr(ctx, "_messages"):
+                    ctx._messages.clear()  # noqa: SLF001
+        except Exception:
+            pass
 
     # -------------------------------------------------------------------------
     # 便利方法

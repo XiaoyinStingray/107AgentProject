@@ -7,7 +7,11 @@ export type SSEEventType =
   | "agent_action"
   | "world_event"
   | "relationship_change"
-  | "tick_boundary";
+  | "tick_boundary"
+  | "connected"
+  | "paused"
+  | "error"
+  | "session_end";
 
 export interface SimEvent {
   id: string;

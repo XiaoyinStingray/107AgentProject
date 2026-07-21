@@ -18,6 +18,24 @@ interface ThoughtBubbleProps {
    ================================================================ */
 
 export default function ThoughtBubble({ event, compact = false }: ThoughtBubbleProps) {
+  // 基础设施事件：不渲染
+  if (event.type === "connected" || event.type === "paused" || event.type === "error") {
+    return null;
+  }
+
+  // 会话结束
+  if (event.type === "session_end") {
+    return (
+      <div className="flex items-center gap-3 my-4">
+        <div className="flex-1 h-px bg-accent-green/30" />
+        <span className="text-sm font-mono text-accent-green/70 shrink-0">
+          独白结束 · 共 {event.tick} 个片段
+        </span>
+        <div className="flex-1 h-px bg-accent-green/30" />
+      </div>
+    );
+  }
+
   // Tick 边界：分隔线
   if (event.type === "tick_boundary") {
     return (

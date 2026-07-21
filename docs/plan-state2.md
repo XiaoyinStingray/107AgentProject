@@ -19,7 +19,7 @@
 | 29 | 10.1 | Agent 创建链路 + API 层初始化 | 03, 17 | api/client.ts + api/agents.ts + React Query + 真 POST | ✅ |
 | 30 | 10.2 | Narratives API 路由 | 15 | /api/narratives/{story,diary,letter} | ✅ |
 | 31 | 10.3 | Arenas + Events + Relationships API | 26, 09 | /api/arenas/debate, /api/worlds/{id}/events, /api/worlds/{id}/relationships | ✅ |
-| 32 | 10.4 | 单人剧场 SSE 打通 | 11, 19 | SoloTheater 真实思维流 | 2h |
+| 32 | 10.4 | 单人剧场 SSE 打通 | 11, 19 | SoloTheater 真实 SSE + pause/resume + 8tick 自动结束 | ✅ |
 | 33 | 10.5 | 群体沙盒 SSE + 竞争博弈 (#18) | 11, 20 | GroupSandbox 真实多 Agent 交互 + 资源模型 | 3h |
 | 34 | 10.6 | 叙事 + 竞技 + 干预联通 | 30, 31, 23, 22 | 剩余模块全部切换真 API | 3h |
 | 35 | 10.7 | 持久化 + 鲁棒性 | 02, 14 | Agent/World SQLite 存储 + LLM fallback | 3h |
@@ -861,64 +861,30 @@ async def list_simulations(world_id: str | None = None):
 ### Step 32 — 单人剧场 SSE 打通
 
 > **目标：** SoloTheater 页面连上真实后端 SSE，看到真实 Agent 思维流
-> **估时：** 2 小时
+> **状态：** ✅ done
 
-#### 修改文件
+#### 实际产出
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `frontend/src/pages/SoloTheater.tsx` | 修改 | 替换 `useMockSSE` → `useSSE`，加 World 创建 API 调用 |
-| `frontend/src/hooks/useSSE.ts` | 检查 | 确认 `EventSource` 连接 + 字段解析正确 |
-| `backend/src/api/sse.py` | 检查 | 确认 SSE 格式与前端 `SSEEvent` 对齐 |
+| `frontend/src/pages/SoloTheater.tsx` | 修改 | 全链路真 API：useAgents → createWorld → startWorld → useSSE；pause/resume/end 状态管理 |
+| `frontend/src/hooks/useSSE.ts` | 重写 | EventSource 连接 + 断线补发 + id 去重 |
+| `frontend/src/api/worlds.ts` | 修改 | 新增 useResetWorld, useWorldEvents |
+| `frontend/src/types/events.ts` | 修改 | SSEEventType 加 connected/paused/error/session_end |
+| `frontend/src/components/agent/ThoughtBubble.tsx` | 修改 | 基础设施事件跳过渲染；session_end 气泡 |
+| `frontend/src/components/world/EventFeed.tsx` | 修改 | 新类型占位 |
+| `backend/src/api/sse.py` | 修改 | while 连续推流；paused 轮询；tick 上限 + session_end；name_map 填充 agent_name |
+| `backend/src/api/worlds.py` | 修改 | POST /{id}/reset；start 支持 paused→running |
+| `backend/src/engines/world/engine.py` | 修改 | solo prompt 优化；extract 拆 thought_stream+agent_message；WorldEngine 清空 AutoGen 上下文 |
+| `backend/src/engines/agent_factory/factory.py` | 修改 | inject_context 清空 _messages（隔离 tick 间上下文） |
 
-#### 字段对齐（关键）
+#### 实现发现
 
-后端 `SimEvent`（Python）和前端 `SSEEvent`（TypeScript）必须字段一致。当前可能不一致的字段：
-
-```typescript
-// 前端 types/events.ts — SSEEvent
-{
-  type: SSEEventType;     // 'thought_stream' | 'agent_message' | ...
-  agent_id?: string;
-  agent_name?: string;
-  phase?: string;         // ← 后端 tick_stream 产出的字段名需对齐
-  content?: string;       // ← 后端可能是 description
-  message?: string;
-  tick: number;
-  data?: Record<string, unknown>;
-}
-
-// 后端 models/event.py — SimEvent
-{
-  type: str;              // 'thought' | 'agent_message' | ...
-  source_agent_id: str;   // ← 前端叫 agent_id
-  description: str;       // ← 前端叫 content
-  tick: int;
-  data: dict;
-}
-```
-
-**关注点：** 后端 `source_agent_id` → 前端 `agent_id`，`description` → `content`，`type: "thought"` → `type: "thought_stream"`。在 SSE 适配层 (`api/sse.py` 的 `_event_to_dict`) 做映射。
-
-#### 前端逻辑流
-
-```typescript
-// SoloTheater.tsx 改造后的逻辑流：
-
-async function handleStart() {
-  // 1. 创建 World
-  const world = await createWorld({
-    name: "单人剧场",
-    scenario: selectedScenario,
-    agent_ids: [selectedAgent.id],
-  });
-  
-  // 2. 启动模拟
-  await startWorld(world.id);
-  
-  // 3. 连接 SSE
-  connectSSE(world.id);
-}
+- **字段对齐已在 `_event_to_dict` 完成：** `source_agent_id → agent_id`、`description → content`、`name_map` 填充 `agent_name`。
+- **Prompt 迭代：** 原 `"请描述你现在的想法"` → `"直接说出你的内心想法——不要分析自己"`。Agent 还是倾向元分析，但配合 tick 上限+thought/speech 分离后体验可用。
+- **Pause/Resume 方案演变：** 第一版 disconnect+重连（409 风暴）→ 第二版 paused 轮询但 disconnect 导致断线 → 最终版 paused 轮询 + 保持连接 + 前端 `isPaused` 状态切换按钮。
+- **上下文隔离：** AutoGen `AssistantAgent` 的 `_model_context._messages` 在 WorldEngine 创建和每次 inject_context 时清空——切换场景、新 tick 不再泄漏旧对话。
+- **Tick 上限 8：** 单人模式无社交终止条件，纯自循环会无限运行。8 tick 后推送 `session_end` 并设置 `world.status = "finished"`。
 ```
 
 #### 验收标准

@@ -51,6 +51,7 @@ export default function SoloTheater() {
     useState<ScenarioName>("期末周");
   const [worldId, setWorldId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
 
   // API Mutations
   const createWorld = useCreateWorld();
@@ -96,30 +97,24 @@ export default function SoloTheater() {
       // 3. 设置 worldId → useSSE 自动连接
       setWorldId(world.id);
       setIsRunning(true);
+      setIsPaused(false);
     } catch (err) {
       console.error("启动失败:", err);
     }
   };
 
-  /** 暂停 */
+  /** 暂停——只改后端状态，SSE 保持连接等待恢复 */
   const handlePause = async () => {
     if (!worldId) return;
-    try {
-      await pauseWorld.mutateAsync(worldId);
-      disconnect();
-    } catch (err) {
-      console.error("暂停失败:", err);
-    }
+    await pauseWorld.mutateAsync(worldId);
+    setIsPaused(true);
   };
 
-  /** 继续——重新连接 SSE（后端仍在运行） */
-  const handleResume = () => {
-    if (!worldId) return;
-    // 先断开旧连接，再重连（useSSE 会在 worldId 不变时通过 connect 重连）
-    disconnect();
-    // 通过短暂清空 worldId 再恢复来触发 useEffect 重连
-    setWorldId(null);
-    setTimeout(() => setWorldId(worldId), 0);
+  /** 继续——调后端 start（paused→running），SSE 连接自动恢复 */
+  const handleResume = async () => {
+    if (!worldId || startWorld.isPending) return;
+    await startWorld.mutateAsync(worldId);
+    setIsPaused(false);
   };
 
   /** 重置：调后端 reset → 断开 SSE → 清空前端状态 */
@@ -135,6 +130,7 @@ export default function SoloTheater() {
     clear();
     setWorldId(null);
     setIsRunning(false);
+    setIsPaused(false);
   };
 
   // ── 投放前：设置区 ──
@@ -277,7 +273,7 @@ export default function SoloTheater() {
         </div>
         <StatusDot status={connected ? "active" : "idle"} />
         <div className="flex gap-2">
-          {connected ? (
+          {connected && !isPaused ? (
             <button
               onClick={handlePause}
               disabled={pauseWorld.isPending}
@@ -294,14 +290,16 @@ export default function SoloTheater() {
           ) : events.length > 0 ? (
             <button
               onClick={handleResume}
+              disabled={startWorld.isPending}
               className="
                 px-3 py-1 text-sm font-mono rounded
                 bg-accent-green/10 border border-accent-green/30
                 text-accent-green hover:bg-accent-green/20
                 transition-colors
+                disabled:opacity-50
               "
             >
-              ▶ 继续
+              {startWorld.isPending ? "⏳" : "▶"} 继续
             </button>
           ) : null}
           <button

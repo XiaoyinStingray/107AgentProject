@@ -144,6 +144,11 @@ async def start_world(
     if world.status == "running":
         raise HTTPException(status_code=409, detail="World is already running")
 
+    # paused → running（恢复），直接改状态让 SSE 循环继续
+    if world.status == "paused":
+        world.status = "running"
+        return {"status": "resumed", "world_id": world_id}
+
     engine = await _build_world_engine(world, agent_store)
     world.status = "running"
 

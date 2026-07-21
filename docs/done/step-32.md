@@ -5,7 +5,7 @@
 | 日期 | 2026-07-21 |
 | Phase | Phase 10.4 |
 | Plan 章节 | [plan-state2.md](../plan-state2.md) §Step 32 |
-| 状态 | ⚠️ done (代码完成，M1 铸造厂因 LLM API Key 无效阻塞验收) |
+| 状态 | ✅ done |
 
 ## 产出
 
@@ -41,14 +41,33 @@
 - [x] TypeScript 类型检查 — ✅ 0 errors
 - [x] Vite 构建 — ✅ 成功（chunk size warning 为预存问题）
 - [x] Vite 代理验证 — ✅ `GET /api/agents` 通过代理返回 200
-- [ ] M1 铸造厂功能验收 — ⚠️ 阻塞（LLM API Key 无效，见 BUG-005）
-- [ ] M2 单人剧场功能验收 — ⚠️ 依赖 M1 创建 Agent 成功
+- [x] M1 铸造厂功能验收 — ✅ LLM API Key 有效
+- [x] M2 单人剧场功能验收 — ✅ 思维流实时展示 + pause/resume + 8tick 自动结束
 
 ## 已知问题
 
-- **BUG-005：** LLM API Key 无效时前端显示 "failed to fetch"，后端返回 401 但前端未解析具体错误。已记录到 `docs/bugs.md`。
-- **API Key 配置路径：** `.env` 需放在 `backend/` 目录下（`config.py` 使用相对路径 `env_file=".env"`）。项目根目录的 `.env` 不会被自动加载。
 - Vite 构建 chunk size 警告（`vendor` chunk > 500KB），Step 38 优化。
+
+## 补充修复（2026-07-21 下午 — 人工验收 + 迭代）
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `backend/src/api/sse.py` | 修改 | paused 轮询保持连接；8 tick 上限 + session_end；name_map 填充 agent_name |
+| `frontend/src/pages/SoloTheater.tsx` | 修改 | handlePause 去除 disconnect；isPaused 状态；handleResume loading guard |
+| `backend/src/engines/world/engine.py` | 修改 | solo prompt 角色沉浸化；_extract_events_from_response 拆分 thought_stream + agent_message；WorldEngine 清空 _model_context |
+| `backend/src/engines/agent_factory/factory.py` | 修改 | inject_context 清空 _model_context._messages（tick 间上下文隔离） |
+| `frontend/src/types/events.ts` | 修改 | +connected/paused/error/session_end |
+| `frontend/src/components/agent/ThoughtBubble.tsx` | 修改 | 基础设施事件跳过；session_end 结束气泡 |
+| `frontend/src/components/world/EventFeed.tsx` | 修改 | 新类型 Record 补齐 |
+
+### 验收迭代记录
+
+- **只出思考不出话：** `_extract_events_from_response` 所有消息都当 thought_stream → 拆分为 inner_messages(thought) + chat_message(speech)，现在思维流同时显示"思考"和"对话"
+- **场景上下文泄漏：** LifeAgent 复用 → 旧 tick 输出在新场景继续喂 → WorldEngine init + inject_context 清空 AutoGen `_messages`
+- **暂停 409 风暴：** handleResume 无防连点 + handlePause 调用 disconnect 关闭 SSE → 去 disconnect + isPaused 状态 + isPending 禁用按钮
+- **"unknown" 事件：** connected/paused 被 ThoughtBubble 渲染为 fallback → 基础设施事件跳过 + 类型补齐
+- **继续不生效：** pause disconnect 后 SSE 没人收 → paused 轮询保持连接，resume 只改后端状态
+- **无限独白：** 无终止条件 → 8 tick 上限 + session_end 结束气泡
 
 ## 对下一步的提示
 

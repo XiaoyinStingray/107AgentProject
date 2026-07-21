@@ -72,6 +72,17 @@ class WorldEngine:
         self._db = db_session
         self._retriever = MemoryRetriever(db_session)
         self.events: list[SimEvent] = []
+        # 重置所有 Agent 的 AutoGen 内部消息历史——隔离不同场景的上下文
+        for agent in agents:
+            try:
+                if hasattr(agent.autogen_agent, "_model_context"):
+                    ctx = agent.autogen_agent._model_context  # noqa: SLF001
+                    # clear() 在 AutoGen 0.7 中是 async——但我们这里没法 await
+                    # 通过清空内部消息列表来重置（AutoGen 内部用 _messages 列表）
+                    if hasattr(ctx, "_messages"):
+                        ctx._messages.clear()  # noqa: SLF001
+            except Exception:
+                pass
         self.relationships: dict[tuple[str, str], float] = {}
         self.current_tick: int = 0
 
@@ -207,8 +218,10 @@ class WorldEngine:
         from autogen_core import CancellationToken
 
         prompt = (
-            f"场景：{self.world.scenario.name}\n"
-            f"请描述你现在的想法和打算做的事情。"
+            f"你现在正在经历：{self.world.scenario.name}。\n"
+            f"作为一个真实的人，你此刻心里在想什么、想做什么？\n"
+            f"直接说出你的内心想法——不要分析自己、不要提到\"作为XX人格\"、"
+            f"不要提\"我需要以XX的身份\"。你就是你。"
         )
         try:
             response = await agent.autogen_agent.on_messages(
@@ -460,14 +473,15 @@ class WorldEngine:
     ) -> list[SimEvent]:
         """从 Agent 的响应中提取事件（solo 模式）。
 
-        遍历 Response.inner_messages，处理 TextMessage 和 ToolCallRequestEvent。
+        - inner_messages 中的 TextMessage → thought_stream（思考过程）
+        - chat_message（最终回复）→ agent_message（说出口的话）
+        - inner_messages 中的 ToolCallRequestEvent → agent_action
         """
-        from autogen_agentchat.messages import ToolCallRequestEvent
+        from autogen_agentchat.messages import ToolCallRequestEvent, TextMessage
 
-        messages = getattr(response, "inner_messages", [])
-        if not messages and hasattr(response, "chat_message"):
-            messages = [response.chat_message]
+        messages = getattr(response, "inner_messages", []) or []
         events: list[SimEvent] = []
+
         for msg in messages:
             # tool call → agent_action
             if isinstance(msg, ToolCallRequestEvent):
@@ -476,9 +490,9 @@ class WorldEngine:
                     events.append(evt)
                 continue
 
-            # 普通消息 → thought_stream
+            # 内部消息 → thought_stream
             content = getattr(msg, "content", "")
-            if content:
+            if content and isinstance(msg, TextMessage):
                 events.append(
                     SimEvent(
                         id=str(uuid.uuid4()),
@@ -486,10 +500,28 @@ class WorldEngine:
                         tick=self.current_tick,
                         type="thought_stream",
                         source_agent_id=agent_id,
-                        description=str(content)[:500],
+                        description=str(content),
                         created_at=datetime.now(timezone.utc).isoformat(),
                     )
                 )
+
+        # 最终回复 → agent_message（Agent 说出口的话）
+        chat_msg = getattr(response, "chat_message", None)
+        if chat_msg:
+            chat_content = getattr(chat_msg, "content", "")
+            if chat_content:
+                events.append(
+                    SimEvent(
+                        id=str(uuid.uuid4()),
+                        world_id=self.world.id,
+                        tick=self.current_tick,
+                        type="agent_message",
+                        source_agent_id=agent_id,
+                        description=str(chat_content),
+                        created_at=datetime.now(timezone.utc).isoformat(),
+                    )
+                )
+
         return events
 
     def _make_error_event(self, agent_id: str, error: str) -> SimEvent:

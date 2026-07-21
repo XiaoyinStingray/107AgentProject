@@ -182,4 +182,9 @@ const EVENT_VISUALS: Record<
     border: "border-border",
     text: "text-text-secondary",
   },
+  // 基础设施事件（不进入 EventFeed，占位满足 Record 类型）
+  connected: { label: "", border: "", text: "" },
+  paused: { label: "", border: "", text: "" },
+  error: { label: "", border: "", text: "" },
+  session_end: { label: "", border: "", text: "" },
 };

@@ -72,15 +72,29 @@ async def stream_world(world_id: str):
     engine = get_world_engine(world_id)
 
     async def event_generator():
-        # 发送初始连接确认
+        import asyncio
+
+        name_map = {aid: a.persona.name for aid, a in engine.agents.items()}
         yield _sse_event({"type": "connected", "world_id": world_id, "tick": engine.current_tick})
 
+        # 单人剧场 tick 上限（群体模式走 GroupChat 的 max_turns）
+        max_ticks = 8 if len(engine.agents) == 1 else 0
+        tick_count = 0
+
         try:
-            # 连续推流：while 循环驱动多个 tick，直到 World 暂停/结束或客户端断开
-            while engine.world.status == "running":
-                async for event in engine.tick_stream():
-                    yield _sse_event(_event_to_dict(event))
-                # tick_stream 结束一个 tick → 自动进入下一个 tick
+            while engine.world.status != "finished" and engine.world.status != "idle":
+                if max_ticks and tick_count >= max_ticks:
+                    engine.world.status = "finished"
+                    yield _sse_event({"type": "session_end", "world_id": world_id, "tick": engine.current_tick})
+                    break
+
+                if engine.world.status == "running":
+                    async for event in engine.tick_stream():
+                        yield _sse_event(_event_to_dict(event, name_map))
+                    tick_count += 1
+                elif engine.world.status == "paused":
+                    yield _sse_event({"type": "paused", "world_id": world_id})
+                    await asyncio.sleep(1)
         except Exception as e:
             logger.error(f"SSE stream error for world {world_id}: {e}")
             yield _sse_event({"type": "error", "message": str(e)})
@@ -116,35 +130,35 @@ def _sse_event(data: dict) -> str:
     return f"data: {payload}\n\n"
 
 
-def _event_to_dict(event: SimEvent) -> dict:
+def _event_to_dict(event: SimEvent, name_map: dict = None) -> dict:
     """将 SimEvent 序列化为前端 SSEEvent 格式。
 
     字段映射（后端 → 前端）:
         source_agent_id → agent_id
-        description → content（thought_stream）/ 保留 description（其他类型）
-        data 中的业务字段平铺到顶层（phase, message, action 等）
+        description → content（全类型统一）
+        name_map 按 agent_id 查 → agent_name
     """
+    name_map = name_map or {}
+    agent_id = event.source_agent_id or ""
+
     base = {
         "id": event.id,
         "world_id": event.world_id,
         "tick": event.tick,
         "type": event.type,
-        "agent_id": event.source_agent_id,
-        "description": event.description,
+        "agent_id": agent_id,
+        "agent_name": name_map.get(agent_id, agent_id),
+        "content": event.description,
         "data": event.data,
     }
 
     # 按事件类型平铺业务字段
-    if event.type == "thought_stream":
-        base["content"] = event.description
-        base["phase"] = event.data.get("phase", "") if event.data else ""
-    elif event.type == "agent_message":
+    if event.type == "agent_message":
         base["message"] = event.data.get("message", event.description) if event.data else event.description
         base["subtext"] = event.data.get("subtext", "") if event.data else ""
         base["tone"] = event.data.get("tone", "neutral") if event.data else "neutral"
     elif event.type == "agent_action":
         base["action"] = event.data.get("action", "") if event.data else ""
         base["target"] = event.data.get("target", "") if event.data else ""
-        base["result"] = event.data.get("result", "") if event.data else ""
 
     return base
