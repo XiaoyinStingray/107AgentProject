@@ -1,4 +1,8 @@
-# 107AgentProject
+# 人生实验室 · Life Lab
+
+> Agent 社会实验平台。用户创建/部署自主 Agent → Agent 在场景中自主感知、思考、决策、互动 → 用户观察涌现行为。
+>
+> **一句话：** 你是导演，Agent 是演员。你设定好角色和舞台，按下开始，看他们怎么演。
 
 ## 比赛结束前本仓库不允许转public、fork或是上传到其他网站。push时请注意不要携带Claude、Codex等工具配置，有需求可自行添加gitignore。
 
@@ -15,48 +19,132 @@
 
 ## 项目简介
 
-本项目旨在构建一个完整的 AI Agent 应用，具体方向待定。
+本项目构建一个基于 **FastAPI + AutoGen + React** 的 AI Agent 社会模拟平台。系统包含 8 个模块（M1–M8）共 56 项功能：
 
-## 仓库结构(TODO: 根据后续情况修改)
+| 模块 | 说明 | 核心能力 |
+|------|------|---------|
+| M1 铸造厂 | Agent 创建 | 自然语言 → 完整人格（MBTI + 大五人格 + 决策风格 + 背景故事） |
+| M2 单人剧场 | 单 Agent 观察 | 场景投放、思维流实时展示、Agent 自主决策 |
+| M3 群体沙盒 | 多 Agent 互动 | 群体投放、Agent 间对话、关系演化、竞争博弈 |
+| M4 竞技场 | Agent 对抗 | 1v1 辩论/面试/路演、LLM 裁判评分、战报生成 |
+| M5 叙事工厂 | 事件→故事 | 小说/日记/信/播客脚本，保持 Agent 口吻一致 |
+| M6 控制台 | 上帝视角 | 多 Agent 仪表盘、事件热力图、搜索、决策模式识别 |
+| M7 干预台 | 导演干预 | 运行时注入事件、干预历史 |
+| M8 档案馆 | 沉淀分享 | 精彩回放、实验模板、成就系统、研究报告导出 |
 
-```
-├── backend/             # 后端服务
-│   ├── src/             # 源代码
-│   └── tests/           # 单元测试
-├── frontend/            # 前端应用
-│   ├── src/             # 页面 & 路由
-│   ├── components/      # UI 组件
-│   └── lib/             # 工具函数
-├── docs/                # 项目文档
-├── scripts/             # 工具脚本
-├── .github/workflows/   # CI/CD 流水线
-├── .editorconfig        # 编辑器统一配置
-├── .env.example         # 环境变量模板
-└── README.md
-```
+## 技术栈
+
+| 层 | 技术 |
+|----|------|
+| Web 框架 | FastAPI (Python 3.12+) |
+| Agent 编排 | AutoGen 0.7+ |
+| 数据库 | SQLite + aiosqlite |
+| 前端框架 | React 18 + Vite + TypeScript |
+| 样式 | TailwindCSS |
+| 状态管理 | React Query (TanStack Query) + Zustand |
+| 图表 | Recharts |
+| 图标 | Lucide Icons |
+| 实时通信 | SSE (Server-Sent Events) |
+| LLM | OpenAI 兼容 API（DeepSeek / GLM / OpenAI 均可） |
 
 ## 快速开始
+
+### 环境要求
+
+- Python 3.12+
+- Node.js 18+
+- npm
+
+### 安装
 
 ```bash
 # 克隆仓库
 git clone https://github.com/XiaoyinStingray/107AgentProject && cd 107AgentProject
 
-# 配置环境变量(TODO: 根据后续情况修改)
-cp .env.example .env
-# 编辑 .env 填入实际配置
+# Python 环境
+conda create -n lifelab python=3.12
+conda activate lifelab
+pip install -r requirements.txt
 
-# 后端
-cd backend
-# TODO: 安装依赖 & 启动
-
-# 前端
+# 前端依赖
 cd frontend
-# TODO: 安装依赖 & 启动
+npm install
+cd ..
 ```
 
-## 环境安装(TODO: 根据后续情况修改)
-conda create \<EnvName\> 
+### 配置
 
-conda activate \<EnvName\> 
+```bash
+# 复制环境变量模板
+cp .env.example .env
 
-pip install -r requirements.txt
+# 编辑 .env 填入 LLM 配置
+# LLM_API_KEY=你的API Key
+# LLM_BASE_URL=https://api.deepseek.com/v1
+# LLM_MODEL=deepseek-chat
+```
+
+### 启动
+
+```bash
+# 终端 1：启动后端
+python run.py
+# → http://127.0.0.1:8000
+# 健康检查: http://127.0.0.1:8000/health → {"status":"ok"}
+# API 文档: http://127.0.0.1:8000/docs
+
+# 终端 2：启动前端
+cd frontend
+npm run dev
+# → http://127.0.0.1:5173
+```
+
+### 验证
+
+打开 `http://127.0.0.1:5173/agents`，输入 Agent 描述（如"来自小镇的计算机系新生，内向但野心大"），点击创建——应返回 LLM 生成的真实人格。
+
+## 仓库结构
+
+```
+├── backend/                     # 后端服务
+│   ├── src/
+│   │   ├── main.py              # FastAPI 应用入口
+│   │   ├── config.py            # 配置管理（pydantic-settings）
+│   │   ├── db.py                # SQLite + aiosqlite
+│   │   ├── models/              # Pydantic 类型定义
+│   │   ├── api/                 # REST API 路由
+│   │   │   ├── agents.py        # /api/agents CRUD
+│   │   │   ├── worlds.py        # /api/worlds 管理 + SSE
+│   │   │   ├── sse.py           # SSE 事件推送
+│   │   │   └── export.py        # 研究报告导出
+│   │   ├── engines/             # 核心引擎
+│   │   │   ├── persona/         # 人格引擎（自然语言 → Persona JSON）
+│   │   │   ├── agent_factory/   # Agent 工厂（LifeAgent + AutoGen 封装）
+│   │   │   ├── world/           # 世界引擎（Tick 调度 + 关系演化）
+│   │   │   ├── narrative/       # 叙事引擎（事件 → 小说/日记/信/播客）
+│   │   │   └── arena/           # 竞技引擎（1v1 辩论 + 裁判评分）
+│   │   └── llm/                 # LLM 客户端工厂
+│   ├── tests/                   # 后端单元测试
+│   └── data/                    # SQLite 数据文件（gitignore）
+├── frontend/                    # 前端应用
+│   └── src/
+│       ├── main.tsx             # 应用入口 + QueryClientProvider
+│       ├── App.tsx              # 路由 + 布局
+│       ├── api/                 # API 调用层（React Query hooks）
+│       ├── pages/               # 8 个模块页面
+│       ├── components/          # 共享 UI 组件
+│       ├── hooks/               # 共享 hooks（useSSE, useApi）
+│       ├── stores/              # Zustand stores
+│       ├── types/               # TypeScript 类型定义
+│       └── mocks/               # Mock 数据
+├── docs/                        # 项目文档
+│   ├── agent-lab-blueprint.md   # 工程蓝图
+│   ├── development-plan.md      # State 1 计划
+│   ├── plan-state2.md           # State 2 计划
+│   ├── STEP.md                  # 开发流程规范
+│   └── done/                    # 步骤完成记录
+├── run.py                       # 后端一键启动脚本
+├── requirements.txt             # Python 依赖
+├── .env.example                 # 环境变量模板
+└── README.md
+```
