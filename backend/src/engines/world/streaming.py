@@ -28,26 +28,45 @@ class WorldStreamingMixin:
             )
             for event in self._extract_events_from_response(response, agent.id):
                 yield event
+                if self.world.status == "paused":
+                    break
         except Exception as error:
             logger.error(f"stream solo error: {error}")
             yield self._make_error_event(agent.id, str(error))
 
     async def _stream_group_tick(self) -> AsyncGenerator[SimEvent, None]:
-        """Stream one target-aware multi-Agent SelectorGroupChat tick."""
+        """Stream one target-aware multi-Agent SelectorGroupChat tick.
+
+        Checks ``world.status`` between every message so that a
+        user-triggered pause takes effect without waiting for the
+        entire GroupChat to finish.  The outer ``tick_stream()``
+        still post-processes, persists and emits a ``tick_boundary``
+        for the partial tick.
+        """
         from autogen_core import CancellationToken
 
+        stream = None
         try:
             team = self.build_group_chat()
-            async for message in team.run_stream(
+            stream = team.run_stream(
                 task=self._build_group_task(),
                 cancellation_token=CancellationToken(),
-            ):
+            )
+            async for message in stream:
+                if self.world.status == "paused":
+                    break
                 event = self._stream_message_to_event(message)
                 if event:
                     yield event
         except Exception as error:
             logger.error(f"stream group error: {error}")
             yield self._make_error_event("world", str(error))
+        finally:
+            if stream is not None:
+                try:
+                    await stream.aclose()
+                except Exception:
+                    pass  # best-effort cleanup of AutoGen internal tasks
 
     def _stream_message_to_event(self, message) -> SimEvent | None:
         """Convert a supported AutoGen stream message into a SimEvent."""

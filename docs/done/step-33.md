@@ -86,6 +86,15 @@
 - [x] 真实 DeepSeek 手动验收 — ✅ 群体对话、身份对应与自然结束无异常
 - [x] 人工 CHECK-2 — ✅ 2026-07-22 用户确认通过
 
+### 🔧 回溯修复（2026-07-22）
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `backend/src/engines/world/streaming.py` | 修改 | `_stream_group_tick` / `_stream_solo_tick` 每条消息之间检查 `world.status`，暂停时立即停止消费 GroupChat 流并用 `aclose()` 清理残留 task |
+
+- **决策 — 消息间暂停检查：** 原来暂停只在 tick 之间生效，如果 GroupChat 很长（多轮 LLM 调用），用户点暂停后要等整个 tick 跑完。改为每条 AutoGen 消息 yield 之后检查 `world.status == "paused"`，当前 tick 仍正常收尾（post-process + persist + tick_boundary），然后 SSE generator 立即进入暂停等待。暂停响应时间从"tick 全部跑完"缩短到"当前消息跑完"。
+- 后端 212 ✅ / 前端 203 ✅，全量回归通过。
+
 ## 当前限制
 
 - 前端 SSE Store 只保留最近 500 条消息；暂停状态事件也会占用窗口，较早 Tick 可能从实时页面消失，但 SQLite 历史事件仍保留。历史分页/水合留待 Step 35–36。
