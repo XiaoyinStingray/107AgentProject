@@ -184,17 +184,18 @@ class TestParseJudgeResult:
         assert result["winner_id"] == "id-b"
         assert result["scores"]["id-b"] == 35
 
-    def test_parse_invalid_json_returns_draw(self):
+    def test_parse_invalid_json_returns_raw_text(self):
+        """When JSON parsing fails, raw text is used as reasoning with default scores."""
         from engines.arena.engine import ArenaEngine
 
         engine = ArenaEngine(MockModelClient())
         raw = "这不是 JSON 格式的内容"
 
         result = engine._parse_judge_result(raw, "id-a", "id-b")
-        assert result["winner_id"] == "id-a"  # 默认 A
+        assert result["winner_id"] == "id-a"  # 默认 A（分数相同时 A 胜出）
         assert result["scores"]["id-a"] == 20.0
         assert result["scores"]["id-b"] == 20.0
-        assert "解析失败" in result["reasoning"]
+        assert result["reasoning"] == raw  # raw text preserved as reasoning
 
     def test_parse_winner_b(self):
         from engines.arena.engine import ArenaEngine

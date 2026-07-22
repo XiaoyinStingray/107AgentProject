@@ -82,16 +82,17 @@ export function useSSE(worldId: string | null) {
     setConnected(false);
   }, [setConnected]);
 
-  // worldId 变化时重连
+  // worldId 变化时重连，并清除上一个 World 的残留事件
   useEffect(() => {
     lastTickRef.current = 0;
+    clear(); // 防止切换页面时旧 World 事件污染新页面
     if (worldId) {
       connect();
     } else {
       disconnect();
     }
     return () => disconnect();
-  }, [worldId, connect, disconnect]);
+  }, [worldId, connect, disconnect, clear]);
 
   return {
     events,

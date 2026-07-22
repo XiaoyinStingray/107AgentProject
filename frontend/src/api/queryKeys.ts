@@ -17,7 +17,11 @@ export const worldKeys = {
   relationships: (id: string) => ["worlds", id, "relationships"] as const,
 };
 
-// Step 30–31 追加:
-// export const narrativeKeys = { ... };
-// export const arenaKeys = { ... };
-// export const simulationKeys = { ... };
+export const narrativeKeys = {
+  all: ["narratives"] as const,
+};
+
+export const arenaKeys = {
+  all: ["arenas"] as const,
+  detail: (id: string) => ["arenas", id] as const,
+};

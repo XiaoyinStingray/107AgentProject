@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Link, MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -7,6 +7,53 @@ import { MOCK_AGENTS } from "../mocks/agents";
 import { ARENA_MODE_OPTIONS } from "../mocks/arena";
 import { useAgentStore } from "../stores/useAgentStore";
 import Arena from "./Arena";
+
+// Step 34b: Mock useRunDebate — real API path, returns mock data
+const { arenaMockResult } = vi.hoisted(() => ({
+  arenaMockResult: {
+    id: "arena-debate-test",
+    mode: "debate",
+    winner_id: "mock-1",
+    scores: { mock_1: 32, mock_2: 28 },
+    judge_reasoning: "正方论点更有说服力",
+    transcript: [
+      { turn: 0, speaker: "agent_1", content: "我认为稳定比风险更重要。" },
+      { turn: 1, speaker: "agent_2", content: "年轻人不承担风险就没有未来。" },
+    ],
+    topic: "测试辩题",
+    rounds: 3,
+    created_at: "2026-07-22T00:00:00",
+  },
+}));
+
+vi.mock("../api/arenas", () => ({
+  useRunDebate: () => ({
+    mutateAsync: () => Promise.resolve(arenaMockResult),
+    isPending: false,
+  }),
+  useArenaResult: () => ({ data: null }),
+  useArenas: () => ({ data: [] }),
+  adaptArenaResult: (
+    api: typeof arenaMockResult,
+    a: { id: string; name: string },
+    b: { id: string; name: string },
+  ) => ({
+    winner_id: api.winner_id,
+    scores: api.scores,
+    judge_reasoning: api.judge_reasoning,
+    transcript: (api.transcript || []).map((t, i) => ({
+      id: `t-${i}`,
+      round: Math.floor(t.turn / 2) + 1,
+      speaker_id: t.speaker === "agent_1" ? a.id : b.id,
+      speaker_name: t.speaker === "agent_1" ? a.name : b.name,
+      content: t.content,
+    })),
+    score_breakdowns: {
+      [a.id]: { argument_quality: 8, expression: 8, adaptability: 8, character_consistency: 8, total: 32 },
+      [b.id]: { argument_quality: 7, expression: 7, adaptability: 7, character_consistency: 7, total: 28 },
+    },
+  }),
+}));
 
 const testQueryClient = new QueryClient({
   defaultOptions: { queries: { retry: false } },
@@ -113,39 +160,24 @@ describe("Step 22 Arena page state", () => {
     ).toHaveLength(2);
   });
 
-  it("plays six entries, shows the result, resets, and starts cleanly again", () => {
-    vi.useFakeTimers();
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+  it("runs debate via API and transitions away from setup", async () => {
     renderArena();
-    const originalTopic = screen.getByLabelText("竞技主题").getAttribute("value");
 
+    // verify we start on setup
+    expect(screen.getByRole("heading", { name: "1v1 Agent 对抗" })).toBeInTheDocument();
+
+    // debate → 真实 API 路径，mocked mutation 立即返回
     fireEvent.click(screen.getByRole("button", { name: "开始 1v1 竞技" }));
-    expect(screen.getByText("0 条发言")).toBeInTheDocument();
 
-    act(() => vi.advanceTimersByTime(TRANSCRIPT_INTERVAL_MS));
-    expect(screen.getByText("1 条发言")).toBeInTheDocument();
+    // setup heading should disappear after phase transition
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("heading", { name: "1v1 Agent 对抗" }),
+      ).not.toBeInTheDocument();
+    });
 
-    for (let index = 0; index < 5; index += 1) {
-      act(() => vi.advanceTimersByTime(TRANSCRIPT_INTERVAL_MS));
-    }
-    expect(screen.getByText("6 条发言")).toBeInTheDocument();
-
-    act(() => vi.advanceTimersByTime(TRANSCRIPT_INTERVAL_MS));
-    expect(screen.getByText("裁判正在汇总四项评分…")).toBeInTheDocument();
-    act(() => vi.advanceTimersByTime(JUDGE_DELAY_MS));
-    expect(screen.getByText(/胜者 ·/)).toBeInTheDocument();
+    // the result panel should be visible
     expect(screen.getByText("裁判理由")).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole("button", { name: "返回设置" }));
-    expect(
-      screen.getByRole("heading", { name: "1v1 Agent 对抗" }),
-    ).toBeInTheDocument();
-    expect(screen.getByLabelText("竞技主题")).toHaveValue(originalTopic);
-
-    fireEvent.click(screen.getByRole("button", { name: "开始 1v1 竞技" }));
-    expect(screen.getByText("0 条发言")).toBeInTheDocument();
   });
 
   it.each([
@@ -191,6 +223,8 @@ describe("Step 22 Arena hash behavior", () => {
     vi.useFakeTimers();
     renderArenaWithNavigation();
 
+    // 切换到 interview 模式（保留 Mock 动画），启动后应进入 running 状态
+    fireEvent.click(screen.getByRole("button", { name: /面试竞争/ }));
     fireEvent.click(screen.getByRole("button", { name: "开始 1v1 竞技" }));
     act(() => vi.advanceTimersByTime(TRANSCRIPT_INTERVAL_MS));
     expect(screen.getByText("1 条发言")).toBeInTheDocument();

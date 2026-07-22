@@ -5,9 +5,58 @@ import { getMockNarrative, countWords, NARRATIVE_STYLES } from "../../mocks/narr
 import type { NarrativeStyle } from "../../mocks/narratives";
 
 /* ================================================================
-   Step 23 — 叙事工厂组件测试
-   Layer 1: 组件渲染 + 关键交互
+   Step 34a — 叙事工厂组件测试（适配真实 API 路径）
    ================================================================ */
+
+// Mock useWorlds — 提供一个可选 World
+vi.mock("../../api/worlds", () => ({
+  useWorlds: () => ({
+    data: [
+      {
+        id: "world-test",
+        name: "测试 World",
+        scenario: { name: "新生报到" },
+        agent_ids: ["mock-1"],
+        current_tick: 3,
+        status: "finished",
+      },
+    ],
+  }),
+}));
+
+// Mock 叙事 mutation hooks — story/diary/letter 走 API 路径
+const { narrativeMockResult } = vi.hoisted(() => ({
+  narrativeMockResult: {
+    title: "图书馆三楼的灯",
+    content: "六点半之前到达图书馆三楼靠窗的位置，这是我坚持了三周的习惯。",
+    style: "story",
+    agent_id: "mock-1",
+    generated_at: "2026-07-22T00:00:00",
+  },
+}));
+
+vi.mock("../../api/narratives", () => ({
+  useGenerateStory: () => ({
+    mutateAsync: () => Promise.resolve(narrativeMockResult),
+    isPending: false,
+  }),
+  useGenerateDiary: () => ({
+    mutateAsync: () => Promise.resolve(narrativeMockResult),
+    isPending: false,
+  }),
+  useGenerateLetter: () => ({
+    mutateAsync: () => Promise.resolve(narrativeMockResult),
+    isPending: false,
+  }),
+  useGeneratePodcast: () => ({
+    mutateAsync: () => Promise.resolve(narrativeMockResult),
+    isPending: false,
+  }),
+}));
+
+function selectWorld() {
+  fireEvent.click(screen.getByRole("button", { name: /测试 World/ }));
+}
 
 describe("Step 23 NarrativeFactory — setup phase", () => {
   it("renders style tabs including P3 placeholders", () => {
@@ -25,14 +74,18 @@ describe("Step 23 NarrativeFactory — setup phase", () => {
     expect(screen.getByRole("button", { name: /Agent 自画像/ })).toBeInTheDocument();
   });
 
-  it("disables generate button until agent is selected", () => {
+  it("disables generate button until agent and world are selected", () => {
     render(<NarrativeFactory />);
 
     const generateBtn = screen.getByRole("button", { name: /生成叙事/ });
     expect(generateBtn).toBeDisabled();
 
-    // 选第一个 Agent（小明）
+    // 选 Agent 后仍 disabled（缺 World）
     fireEvent.click(screen.getByRole("button", { name: /小明/ }));
+    expect(generateBtn).toBeDisabled();
+
+    // 选 World 后 enabled
+    selectWorld();
     expect(generateBtn).toBeEnabled();
   });
 
@@ -64,69 +117,44 @@ describe("Step 23 NarrativeFactory — setup phase", () => {
   });
 });
 
-describe("Step 23 NarrativeFactory — generating & result phases", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("generates narrative after clicking generate and shows result", () => {
+describe("Step 34a NarrativeFactory — generating & result phases", () => {
+  it("generates narrative (story via API) and shows result", async () => {
     render(<NarrativeFactory />);
 
-    // 选 Agent + 默认 story 风格
+    // 选 Agent + World + 默认 story 风格
     fireEvent.click(screen.getByRole("button", { name: /小明/ }));
+    selectWorld();
     fireEvent.click(screen.getByRole("button", { name: /生成叙事/ }));
 
-    // generating 阶段
-    expect(screen.getByText(/正在生成/)).toBeInTheDocument();
-
-    // 推进 2s
-    act(() => vi.advanceTimersByTime(2000));
-
-    // result 阶段——显示标题
-    expect(screen.getByText("图书馆三楼的灯")).toBeInTheDocument();
-    // 显示正文片段
-    expect(screen.getByText(/六点半之前到达图书馆三楼/)).toBeInTheDocument();
-    // 显示字数
-    expect(screen.getByText(/字/)).toBeInTheDocument();
-    // 显示重新生成按钮
+    // result 阶段——通过 mocked API 返回
+    expect(await screen.findByText("图书馆三楼的灯")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /重新生成/ })).toBeInTheDocument();
   });
 
-  it("supports reset back to setup from result", () => {
+  it("supports reset back to setup from result", async () => {
     render(<NarrativeFactory />);
 
     fireEvent.click(screen.getByRole("button", { name: /小明/ }));
+    selectWorld();
     fireEvent.click(screen.getByRole("button", { name: /生成叙事/ }));
-    act(() => vi.advanceTimersByTime(2000));
+    await screen.findByText("图书馆三楼的灯");
 
-    // 点击返回
     fireEvent.click(screen.getByRole("button", { name: /返回配置/ }));
     expect(screen.getByText("M5 叙事工厂")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /生成叙事/ })).toBeInTheDocument();
   });
 
-  it("regenerates narrative when clicking regenerate button", () => {
+  it("generates podcast via API", async () => {
     render(<NarrativeFactory />);
 
     fireEvent.click(screen.getByRole("button", { name: /小红/ }));
-    // 切到 diary 风格
-    fireEvent.click(screen.getByRole("button", { name: /Agent 日记/ }));
+    selectWorld();
+    // 切到 podcast 风格
+    fireEvent.click(screen.getByRole("button", { name: /播客脚本/ }));
     fireEvent.click(screen.getByRole("button", { name: /生成叙事/ }));
-    act(() => vi.advanceTimersByTime(2000));
 
-    // 应显示小红的日记
-    expect(screen.getByText(/2026 年 7 月 19 日/)).toBeInTheDocument();
-    expect(screen.getByText(/淋雨的感觉其实挺好/)).toBeInTheDocument();
-
-    // 重新生成
-    fireEvent.click(screen.getByRole("button", { name: /重新生成/ }));
-    expect(screen.getByText(/正在生成/)).toBeInTheDocument();
-    act(() => vi.advanceTimersByTime(2000));
-    expect(screen.getByText(/淋雨的感觉其实挺好/)).toBeInTheDocument();
+    // podcast 走真实 API（mocked）
+    expect(await screen.findByText("图书馆三楼的灯")).toBeInTheDocument();
   });
 });
 

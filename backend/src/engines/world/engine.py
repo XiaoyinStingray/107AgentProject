@@ -82,7 +82,17 @@ class WorldEngine(WorldStreamingMixin, WorldMessageMixin, WorldStateMixin):
         return all_events
 
     async def tick_stream(self) -> AsyncGenerator[SimEvent, None]:
-        """Stream one tick, including derived actions and relationships."""
+        """Stream one tick, including derived actions and relationships.
+
+        Pending intervention events are yielded before the tick starts
+        so the frontend sees them in real time.
+        """
+        # Yield any pending intervention events first
+        pending = getattr(self, "_pending_injects", None)
+        if pending:
+            while pending:
+                yield pending.pop(0)
+
         await self._inject_world_context()
         tick_events: list[SimEvent] = []
         async for event in self._stream_agent_tick():

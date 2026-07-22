@@ -14,10 +14,39 @@ import { MOCK_AGENTS } from "../../mocks/agents";
 import type { InjectionEventType } from "../../types/intervention";
 
 /* ================================================================
-   Step 24 — M7 导演干预台组件测试
-   Layer 1: 组件渲染 + 关键交互
-   Layer 2: Mock 工具函数
+   Step 34c — M7 导演干预台组件测试（适配真实注入 API 路径）
    ================================================================ */
+
+vi.mock("../../api/worlds", () => ({
+  useWorlds: () => ({
+    data: [
+      {
+        id: "world-running",
+        name: "运行中的 World",
+        scenario: { name: "期末周" },
+        agent_ids: ["mock-1", "mock-2"],
+        current_tick: 5,
+        status: "running",
+      },
+      {
+        id: "world-idle",
+        name: "空闲 World",
+        scenario: { name: "新生报到" },
+        agent_ids: ["mock-1"],
+        current_tick: 0,
+        status: "idle",
+      },
+    ],
+  }),
+  useInjectEvent: () => ({
+    mutateAsync: () => Promise.resolve({ status: "injected" }),
+    isPending: false,
+  }),
+}));
+
+function selectRunningWorld() {
+  fireEvent.click(screen.getByRole("button", { name: /运行中的 World/ }));
+}
 
 /* ---------- Layer 1: 组件渲染 + 交互 ---------- */
 
@@ -93,17 +122,11 @@ describe("Step 24 DirectorIntervention — 渲染与基础交互", () => {
   });
 });
 
-describe("Step 24 DirectorIntervention — 注入流程", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+describe("Step 34c DirectorIntervention — 注入流程", () => {
 
   it("disables inject button when description is empty (world_event)", () => {
     render(<DirectorIntervention />);
+    selectRunningWorld();
 
     const injectBtn = screen.getByRole("button", { name: /注入事件/ });
     expect(injectBtn).toBeDisabled();
@@ -111,6 +134,7 @@ describe("Step 24 DirectorIntervention — 注入流程", () => {
 
   it("enables inject button when description is filled (world_event)", () => {
     render(<DirectorIntervention />);
+    selectRunningWorld();
 
     const textarea = screen.getByPlaceholderText(/暴雨/);
     fireEvent.change(textarea, { target: { value: "测试事件描述" } });
@@ -121,6 +145,7 @@ describe("Step 24 DirectorIntervention — 注入流程", () => {
 
   it("disables inject button when needsTarget but no target selected", () => {
     render(<DirectorIntervention />);
+    selectRunningWorld();
 
     fireEvent.click(screen.getByRole("button", { name: /Agent 消息/ }));
     const textarea = screen.getByPlaceholderText(/班主任/);
@@ -132,6 +157,7 @@ describe("Step 24 DirectorIntervention — 注入流程", () => {
 
   it("shows warning when needsTarget but no target selected", () => {
     render(<DirectorIntervention />);
+    selectRunningWorld();
 
     fireEvent.click(screen.getByRole("button", { name: /Agent 消息/ }));
     const textarea = screen.getByPlaceholderText(/班主任/);
@@ -142,6 +168,7 @@ describe("Step 24 DirectorIntervention — 注入流程", () => {
 
   it("enables inject button when target selected and description filled", () => {
     render(<DirectorIntervention />);
+    selectRunningWorld();
 
     fireEvent.click(screen.getByRole("button", { name: /Agent 消息/ }));
     const textarea = screen.getByPlaceholderText(/班主任/);
@@ -156,26 +183,24 @@ describe("Step 24 DirectorIntervention — 注入流程", () => {
     expect(injectBtn).toBeEnabled();
   });
 
-  it("injects world_event and adds to history", () => {
+  it("injects world_event and adds to history", async () => {
     render(<DirectorIntervention />);
+    selectRunningWorld();
 
     // 填写描述
     const textarea = screen.getByPlaceholderText(/暴雨/);
     fireEvent.change(textarea, { target: { value: "突然地震" } });
 
-    // 点击注入
+    // 点击注入（触发 API 调用）
     fireEvent.click(screen.getByRole("button", { name: /注入事件/ }));
 
-    // 成功提示应出现
-    expect(screen.getByText(/已注入/)).toBeInTheDocument();
-
-    // 推进 2s 让成功提示消失
-    act(() => vi.advanceTimersByTime(2000));
-    expect(screen.queryByText(/已注入/)).not.toBeInTheDocument();
+    // 成功提示应出现（mocked API 立即返回）
+    expect(await screen.findByText(/已注入/)).toBeInTheDocument();
   });
 
-  it("injects agent_message with target and adds to history", () => {
+  it("injects agent_message with target and adds to history", async () => {
     render(<DirectorIntervention />);
+    selectRunningWorld();
 
     // 切到 agent_message
     fireEvent.click(screen.getByRole("button", { name: /Agent 消息/ }));
@@ -192,16 +217,19 @@ describe("Step 24 DirectorIntervention — 注入流程", () => {
     // 注入
     fireEvent.click(screen.getByRole("button", { name: /注入事件/ }));
 
-    expect(screen.getByText(/已注入/)).toBeInTheDocument();
+    expect(await screen.findByText(/已注入/)).toBeInTheDocument();
   });
 
-  it("clears description after injection", () => {
+  it("clears description after injection", async () => {
     render(<DirectorIntervention />);
+    selectRunningWorld();
 
     const textarea = screen.getByPlaceholderText(/暴雨/) as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: "测试事件" } });
     fireEvent.click(screen.getByRole("button", { name: /注入事件/ }));
 
+    // 等待 API 调用完成
+    await screen.findByText(/已注入/);
     expect(textarea.value).toBe("");
   });
 });
@@ -241,8 +269,9 @@ describe("Step 24 DirectorIntervention — 干预历史", () => {
     expect(screen.getByText("暂无干预记录")).toBeInTheDocument();
   });
 
-  it("adds new injection to top of history", () => {
+  it("adds new injection to top of history", async () => {
     render(<DirectorIntervention />);
+    selectRunningWorld();
 
     // 初始 3 条
     expect(screen.getByText("3 条记录")).toBeInTheDocument();
@@ -252,6 +281,8 @@ describe("Step 24 DirectorIntervention — 干预历史", () => {
     fireEvent.change(textarea, { target: { value: "新注入的测试事件" } });
     fireEvent.click(screen.getByRole("button", { name: /注入事件/ }));
 
+    // 等待 API 调用完成
+    await screen.findByText(/已注入/);
     // 应变为 4 条
     expect(screen.getByText("4 条记录")).toBeInTheDocument();
     // 新注入的描述应在历史中

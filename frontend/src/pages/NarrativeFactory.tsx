@@ -1,91 +1,112 @@
-import { useMemo, useState, useCallback, useEffect, useRef } from "react";
+import { useMemo, useState, useCallback } from "react";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
 import StatusDot from "../components/shared/StatusDot";
 import { MOCK_AGENTS } from "../mocks/agents";
 import { useAgentStore } from "../stores/useAgentStore";
+import { useWorlds } from "../api/worlds";
+import {
+  useGenerateStory,
+  useGenerateDiary,
+  useGenerateLetter,
+  useGeneratePodcast,
+} from "../api/narratives";
+import type { NarrativeGenRequest } from "../api/narratives";
 import {
   NARRATIVE_STYLES,
   DEFAULT_LETTER_TARGET,
   DEFAULT_PODCAST_TARGET,
-  getMockNarrative,
-  pickAgentName,
 } from "../mocks/narratives";
 import type { NarrativeStyle, NarrativeResult } from "../mocks/narratives";
 import type { AgentResponse } from "../types/agent";
 
 /* ================================================================
-   Step 23 — 叙事工厂页面 (M5)
+   Step 34a — 叙事工厂页面 (M5)
    事件日志 → 自然语言叙事（小说/日记/信/播客）。
-   前端 Mock 模式——后端 /api/narratives/* 尚未实现。
+   story/diary/letter 走真实后端 API，podcast 保留 Mock。
    ================================================================ */
 
 type NarrativePhase = "setup" | "generating" | "result";
 
-const GENERATING_DELAY = 2000; // Mock 生成延迟 ms
-
 export default function NarrativeFactory() {
   const agents = useAvailableAgents();
+  const { data: worlds = [] } = useWorlds();
 
   // === setup 状态 ===
   const [agentId, setAgentId] = useState<string>("");
+  const [worldId, setWorldId] = useState<string>("");
   const [styleKey, setStyleKey] = useState<NarrativeStyle>("story");
   const [target, setTarget] = useState<string>("");
   const [phase, setPhase] = useState<NarrativePhase>("setup");
   const [result, setResult] = useState<NarrativeResult | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // 叙事 mutations
+  const generateStory = useGenerateStory();
+  const generateDiary = useGenerateDiary();
+  const generateLetter = useGenerateLetter();
+  const generatePodcast = useGeneratePodcast();
+  const isPending =
+    generateStory.isPending ||
+    generateDiary.isPending ||
+    generateLetter.isPending ||
+    generatePodcast.isPending;
 
   const selectedAgent = agents.find((a) => a.id === agentId);
   const selectedStyle = NARRATIVE_STYLES.find(
     (s) => s.key === styleKey && s.available,
   );
   const effectiveTarget = target.trim() || getDefaultTarget(styleKey);
-  const canGenerate = !!agentId && !!selectedStyle;
+  const canGenerate = !!agentId && !!worldId && !!selectedStyle;
 
-  // 清理 timer
-  const clearTimer = useCallback(() => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-  }, []);
+  /** 构建通用叙事请求 */
+  const buildRequest = useCallback((): NarrativeGenRequest => ({
+    agent_id: agentId,
+    world_id: worldId,
+    target: styleKey === "letter" && effectiveTarget ? effectiveTarget : null,
+  }), [agentId, worldId, styleKey, effectiveTarget]);
 
-  const handleGenerate = useCallback(() => {
+  const handleGenerate = useCallback(async () => {
     if (!canGenerate || !selectedStyle) return;
-    clearTimer();
+    setErrorMsg(null);
     setPhase("generating");
-    timerRef.current = setTimeout(() => {
-      const mock = getMockNarrative(agentId, styleKey);
-      // 注入用户填写的 target 到 letter/podcast 的标题/内容（简化处理：仅作为元信息）
+
+    try {
+      const req = buildRequest();
+      let apiResult;
+      if (styleKey === "story") apiResult = await generateStory.mutateAsync(req);
+      else if (styleKey === "diary") apiResult = await generateDiary.mutateAsync(req);
+      else if (styleKey === "letter") apiResult = await generateLetter.mutateAsync(req);
+      else apiResult = await generatePodcast.mutateAsync(req);
+
       setResult({
-        ...mock,
-        agent_name: pickAgentName(agents, agentId),
+        title: apiResult.title,
+        content: apiResult.content,
+        style: apiResult.style as NarrativeStyle,
+        agent_id: apiResult.agent_id,
+        agent_name: selectedAgent?.name ?? apiResult.agent_id,
+        generated_at: apiResult.generated_at,
+        word_count: apiResult.content.length,
       });
       setPhase("result");
-    }, GENERATING_DELAY);
-  }, [canGenerate, selectedStyle, agentId, styleKey, agents, clearTimer]);
+    } catch (cause) {
+      setErrorMsg(cause instanceof Error ? cause.message : "叙事生成失败");
+      setPhase("setup");
+    }
+  }, [canGenerate, selectedStyle, styleKey, agentId, buildRequest,
+      generateStory, generateDiary, generateLetter, generatePodcast]);
 
   const handleReset = useCallback(() => {
-    clearTimer();
     setResult(null);
+    setErrorMsg(null);
     setPhase("setup");
-  }, [clearTimer]);
+  }, []);
 
   const handleRegenerate = useCallback(() => {
-    // 重新生成——重新走 mock 流程（结果内容不变，时间戳刷新）
-    if (!canGenerate) return;
-    clearTimer();
     setResult(null);
-    setPhase("generating");
-    timerRef.current = setTimeout(() => {
-      const mock = getMockNarrative(agentId, styleKey);
-      setResult({
-        ...mock,
-        agent_name: pickAgentName(agents, agentId),
-      });
-      setPhase("result");
-    }, GENERATING_DELAY);
-  }, [canGenerate, agentId, styleKey, agents, clearTimer]);
+    setErrorMsg(null);
+    handleGenerate();
+  }, [handleGenerate]);
 
   // 复制到剪贴板
   const [copied, setCopied] = useState(false);
@@ -117,8 +138,6 @@ export default function NarrativeFactory() {
     URL.revokeObjectURL(url);
   }, [result]);
 
-  // 组件卸载时清理
-  useEffect(() => clearTimer, [clearTimer]);
 
   // === generating ===
   if (phase === "generating") {
@@ -335,6 +354,63 @@ export default function NarrativeFactory() {
         </div>
       </div>
 
+      {/* World 选择（叙事需要从 World 历史事件中提取素材） */}
+      <div className="mb-6">
+        <h2 className="text-sm font-mono text-text-primary mb-3">
+          🌍 选择实验 World
+        </h2>
+        {worlds.length === 0 ? (
+          <Card>
+            <p className="text-xs font-mono text-text-secondary/60 text-center py-4">
+              暂无可用的 World——请先在单人剧场或群体沙盒中创建并运行一个实验
+            </p>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {worlds.map((world) => {
+              const isSelected = world.id === worldId;
+              return (
+                <button
+                  key={world.id}
+                  type="button"
+                  onClick={() => setWorldId(world.id)}
+                  className={`
+                    text-left p-3 rounded-lg border transition-colors
+                    ${isSelected
+                      ? "border-accent-green/60 bg-accent-green/5 ring-1 ring-accent-green/20"
+                      : "border-border bg-bg-card hover:border-text-secondary/40"
+                    }
+                  `.trim()}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm select-none">
+                      {world.status === "running" ? "🟢" : "⏹️"}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <span className="font-mono text-sm text-text-primary">
+                        {world.name}
+                      </span>
+                      <span className="ml-2 text-xs font-mono text-text-secondary/60">
+                        Tick {world.current_tick}
+                      </span>
+                    </div>
+                    {isSelected && (
+                      <span className="text-xs text-accent-green font-mono">
+                        ✓
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-text-secondary mt-1 pl-7">
+                    {world.scenario.name} · {world.agent_ids.length} Agent
+                    {world.agent_ids.length > 0 ? "s" : ""}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       {/* 附加参数（letter/podcast） */}
       {selectedStyle?.needsTarget && (
         <div className="mb-6 animate-fade-in">
@@ -358,7 +434,7 @@ export default function NarrativeFactory() {
       )}
 
       {/* 当前选择摘要 */}
-      {(selectedAgent || selectedStyle) && (
+      {(selectedAgent || selectedStyle || worldId) && (
         <Card className="mb-6">
           <h3 className="text-xs font-mono text-text-secondary mb-2">
             当前选择
@@ -367,6 +443,11 @@ export default function NarrativeFactory() {
             <span className="text-text-secondary">Agent:</span>
             <span className="text-accent-green">
               {selectedAgent?.name ?? "未选择"}
+            </span>
+            <span className="text-text-secondary/40">|</span>
+            <span className="text-text-secondary">World:</span>
+            <span className="text-accent-blue">
+              {worlds.find((w) => w.id === worldId)?.name ?? "未选择"}
             </span>
             <span className="text-text-secondary/40">|</span>
             <span className="text-text-secondary">风格:</span>
@@ -386,21 +467,28 @@ export default function NarrativeFactory() {
         </Card>
       )}
 
+      {/* 错误提示 */}
+      {errorMsg && (
+        <p role="alert" className="text-sm text-accent-red font-mono mb-4 text-center">
+          {errorMsg}
+        </p>
+      )}
+
       {/* 生成按钮 */}
       <div className="flex justify-center">
         <button
           type="button"
-          disabled={!canGenerate}
+          disabled={!canGenerate || isPending}
           onClick={handleGenerate}
           className={`
             px-8 py-3 rounded-lg font-mono text-sm transition-all
-            ${canGenerate
+            ${canGenerate && !isPending
               ? "bg-accent-green text-bg-primary hover:bg-accent-green/90 cursor-pointer"
               : "bg-bg-secondary border border-border text-text-secondary/40 cursor-not-allowed"
             }
           `.trim()}
         >
-          ✨ 生成叙事
+          {isPending ? "生成中…" : "✨ 生成叙事"}
         </button>
       </div>
     </div>

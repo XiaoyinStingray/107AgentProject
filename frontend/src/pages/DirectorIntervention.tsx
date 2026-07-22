@@ -11,39 +11,62 @@ import {
   getInjectionTypeMeta,
 } from "../mocks/intervention";
 import { useAgentStore } from "../stores/useAgentStore";
+import { useWorlds, useInjectEvent } from "../api/worlds";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
 import StatusDot from "../components/shared/StatusDot";
 
 /* ================================================================
-   Step 24 — M7 导演干预台
-   事件注入 (P2) + 干预历史会话日志 + P3 占位面板。
-   Mock 模式——后端 /api/worlds/{id}/inject 实现后替换为 API 调用。
+   Step 34c — M7 导演干预台
+   事件注入走真实 POST /api/worlds/{id}/inject，历史仍为本地状态。
    ================================================================ */
 
 export default function DirectorIntervention() {
   const agents = useAvailableAgents();
+  const { data: worlds = [] } = useWorlds();
+  const injectEvent = useInjectEvent();
   const [history, setHistory] = useState<InjectionRecord[]>(
     MOCK_INTERVENTION_HISTORY,
   );
 
   // 注入表单状态
+  const [worldId, setWorldId] = useState<string>("");
   const [type, setType] = useState<InjectionEventType>("world_event");
   const [targetAgentId, setTargetAgentId] = useState<string>("");
   const [description, setDescription] = useState("");
   const [lastInjected, setLastInjected] = useState<InjectionRecord | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const selectedType = getInjectionTypeMeta(type);
   const needsTarget = selectedType?.needsTarget ?? false;
   const targetAgent = agents.find((a) => a.id === targetAgentId);
   const canInject =
-    description.trim().length > 0 && (!needsTarget || !!targetAgentId);
+    !!worldId &&
+    description.trim().length > 0 &&
+    (!needsTarget || !!targetAgentId) &&
+    !injectEvent.isPending;
 
-  const handleInject = useCallback(() => {
+  const activeWorlds = worlds.filter(
+    (w) => w.status === "running" || w.status === "paused",
+  );
+
+  const handleInject = useCallback(async () => {
     if (!canInject) return;
+    setErrorMsg(null);
     const targetName = needsTarget
       ? (targetAgent?.name ?? "未知")
       : "世界";
+
+    try {
+      await injectEvent.mutateAsync({
+        worldId,
+        description: description.trim(),
+      });
+    } catch (cause) {
+      setErrorMsg(cause instanceof Error ? cause.message : "事件注入失败");
+      return;
+    }
+
     const record = createInjectionRecord(
       type,
       needsTarget ? targetAgentId : null,
@@ -53,9 +76,9 @@ export default function DirectorIntervention() {
     setHistory((prev) => [record, ...prev]);
     setLastInjected(record);
     setDescription("");
-    // 2 秒后清除成功提示
     setTimeout(() => setLastInjected(null), 2000);
-  }, [canInject, needsTarget, targetAgent, type, targetAgentId, description]);
+  }, [canInject, needsTarget, targetAgent, type, targetAgentId, description,
+      worldId, injectEvent]);
 
   const handleClearHistory = useCallback(() => {
     setHistory([]);
@@ -82,6 +105,50 @@ export default function DirectorIntervention() {
                 事件注入
               </h2>
               <Badge label="P2" variant="P2" />
+            </div>
+
+            {/* World 选择——可注入运行中或暂停的 World */}
+            <div className="mb-4">
+              <label className="text-xs font-mono text-text-secondary mb-2 block">
+                🌍 选择活跃的 World
+              </label>
+              {activeWorlds.length === 0 ? (
+                <Card>
+                  <p className="text-xs font-mono text-text-secondary/60 text-center py-3">
+                    暂无可注入的 World——请先在沙盒或剧场中启动一个模拟
+                  </p>
+                </Card>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {activeWorlds.map((world) => {
+                    const statusIcon =
+                      world.status === "running" ? "🟢" : "⏸️";
+                    const isSelected = world.id === worldId;
+                    return (
+                      <button
+                        key={world.id}
+                        type="button"
+                        onClick={() => setWorldId(world.id)}
+                        className={`
+                          text-left px-3 py-2 rounded border text-xs font-mono transition-colors
+                          ${isSelected
+                            ? "border-accent-orange/60 bg-accent-orange/10 text-accent-orange"
+                            : "border-border bg-bg-secondary/60 text-text-secondary hover:border-text-secondary/40"
+                          }
+                        `.trim()}
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <span>{statusIcon}</span>
+                          <span>{world.name}</span>
+                          <span className="text-text-secondary/50">
+                            T{world.current_tick}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* 事件类型选择 */}
@@ -196,7 +263,7 @@ export default function DirectorIntervention() {
                   }
                 `.trim()}
               >
-                💉 注入事件
+                {injectEvent.isPending ? "注入中…" : "💉 注入事件"}
               </button>
               {lastInjected && (
                 <span className="text-xs font-mono text-accent-green animate-fade-in">
@@ -205,10 +272,18 @@ export default function DirectorIntervention() {
                 </span>
               )}
             </div>
-            {!canInject && needsTarget && !targetAgentId && (
+            {!worldId && (
+              <p className="text-xs font-mono text-accent-red mt-2">
+                请先选择一个运行中的 World
+              </p>
+            )}
+            {worldId && !canInject && needsTarget && !targetAgentId && (
               <p className="text-xs font-mono text-accent-red mt-2">
                 请选择目标 Agent
               </p>
+            )}
+            {errorMsg && (
+              <p className="text-xs font-mono text-accent-red mt-2">{errorMsg}</p>
             )}
           </Card>
 

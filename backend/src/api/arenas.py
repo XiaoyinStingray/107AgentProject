@@ -107,6 +107,80 @@ async def run_debate(
     )
 
 
+@router.post("/interview", response_model=ArenaResultResponse, status_code=201)
+async def run_interview(
+    req: ArenaCreateRequest,
+    store: AgentStore = Depends(get_agent_store),
+    engine: ArenaEngine = Depends(get_arena_engine),
+):
+    """运行一场面试竞争——两 Agent 竞争同一岗位。"""
+    agent_a = store.get(req.agent_a_id)
+    if agent_a is None:
+        raise HTTPException(status_code=404, detail=f"Agent not found: {req.agent_a_id}")
+    agent_b = store.get(req.agent_b_id)
+    if agent_b is None:
+        raise HTTPException(status_code=404, detail=f"Agent not found: {req.agent_b_id}")
+
+    try:
+        result = await engine.run_interview(agent_a, agent_b, req.topic, req.rounds)
+    except Exception as e:
+        logger.exception("Arena interview failed")
+        raise HTTPException(status_code=500, detail=f"面试运行失败: {str(e)}")
+
+    result_id = str(uuid.uuid4())
+    result.created_at = datetime.now(timezone.utc).isoformat()
+    _results[result_id] = result
+
+    return ArenaResultResponse(
+        id=result_id,
+        mode=result.mode.value,
+        winner_id=result.winner_id,
+        scores=result.scores,
+        judge_reasoning=result.judge_reasoning,
+        transcript=result.transcript,
+        topic=result.topic,
+        rounds=result.rounds,
+        created_at=result.created_at,
+    )
+
+
+@router.post("/pitch", response_model=ArenaResultResponse, status_code=201)
+async def run_pitch(
+    req: ArenaCreateRequest,
+    store: AgentStore = Depends(get_agent_store),
+    engine: ArenaEngine = Depends(get_arena_engine),
+):
+    """运行一场创业路演——两 Agent 各自陈述方案。"""
+    agent_a = store.get(req.agent_a_id)
+    if agent_a is None:
+        raise HTTPException(status_code=404, detail=f"Agent not found: {req.agent_a_id}")
+    agent_b = store.get(req.agent_b_id)
+    if agent_b is None:
+        raise HTTPException(status_code=404, detail=f"Agent not found: {req.agent_b_id}")
+
+    try:
+        result = await engine.run_pitch(agent_a, agent_b, req.topic, req.rounds)
+    except Exception as e:
+        logger.exception("Arena pitch failed")
+        raise HTTPException(status_code=500, detail=f"路演运行失败: {str(e)}")
+
+    result_id = str(uuid.uuid4())
+    result.created_at = datetime.now(timezone.utc).isoformat()
+    _results[result_id] = result
+
+    return ArenaResultResponse(
+        id=result_id,
+        mode=result.mode.value,
+        winner_id=result.winner_id,
+        scores=result.scores,
+        judge_reasoning=result.judge_reasoning,
+        transcript=result.transcript,
+        topic=result.topic,
+        rounds=result.rounds,
+        created_at=result.created_at,
+    )
+
+
 @router.get("/{arena_id}", response_model=ArenaResultResponse)
 async def get_arena_result(arena_id: str):
     """获取竞技结果。"""

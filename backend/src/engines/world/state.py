@@ -158,7 +158,11 @@ class WorldStateMixin:
         await self._db.commit()
 
     def inject_event(self, description: str):
-        """Inject one external world_event for the intervention console."""
+        """Inject one external world_event for the intervention console.
+
+        The event is appended to the engine's event list, persisted,
+        and queued for SSE delivery at the start of the next tick.
+        """
         event = SimEvent(
             id=str(uuid.uuid4()),
             world_id=self.world.id,
@@ -169,4 +173,7 @@ class WorldStateMixin:
             created_at=datetime.now(timezone.utc).isoformat(),
         )
         self.events.append(event)
+        if not hasattr(self, "_pending_injects"):
+            self._pending_injects: list[SimEvent] = []
+        self._pending_injects.append(event)
         logger.info(f"WorldEngine.inject_event: {description[:80]}")

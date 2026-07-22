@@ -5,6 +5,7 @@ import ArenaResultPanel from "../components/arena/ArenaResultPanel";
 import ArenaSetup from "../components/arena/ArenaSetup";
 import EmptyState from "../components/shared/EmptyState";
 import { findItemById } from "../data/menuData";
+import { useRunDebate, adaptArenaResult } from "../api/arenas";
 import { MOCK_AGENTS } from "../mocks/agents";
 import {
   ARENA_MODE_OPTIONS,
@@ -24,7 +25,7 @@ import type {
 const TRANSCRIPT_INTERVAL_MS = 800;
 const JUDGE_DELAY_MS = 1200;
 
-/** Step 22 竞技场页面：本地状态编排与 M4 hash 分流。 */
+/** Step 34b 竞技场页面：debate 走真实 API，interview/pitch 保留 Mock。 */
 export default function Arena() {
   const { hash } = useLocation();
   const agents = useAvailableAgents();
@@ -44,6 +45,9 @@ export default function Arena() {
   );
   const [result, setResult] = useState<ArenaPresentationResult | null>(null);
   const [visibleTranscriptCount, setVisibleTranscriptCount] = useState(0);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const runDebate = useRunDebate();
 
   const selectedAgentA = agents.find(
     (agent) => agent.id === selectedAgentAId,
@@ -62,7 +66,8 @@ export default function Arena() {
     selectedAgentA &&
       selectedAgentB &&
       selectedAgentA.id !== selectedAgentB.id &&
-      topic.trim(),
+      topic.trim() &&
+      !runDebate.isPending,
   );
   const visibleTranscript =
     result?.transcript.slice(0, visibleTranscriptCount) ?? [];
@@ -102,8 +107,37 @@ export default function Arena() {
     if (option) setTopic(option.default_topic);
   };
 
-  const handleStart = () => {
+  const handleStart = async () => {
     if (!canStart || !selectedAgentA || !selectedAgentB) return;
+    setErrorMsg(null);
+
+    // debate → 真实 API；interview/pitch → 保留 Mock
+    if (selectedMode === "debate") {
+      setPhase("running"); // 直接用 running 表示 loading（不展示逐条动画）
+      try {
+        const apiResult = await runDebate.mutateAsync({
+          mode: "debate",
+          agent_a_id: selectedAgentAId,
+          agent_b_id: selectedAgentBId,
+          topic,
+          rounds: MOCK_ARENA_ROUNDS,
+        });
+        const presentation = adaptArenaResult(
+          apiResult,
+          { id: selectedAgentA.id, name: selectedAgentA.name },
+          { id: selectedAgentB.id, name: selectedAgentB.name },
+        );
+        setResult(presentation);
+        setVisibleTranscriptCount(presentation.transcript.length);
+        setPhase("result");
+      } catch (cause) {
+        setErrorMsg(cause instanceof Error ? cause.message : "竞技运行失败");
+        setPhase("setup");
+      }
+      return;
+    }
+
+    // interview / pitch → 保留 Mock
     const nextResult = buildMockArenaResult(config, selectedAgentA, selectedAgentB);
     setResult(nextResult);
     setVisibleTranscriptCount(0);
@@ -114,6 +148,7 @@ export default function Arena() {
     setPhase("setup");
     setResult(null);
     setVisibleTranscriptCount(0);
+    setErrorMsg(null);
   };
 
   if (itemId !== null && itemId !== 22) {
@@ -145,6 +180,31 @@ export default function Arena() {
           description="请先在 Agent 铸造厂创建参赛者，再返回竞技场。"
           tier="P1"
         />
+      </div>
+    );
+  }
+
+  // 辩论真实 API 加载中（phase=running 但 result 尚未返回）
+  if (phase === "running" && !result && selectedMode === "debate") {
+    return (
+      <div className="min-h-full flex items-center justify-center animate-fade-in">
+        <div className="text-center">
+          <div className="text-5xl mb-4 animate-pulse">⚔️</div>
+          <h2 className="text-lg font-mono text-text-primary mb-2">
+            辩论进行中…
+          </h2>
+          <p className="text-sm text-text-secondary font-mono">
+            {selectedAgentA?.name} vs {selectedAgentB?.name}
+          </p>
+          <p className="text-xs text-text-secondary/60 font-mono mt-1">
+            辩题：{topic}
+          </p>
+          <div className="mt-6 flex justify-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-accent-orange/60 animate-pulse" />
+            <span className="w-2 h-2 rounded-full bg-accent-orange/40 animate-pulse [animation-delay:200ms]" />
+            <span className="w-2 h-2 rounded-full bg-accent-orange/20 animate-pulse [animation-delay:400ms]" />
+          </div>
+        </div>
       </div>
     );
   }
@@ -184,21 +244,28 @@ export default function Arena() {
   }
 
   return (
-    <ArenaSetup
-      agents={agents}
-      selectedAgentAId={selectedAgentAId}
-      selectedAgentBId={selectedAgentBId}
-      selectedMode={selectedMode}
-      topic={topic}
-      modeOptions={ARENA_MODE_OPTIONS}
-      topicPresets={ARENA_TOPICS[selectedMode]}
-      canStart={canStart}
-      onSelectAgentA={setSelectedAgentAId}
-      onSelectAgentB={setSelectedAgentBId}
-      onSelectMode={handleSelectMode}
-      onChangeTopic={setTopic}
-      onStart={handleStart}
-    />
+    <>
+      {errorMsg && (
+        <p role="alert" className="text-sm text-accent-red font-mono px-6 pt-4">
+          {errorMsg}
+        </p>
+      )}
+      <ArenaSetup
+        agents={agents}
+        selectedAgentAId={selectedAgentAId}
+        selectedAgentBId={selectedAgentBId}
+        selectedMode={selectedMode}
+        topic={topic}
+        modeOptions={ARENA_MODE_OPTIONS}
+        topicPresets={ARENA_TOPICS[selectedMode]}
+        canStart={canStart}
+        onSelectAgentA={setSelectedAgentAId}
+        onSelectAgentB={setSelectedAgentBId}
+        onSelectMode={handleSelectMode}
+        onChangeTopic={setTopic}
+        onStart={handleStart}
+      />
+    </>
   );
 }
 

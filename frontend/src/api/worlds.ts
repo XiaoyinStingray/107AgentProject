@@ -104,3 +104,23 @@ export function useResetWorld() {
     },
   });
 }
+
+/** 向运行中的 World 注入干预事件 */
+export function useInjectEvent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      worldId,
+      description,
+    }: {
+      worldId: string;
+      description: string;
+    }) =>
+      client.post<{ status: string }>(`/worlds/${worldId}/inject`, {
+        description,
+      }),
+    onSuccess: (_, { worldId }) => {
+      qc.invalidateQueries({ queryKey: worldKeys.events(worldId) });
+    },
+  });
+}

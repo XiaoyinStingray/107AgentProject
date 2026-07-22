@@ -154,3 +154,18 @@ async def generate_letter(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"叙事生成失败: {str(e)}")
+
+
+@router.post("/podcast", response_model=NarrativeGenResponse)
+async def generate_podcast(
+    req: NarrativeGenRequest,
+    store: AgentStore = Depends(get_agent_store),
+    engine: NarrativeEngine = Depends(get_narrative_engine),
+):
+    """生成播客脚本。"""
+    try:
+        return await _generate_narrative(NarrativeStyle.PODCAST, req, store, engine)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"叙事生成失败: {str(e)}")
