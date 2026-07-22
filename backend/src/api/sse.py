@@ -10,7 +10,9 @@ SSE 桥接 — WorldEngine.tick_stream() → Server-Sent Events → 前端实时
     es.onmessage = (e) => { const event = JSON.parse(e.data); ... }
 """
 
+import asyncio
 import json
+from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -70,37 +72,8 @@ async def stream_world(world_id: str):
     连接断开后 EventSource 自动重连。
     """
     engine = get_world_engine(world_id)
-
-    async def event_generator():
-        import asyncio
-
-        name_map = {aid: a.persona.name for aid, a in engine.agents.items()}
-        yield _sse_event({"type": "connected", "world_id": world_id, "tick": engine.current_tick})
-
-        # 单人剧场 tick 上限（群体模式走 GroupChat 的 max_turns）
-        max_ticks = 8 if len(engine.agents) == 1 else 0
-        tick_count = 0
-
-        try:
-            while engine.world.status != "finished" and engine.world.status != "idle":
-                if max_ticks and tick_count >= max_ticks:
-                    engine.world.status = "finished"
-                    yield _sse_event({"type": "session_end", "world_id": world_id, "tick": engine.current_tick})
-                    break
-
-                if engine.world.status == "running":
-                    async for event in engine.tick_stream():
-                        yield _sse_event(_event_to_dict(event, name_map))
-                    tick_count += 1
-                elif engine.world.status == "paused":
-                    yield _sse_event({"type": "paused", "world_id": world_id})
-                    await asyncio.sleep(1)
-        except Exception as e:
-            logger.error(f"SSE stream error for world {world_id}: {e}")
-            yield _sse_event({"type": "error", "message": str(e)})
-
     return StreamingResponse(
-        event_generator(),
+        _world_event_generator(world_id, engine),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -108,6 +81,46 @@ async def stream_world(world_id: str):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+async def _world_event_generator(
+    world_id: str,
+    engine: WorldEngine,
+) -> AsyncGenerator[str, None]:
+    """Yield a continuous SSE stream until the World becomes idle or finished."""
+    name_map = {agent_id: agent.persona.name for agent_id, agent in engine.agents.items()}
+    yield _sse_event({"type": "connected", "world_id": world_id, "tick": engine.current_tick})
+    max_ticks = 8 if len(engine.agents) == 1 else 0
+    tick_count = 0
+    try:
+        while engine.world.status not in ("finished", "idle"):
+            if max_ticks and tick_count >= max_ticks:
+                engine.world.status = "finished"
+                _finish_engine_simulation(engine)
+                yield _sse_event({
+                    "type": "session_end",
+                    "world_id": world_id,
+                    "tick": engine.current_tick,
+                })
+                break
+            if engine.world.status == "running":
+                async for event in engine.tick_stream():
+                    yield _sse_event(_event_to_dict(event, name_map))
+                tick_count += 1
+            elif engine.world.status == "paused":
+                yield _sse_event({
+                    "type": "paused",
+                    "world_id": world_id,
+                    "tick": engine.current_tick,
+                })
+                await asyncio.sleep(1)
+    except Exception as error:
+        logger.error(f"SSE stream error for world {world_id}: {error}")
+        yield _sse_event({
+            "type": "error",
+            "message": str(error),
+            "tick": engine.current_tick,
+        })
 
 
 # =============================================================================
@@ -162,3 +175,13 @@ def _event_to_dict(event: SimEvent, name_map: dict = None) -> dict:
         base["target"] = event.data.get("target", "") if event.data else ""
 
     return base
+
+
+def _finish_engine_simulation(engine: WorldEngine) -> None:
+    """Finish the simulation record associated with an exhausted stream."""
+    if not engine.simulation_id:
+        return
+    from api.simulations import finish_simulation
+
+    finish_simulation(engine.simulation_id, engine.current_tick)
+    engine.simulation_id = None

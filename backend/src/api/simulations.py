@@ -64,6 +64,7 @@ async def get_simulation(simulation_id: str):
 
 
 def create_simulation(world_id: str) -> SimulationRecord:
+    """Create and retain one running simulation record for a World."""
     sim = SimulationRecord(
         id=str(uuid.uuid4()),
         world_id=world_id,
@@ -75,6 +76,7 @@ def create_simulation(world_id: str) -> SimulationRecord:
 
 
 def finish_simulation(simulation_id: str, total_ticks: int):
+    """Mark a retained simulation record as finished."""
     sim = _simulations.get(simulation_id)
     if sim:
         sim.status = "finished"

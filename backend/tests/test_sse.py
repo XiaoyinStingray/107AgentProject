@@ -3,6 +3,7 @@ SSE 桥接 单元测试。
 """
 
 import json
+from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
@@ -209,3 +210,50 @@ class TestTickStream:
         # 至少应该有 tick_boundary
         types = [e.type for e in events]
         assert "tick_boundary" in types
+
+    @pytest.mark.asyncio
+    async def test_group_stream_yields_relationship_changes(self, db_session):
+        """Derived relationship events must reach SSE before tick_boundary."""
+        from engines.world.engine import WorldEngine
+        from models.event import SimEvent
+        from models.world import Scenario, WorldResponse
+
+        agents = [
+            SimpleNamespace(
+                id=agent_id,
+                persona=SimpleNamespace(name=name),
+                autogen_agent=SimpleNamespace(name=f"agent_{agent_id}"),
+            )
+            for agent_id, name in (("a1", "小明"), ("a2", "小红"))
+        ]
+        world = WorldResponse(
+            id="w-group",
+            name="group stream",
+            scenario=Scenario(name="期末周"),
+            agent_ids=["a1", "a2"],
+            created_at="2026-01-01",
+        )
+        engine = WorldEngine(world, agents, db_session)
+
+        async def skip_context():
+            return None
+
+        async def fake_group_stream():
+            yield SimEvent(
+                id="message-1",
+                world_id=world.id,
+                tick=0,
+                type="agent_message",
+                source_agent_id="a1",
+                target_agent_ids=["a2"],
+                description="我要先去图书馆占座",
+                created_at="2026-01-01",
+            )
+
+        engine._inject_world_context = skip_context
+        engine._stream_group_tick = fake_group_stream
+        events = [event async for event in engine.tick_stream()]
+
+        event_types = [event.type for event in events]
+        assert "relationship_change" in event_types
+        assert event_types[-1] == "tick_boundary"

@@ -3,12 +3,14 @@ World API 路由 单元测试。
 """
 
 import json
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.agents import get_agent_store, AgentStore
+from api.agents import get_agent_store, AgentStore, router as agents_router
+from api.simulations import router as simulations_router
 from api.worlds import get_world_store, WorldStore, router
 
 
@@ -40,9 +42,13 @@ def _mock_factory():
 @pytest.fixture(autouse=True)
 def _reset_stores():
     import api.agents as agents_mod
+    import api.simulations as simulations_mod
+    import api.sse as sse_mod
     import api.worlds as worlds_mod
     agents_mod._agent_store = AgentStore()
     worlds_mod._world_store = WorldStore()
+    simulations_mod._simulations.clear()
+    sse_mod._active_worlds.clear()
 
 
 @pytest.fixture
@@ -50,7 +56,9 @@ def app():
     from api.agents import get_agent_factory
 
     app = FastAPI()
+    app.include_router(agents_router)
     app.include_router(router)
+    app.include_router(simulations_router)
     app.dependency_overrides[get_agent_factory] = _mock_factory
     return app
 
@@ -61,7 +69,7 @@ def client(app):
 
 
 def _create_agent(client, description="测试角色"):
-    resp = client.post("/api/agents/", json={"description": description})
+    resp = client.post("/api/agents", json={"description": description})
     return resp.json()["id"]
 
 
@@ -87,6 +95,28 @@ class TestCreateWorld:
         })
         assert resp.status_code == 201
         assert resp.json()["scenario"]["name"] == "新生报到"
+
+    def test_named_builtin_scenario_includes_resource_params(self, client):
+        resp = client.post("/api/worlds", json={
+            "name": "期末周世界",
+            "scenario": {"name": "期末周"},
+            "agent_ids": [],
+        })
+        scenario = resp.json()["scenario"]
+        assert scenario["environment_params"]["stress_level"] == "high"
+        assert "图书馆座位减少80%" in scenario["initial_events"]
+
+    def test_custom_scenario_is_not_replaced(self, client):
+        resp = client.post("/api/worlds", json={
+            "name": "自定义世界",
+            "scenario": {
+                "name": "社团招新",
+                "environment_params": {"location": "广场"},
+            },
+            "agent_ids": [],
+        })
+        assert resp.json()["scenario"]["name"] == "社团招新"
+        assert resp.json()["scenario"]["environment_params"] == {"location": "广场"}
 
 
 # =============================================================================
@@ -143,6 +173,27 @@ class TestStartWorld:
         resp = client.post("/api/worlds/nonexistent/start")
         assert resp.status_code == 404
 
+    def test_start_and_reset_record_simulation(self, client):
+        agent_id = _create_agent(client)
+        world = client.post("/api/worlds", json={
+            "name": "W",
+            "scenario": {"name": "期末周"},
+            "agent_ids": [agent_id],
+        }).json()
+
+        assert client.post(f"/api/worlds/{world['id']}/start").status_code == 200
+        running = client.get(
+            f"/api/simulations?world_id={world['id']}"
+        ).json()
+        assert len(running) == 1
+        assert running[0]["status"] == "running"
+
+        assert client.post(f"/api/worlds/{world['id']}/reset").status_code == 200
+        finished = client.get(
+            f"/api/simulations?world_id={world['id']}"
+        ).json()
+        assert finished[0]["status"] == "finished"
+
 
 # =============================================================================
 # POST /api/worlds/{id}/pause
@@ -157,6 +208,26 @@ class TestPauseWorld:
         resp = client.post(f"/api/worlds/{wid}/pause")
         assert resp.status_code == 200
         assert resp.json()["status"] == "paused"
+
+
+class TestRelationships:
+    def test_active_world_returns_typed_snapshot(self, client):
+        import api.sse as sse_mod
+
+        sse_mod._active_worlds["world-rel"] = SimpleNamespace(
+            agents={
+                "a1": SimpleNamespace(id="a1", persona=SimpleNamespace(name="小明")),
+                "a2": SimpleNamespace(id="a2", persona=SimpleNamespace(name="小红")),
+            },
+            relationships={("a1", "a2"): 0.125},
+        )
+
+        response = client.get("/api/worlds/world-rel/relationships")
+
+        assert response.status_code == 200
+        assert response.json()["edges"] == [
+            {"source": "a1", "target": "a2", "score": 0.12}
+        ]
 
 
 # =============================================================================

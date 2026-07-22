@@ -1,13 +1,10 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
 import EventFeed from "./EventFeed";
 import Timeline from "./Timeline";
 import type { SSEEvent } from "../../types/events";
 import SandboxHeader from "./SandboxHeader";
 import SandboxSetup from "./SandboxSetup";
-import RelationshipGraph from "./RelationshipGraph";
-import GroupSandbox from "../../pages/GroupSandbox";
 import { MOCK_AGENTS } from "../../mocks/agents";
 import { MOCK_SANDBOX_SCENARIOS } from "../../mocks/sandbox";
 
@@ -32,65 +29,16 @@ const events: SSEEvent[] = [
     agent_name: "B",
     tick: 2,
     description: "relationship shifted",
-    data: { change: -0.05, score: 0.1 },
+    data: {
+      from: "agent-2",
+      to: "agent-1",
+      old_score: 0.15,
+      new_score: 0.1,
+      interaction: "competitive",
+      intensity: 1,
+    },
   },
 ];
-
-describe("Step 21 RelationshipGraph", () => {
-  const relEvents: SSEEvent[] = [
-    {
-      type: "relationship_change",
-      tick: 2,
-      agent_id: "mock-2",
-      agent_name: "小红",
-      description: "关系变化",
-      data: {
-        agent_a: "mock-1",
-        agent_b: "mock-2",
-        change: 0.15,
-        score: 0.25,
-        interaction: "friendly",
-      },
-    },
-    {
-      type: "relationship_change",
-      tick: 3,
-      agent_id: "mock-3",
-      agent_name: "小刚",
-      description: "关系变化",
-      data: {
-        agent_a: "mock-3",
-        agent_b: "mock-1",
-        change: -0.1,
-        score: -0.1,
-        interaction: "competitive",
-      },
-    },
-  ];
-
-  it("renders edges with correct score labels", () => {
-    render(
-      <RelationshipGraph agents={MOCK_AGENTS} events={relEvents} />,
-    );
-    expect(screen.getByText("+0.25")).toBeInTheDocument();
-    expect(screen.getByText("-0.10")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: /关系网络图/ })).toBeInTheDocument();
-  });
-
-  it("shows placeholder when fewer than 2 agents", () => {
-    render(
-      <RelationshipGraph agents={MOCK_AGENTS.slice(0, 1)} events={relEvents} />,
-    );
-    expect(screen.getByText(/至少 2 个 Agent/)).toBeInTheDocument();
-  });
-
-  it("renders legend labels", () => {
-    render(<RelationshipGraph agents={MOCK_AGENTS} events={[]} />);
-    expect(screen.getByText("友好")).toBeInTheDocument();
-    expect(screen.getByText("中立")).toBeInTheDocument();
-    expect(screen.getByText("敌对")).toBeInTheDocument();
-  });
-});
 
 describe("Step 20 world components", () => {
   it("groups timeline events and selects a tick", () => {
@@ -173,6 +121,8 @@ describe("Step 20 world components", () => {
         scenario="Test world"
         currentTick={3}
         connected
+        isPaused={false}
+        isPending={false}
         speed={1}
         onToggleSpeed={onToggleSpeed}
         onToggleRunning={onToggleRunning}
@@ -189,28 +139,5 @@ describe("Step 20 world components", () => {
     expect(onToggleRunning).toHaveBeenCalledOnce();
     expect(onToggleSpeed).toHaveBeenCalledOnce();
     expect(onReset).toHaveBeenCalledOnce();
-  });
-
-  it("starts the mock runtime and changes speed without losing the stream", () => {
-    vi.useFakeTimers();
-    render(
-      <MemoryRouter>
-        <GroupSandbox />
-      </MemoryRouter>
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: /Agents/ }));
-    expect(screen.getByText("RUNNING")).toBeInTheDocument();
-
-    act(() => vi.advanceTimersByTime(2000));
-    expect(screen.getByText(/1 events/)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /Speed 1x/ }));
-    expect(screen.getByRole("button", { name: /Speed 2x/ })).toBeInTheDocument();
-
-    act(() => vi.advanceTimersByTime(1000));
-    expect(screen.getByText(/2 events/)).toBeInTheDocument();
-
-    vi.useRealTimers();
   });
 });

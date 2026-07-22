@@ -14,6 +14,7 @@ export const worldKeys = {
   all: ["worlds"] as const,
   detail: (id: string) => ["worlds", id] as const,
   events: (id: string) => ["worlds", id, "events"] as const,
+  relationships: (id: string) => ["worlds", id, "relationships"] as const,
 };
 
 // Step 30–31 追加:

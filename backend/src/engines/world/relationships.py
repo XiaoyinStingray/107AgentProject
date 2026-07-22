@@ -76,7 +76,8 @@ _COOPERATIVE_PATTERNS: list[str] = [
 ]
 _COMPETITIVE_PATTERNS: list[str] = [
     "比", "赢", "胜", "竞争", "对手", "打败", "超过", "第一",
-    "我比你", "你不行", "看看谁", "挑战",
+    "我比你", "你不行", "看看谁", "挑战", "抢座", "占座", "争夺",
+    "抢占", "先到先得", "名额",
     "beat", "win", "compete", "rival", "better than",
 ]
 

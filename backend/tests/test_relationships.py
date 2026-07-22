@@ -68,6 +68,9 @@ class TestDetectInteraction:
     def test_competitive_keywords(self):
         assert detect_interaction_type("我一定要赢过你") == "competitive"
 
+    def test_resource_competition_keywords(self):
+        assert detect_interaction_type("我得先去图书馆占座") == "competitive"
+
     def test_neutral_no_keywords(self):
         assert detect_interaction_type("今天天气不错") == "neutral"
 

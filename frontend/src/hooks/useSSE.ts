@@ -14,7 +14,16 @@ import type { SSEEvent } from "../types/events";
 export function useSSE(worldId: string | null) {
   const eventSourceRef = useRef<EventSource | null>(null);
   const lastTickRef = useRef<number>(0);
-  const { events, appendEvent, clear, setConnected, connected } = useSSEStore();
+  const {
+    events,
+    appendEvent,
+    clear,
+    setConnected,
+    connected,
+    relationships,
+    lastRelationshipKey,
+    hydrateRelationships,
+  } = useSSEStore();
 
   /** 去重追加事件 */
   const appendUnique = useCallback(
@@ -75,6 +84,7 @@ export function useSSE(worldId: string | null) {
 
   // worldId 变化时重连
   useEffect(() => {
+    lastTickRef.current = 0;
     if (worldId) {
       connect();
     } else {
@@ -83,5 +93,14 @@ export function useSSE(worldId: string | null) {
     return () => disconnect();
   }, [worldId, connect, disconnect]);
 
-  return { events, connected, connect, disconnect, clear };
+  return {
+    events,
+    connected,
+    relationships,
+    lastRelationshipKey,
+    hydrateRelationships,
+    connect,
+    disconnect,
+    clear,
+  };
 }

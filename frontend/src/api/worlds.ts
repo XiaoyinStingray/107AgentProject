@@ -8,6 +8,7 @@ import { client } from "./client";
 import { worldKeys } from "./queryKeys";
 import type { WorldCreate, WorldResponse } from "../types/world";
 import type { SimEvent } from "../types/events";
+import type { RelationshipSnapshot } from "../types/relationships";
 
 // ===== Queries =====
 
@@ -35,6 +36,17 @@ export function useWorldEvents(worldId: string | null, tickFrom = 0) {
     queryKey: worldKeys.events(worldId ?? ""),
     queryFn: () =>
       client.get<SimEvent[]>(`/worlds/${worldId}/events?tick_from=${tickFrom}`),
+    enabled: !!worldId,
+    staleTime: 5_000,
+  });
+}
+
+/** 获取活跃 World 的当前关系网络快照。 */
+export function useWorldRelationships(worldId: string | null) {
+  return useQuery({
+    queryKey: worldKeys.relationships(worldId ?? ""),
+    queryFn: () =>
+      client.get<RelationshipSnapshot>(`/worlds/${worldId}/relationships`),
     enabled: !!worldId,
     staleTime: 5_000,
   });
@@ -88,6 +100,7 @@ export function useResetWorld() {
     onSuccess: (_, worldId) => {
       qc.invalidateQueries({ queryKey: worldKeys.detail(worldId) });
       qc.invalidateQueries({ queryKey: worldKeys.all });
+      qc.removeQueries({ queryKey: worldKeys.relationships(worldId) });
     },
   });
 }

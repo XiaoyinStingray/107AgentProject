@@ -119,6 +119,15 @@ async def test_create_from_description_has_autogen_agent(factory):
 
 
 @pytest.mark.asyncio
+async def test_created_agent_exposes_selector_metadata(factory):
+    """LifeAgent 为群聊 Selector 提供模型客户端和真实角色描述。"""
+    agent = await factory.create_from_description("测试角色")
+
+    assert agent.model_client is factory.model_client
+    assert agent.autogen_agent.description.startswith("小明：")
+
+
+@pytest.mark.asyncio
 async def test_create_from_description_persona_has_name(factory):
     """builder 生成的 persona.name 与 PersonaBuildResult.name 一致"""
     agent = await factory.create_from_description("测试")

@@ -14,6 +14,7 @@ export default function EventFeed({
   const feedEvents = events.filter(
     (event) =>
       event.type !== "thought_stream" &&
+      !INFRASTRUCTURE_EVENTS.has(event.type) &&
       (selectedTick === null || event.tick === selectedTick),
   );
 
@@ -115,8 +116,9 @@ function EventRow({ event }: { event: SSEEvent }) {
 
 function RelationshipMeta({ event }: { event: SSEEvent }) {
   const data = event.data;
-  const change = typeof data?.change === "number" ? data.change : null;
-  const score = typeof data?.score === "number" ? data.score : null;
+  const oldScore = typeof data?.old_score === "number" ? data.old_score : null;
+  const score = typeof data?.new_score === "number" ? data.new_score : null;
+  const change = oldScore === null || score === null ? null : score - oldScore;
   const changeText = change === null ? "变化未知" : formatSignedNumber(change);
   const scoreText = score === null ? "分数未知" : `当前 ${score.toFixed(2)}`;
 
@@ -188,3 +190,10 @@ const EVENT_VISUALS: Record<
   error: { label: "", border: "", text: "" },
   session_end: { label: "", border: "", text: "" },
 };
+
+const INFRASTRUCTURE_EVENTS = new Set<SSEEventType>([
+  "connected",
+  "paused",
+  "error",
+  "session_end",
+]);

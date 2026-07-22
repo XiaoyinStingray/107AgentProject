@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
+import { useAgents } from "../api/agents";
+import {
+  useCreateWorld,
+  usePauseWorld,
+  useResetWorld,
+  useStartWorld,
+  useWorldRelationships,
+} from "../api/worlds";
+import { useSSE } from "../hooks/useSSE";
+import { useThrottledEvents } from "../hooks/useThrottledEvents";
+import { SANDBOX_SCENARIOS } from "../data/sandboxScenarios";
 import type { AgentResponse } from "../types/agent";
 import type { SSEEvent } from "../types/events";
+import type { RelationshipState } from "../types/relationships";
 import type { SandboxSpeed } from "../types/sandbox";
-import { MOCK_AGENTS } from "../mocks/agents";
-import {
-  MOCK_SANDBOX_EVENTS,
-  MOCK_SANDBOX_SCENARIOS,
-} from "../mocks/sandbox";
-import { useAgentStore } from "../stores/useAgentStore";
 import AgentStatusPanel from "../components/world/AgentStatusPanel";
 import EventFeed from "../components/world/EventFeed";
 import Timeline from "../components/world/Timeline";
@@ -18,58 +24,137 @@ import SandboxSetup from "../components/world/SandboxSetup";
 import ThoughtStream from "../components/agent/ThoughtStream";
 import Card from "../components/shared/Card";
 
-/** Step 20 群体沙盒主页面。 */
+/** Drive a real multi-Agent World through REST control and SSE events. */
 export default function GroupSandbox() {
   const location = useLocation();
   const initialScenario = (location.state as { scenario?: string } | null)?.scenario;
-  const agents = useAvailableAgents();
+  const { data: agents = [], isLoading: agentsLoading, error: agentsError } = useAgents();
+  const initializedAgents = useRef(false);
   const [phase, setPhase] = useState<"setup" | "running">("setup");
-  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>(
-    agents.map((agent) => agent.id),
-  );
+  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);
   const [selectedScenario, setSelectedScenario] = useState(initialScenario ?? "期末周");
   const [selectedTick, setSelectedTick] = useState<number | null>(null);
   const [speed, setSpeed] = useState<SandboxSpeed>(1);
-  const { events, connected, start, resume, stop, clear } =
-    useSandboxMockSSE(speed);
+  const [worldId, setWorldId] = useState<string | null>(null);
+  const [isPaused, setIsPaused] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const createWorld = useCreateWorld();
+  const startWorld = useStartWorld();
+  const pauseWorld = usePauseWorld();
+  const resetWorld = useResetWorld();
+  const relationshipQuery = useWorldRelationships(worldId);
+  const {
+    events,
+    connected,
+    relationships,
+    lastRelationshipKey,
+    hydrateRelationships,
+    disconnect,
+    clear,
+  } = useSSE(worldId);
+  const displayedEvents = useThrottledEvents(events, speed, isPaused, worldId);
 
-  const selectedAgents = agents.filter((agent) =>
-    selectedAgentIds.includes(agent.id),
+  useEffect(() => {
+    if (initializedAgents.current || agents.length === 0) return;
+    setSelectedAgentIds(agents.slice(0, 3).map((agent) => agent.id));
+    initializedAgents.current = true;
+  }, [agents]);
+
+  useEffect(() => {
+    if (relationshipQuery.data) hydrateRelationships(relationshipQuery.data);
+  }, [hydrateRelationships, relationshipQuery.data]);
+
+  useEffect(() => {
+    const streamError = [...events].reverse().find((event) => event.type === "error");
+    if (streamError) {
+      setError(streamError.message ?? streamError.content ?? "SSE 连接发生错误");
+    }
+  }, [events]);
+
+  const selectedAgents = useMemo(
+    () => agents.filter((agent) => selectedAgentIds.includes(agent.id)),
+    [agents, selectedAgentIds],
   );
-  const visibleEvents = events.filter(
-    (event) => !event.agent_id || selectedAgentIds.includes(event.agent_id),
+  const visibleEvents = useMemo(
+    () => displayedEvents.filter((event) =>
+      !INFRASTRUCTURE_EVENT_TYPES.has(event.type)
+      && (!event.agent_id || selectedAgentIds.includes(event.agent_id))),
+    [displayedEvents, selectedAgentIds],
   );
-  const currentTick = getCurrentTick(visibleEvents);
+  const relationshipValues = useMemo(
+    () => Object.values(relationships),
+    [relationships],
+  );
+  const pending = createWorld.isPending || startWorld.isPending
+    || pauseWorld.isPending || resetWorld.isPending;
 
   const handleToggleAgent = useCallback((agentId: string) => {
-    setSelectedAgentIds((current) =>
-      current.includes(agentId)
-        ? current.filter((id) => id !== agentId)
-        : [...current, agentId],
-    );
+    setSelectedAgentIds((current) => current.includes(agentId)
+      ? current.filter((id) => id !== agentId)
+      : [...current, agentId]);
   }, []);
 
-  const handleStart = useCallback(() => {
-    if (selectedAgentIds.length === 0) return;
-    setSelectedTick(null);
-    setPhase("running");
-    start();
-  }, [selectedAgentIds.length, start]);
-
-  const handleReset = useCallback(() => {
-    stop();
+  const handleStart = async () => {
+    if (selectedAgentIds.length < 2 || pending) return;
+    setError(null);
     clear();
-    setSelectedTick(null);
-    setPhase("setup");
-  }, [clear, stop]);
+    try {
+      const world = await createWorld.mutateAsync({
+        name: `群体沙盒 - ${selectedScenario}`,
+        scenario: { name: selectedScenario },
+        agent_ids: selectedAgentIds,
+      });
+      await startWorld.mutateAsync(world.id);
+      setWorldId(world.id);
+      setSelectedTick(null);
+      setIsPaused(false);
+      setPhase("running");
+    } catch (cause) {
+      setError(getErrorMessage(cause, "群体模拟启动失败"));
+    }
+  };
+
+  const handleToggleRunning = async () => {
+    if (!worldId || pending) return;
+    setError(null);
+    try {
+      if (isPaused) {
+        await startWorld.mutateAsync(worldId);
+        setIsPaused(false);
+      } else {
+        await pauseWorld.mutateAsync(worldId);
+        setIsPaused(true);
+      }
+    } catch (cause) {
+      setError(getErrorMessage(cause, "模拟状态切换失败"));
+    }
+  };
+
+  const handleReset = async () => {
+    if (!worldId || pending) return;
+    setError(null);
+    try {
+      await resetWorld.mutateAsync(worldId);
+      disconnect();
+      clear();
+      setWorldId(null);
+      setSelectedTick(null);
+      setIsPaused(false);
+      setPhase("setup");
+    } catch (cause) {
+      setError(getErrorMessage(cause, "模拟重置失败"));
+    }
+  };
 
   if (phase === "setup") {
     return (
       <SandboxSetup
         agents={agents}
-        scenarios={MOCK_SANDBOX_SCENARIOS}
+        scenarios={SANDBOX_SCENARIOS}
         selectedAgentIds={selectedAgentIds}
         selectedScenario={selectedScenario}
+        isLoading={agentsLoading || pending}
+        error={error ?? (agentsError ? "Agent 列表加载失败" : null)}
         onToggleAgent={handleToggleAgent}
         onSelectScenario={setSelectedScenario}
         onStart={handleStart}
@@ -81,142 +166,96 @@ export default function GroupSandbox() {
     <div className="h-full min-h-0 flex flex-col bg-bg-primary">
       <SandboxHeader
         scenario={selectedScenario}
-        currentTick={currentTick}
+        currentTick={getCurrentTick(visibleEvents)}
         connected={connected}
+        isPaused={isPaused}
+        isPending={pending}
         speed={speed}
-        onToggleSpeed={() => setSpeed((value) => (value === 1 ? 2 : 1))}
-        onToggleRunning={connected ? stop : resume}
+        onToggleSpeed={() => setSpeed((value) => value === 1 ? 2 : 1)}
+        onToggleRunning={handleToggleRunning}
         onReset={handleReset}
       />
-
-      <div className="flex-1 min-h-0 min-w-0 grid grid-cols-12 gap-3 p-3">
-        <aside className="col-span-3 min-h-0 min-w-0 overflow-y-auto space-y-3">
-          {selectedAgents.map((agent) => (
-            <AgentStatusPanel
-              key={agent.id}
-              agent={agent}
-              events={visibleEvents.filter((event) => event.agent_id === agent.id)}
-            />
-          ))}
-        </aside>
-
-        <main className="col-span-6 min-h-0 min-w-0 overflow-hidden">
-          <div className="h-full flex flex-col gap-3">
-            <div className="shrink-0 grid grid-cols-2 gap-3">
-              <Card>
-                <Timeline
-                  events={visibleEvents}
-                  selectedTick={selectedTick}
-                  onSelectTick={setSelectedTick}
-                />
-              </Card>
-              <RelationshipGraph
-                agents={selectedAgents}
-                events={visibleEvents}
-              />
-            </div>
-            <Card className="flex-1 min-h-0 overflow-hidden flex flex-col">
-              <EventFeed events={visibleEvents} selectedTick={selectedTick} />
-            </Card>
-          </div>
-        </main>
-
-        <aside className="col-span-3 min-h-0 min-w-0 overflow-hidden">
-          <Card className="h-full min-h-0 flex flex-col overflow-hidden">
-            <div className="px-4 py-3 border-b border-border">
-              <h2 className="font-mono text-sm text-text-primary">
-                THOUGHT STREAM
-              </h2>
-            </div>
-            <ThoughtStream events={visibleEvents} className="flex-1 min-h-0" />
-          </Card>
-        </aside>
-      </div>
-
-      <div className="shrink-0 border-t border-border bg-bg-secondary px-4 py-2 flex items-center gap-4">
-        <span className="text-xs font-mono text-text-secondary">
-          {selectedTick === null ? "全部 Tick" : `Tick #${selectedTick}`}
-        </span>
-        <button
-          type="button"
-          onClick={() => setSelectedTick(null)}
-          className="text-xs font-mono text-accent-blue hover:text-accent-blue/80 transition-colors"
-        >
-          清除筛选
-        </button>
-        <span className="ml-auto text-xs font-mono text-text-secondary">
-          {visibleEvents.length} events · {selectedAgents.length} agents
-        </span>
-      </div>
+      {error && <p role="alert" className="px-4 py-2 text-sm text-accent-red">{error}</p>}
+      <SandboxRuntime
+        agents={selectedAgents}
+        events={visibleEvents}
+        relationships={relationshipValues}
+        lastRelationshipKey={lastRelationshipKey}
+        selectedTick={selectedTick}
+        onSelectTick={setSelectedTick}
+      />
+      <SandboxFooter
+        selectedTick={selectedTick}
+        eventCount={visibleEvents.length}
+        agentCount={selectedAgents.length}
+        onClearTick={() => setSelectedTick(null)}
+      />
     </div>
   );
 }
 
-function useAvailableAgents(): AgentResponse[] {
-  const createdAgents = useAgentStore((state) => state.agents);
-
-  return useMemo(() => {
-    const byId = new Map<string, AgentResponse>();
-    [...MOCK_AGENTS, ...createdAgents].forEach((agent) => {
-      byId.set(agent.id, agent);
-    });
-    return [...byId.values()];
-  }, [createdAgents]);
+interface SandboxRuntimeProps {
+  agents: AgentResponse[];
+  events: SSEEvent[];
+  relationships: RelationshipState[];
+  lastRelationshipKey: string | null;
+  selectedTick: number | null;
+  onSelectTick: (tick: number | null) => void;
 }
 
-/** Mock 事件播放器，独立于 Step 18 的通用 SSE hook。 */
-function useSandboxMockSSE(speed: SandboxSpeed) {
-  const [events, setEvents] = useState<SSEEvent[]>([]);
-  const [connected, setConnected] = useState(false);
-  const indexRef = useRef(0);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+function SandboxRuntime(props: SandboxRuntimeProps) {
+  return (
+    <div className="flex-1 min-h-0 min-w-0 grid grid-cols-12 gap-3 p-3">
+      <aside className="col-span-3 min-h-0 min-w-0 overflow-y-auto space-y-3">
+        {props.agents.map((agent) => <AgentStatusPanel key={agent.id} agent={agent} events={props.events.filter((event) => event.agent_id === agent.id)} />)}
+      </aside>
+      <main className="col-span-6 min-h-0 min-w-0 overflow-hidden">
+        <div className="h-full flex flex-col gap-3">
+          <div className="shrink-0 grid grid-cols-2 gap-3">
+            <Card><Timeline events={props.events} selectedTick={props.selectedTick} onSelectTick={props.onSelectTick} /></Card>
+            <RelationshipGraph agents={props.agents} relationships={props.relationships} lastRelationshipKey={props.lastRelationshipKey} />
+          </div>
+          <Card className="flex-1 min-h-0 overflow-hidden flex flex-col"><EventFeed events={props.events} selectedTick={props.selectedTick} /></Card>
+        </div>
+      </main>
+      <aside className="col-span-3 min-h-0 min-w-0 overflow-hidden">
+        <Card className="h-full min-h-0 flex flex-col overflow-hidden">
+          <div className="px-4 py-3 border-b border-border"><h2 className="font-mono text-sm text-text-primary">THOUGHT STREAM</h2></div>
+          <ThoughtStream events={props.events} className="flex-1 min-h-0" />
+        </Card>
+      </aside>
+    </div>
+  );
+}
 
-  const stop = useCallback(() => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    timerRef.current = null;
-    setConnected(false);
-  }, []);
+interface SandboxFooterProps {
+  selectedTick: number | null;
+  eventCount: number;
+  agentCount: number;
+  onClearTick: () => void;
+}
 
-  const schedule = useCallback(() => {
-    timerRef.current = setInterval(() => {
-      const event = MOCK_SANDBOX_EVENTS[indexRef.current];
-      if (!event) {
-        stop();
-        return;
-      }
-      setEvents((current) => [...current, event]);
-      indexRef.current += 1;
-    }, 2000 / speed);
-    setConnected(true);
-  }, [speed, stop]);
-
-  useEffect(() => {
-    if (!timerRef.current) return;
-    clearInterval(timerRef.current);
-    timerRef.current = null;
-    schedule();
-  }, [schedule]);
-
-  const start = useCallback(() => {
-    stop();
-    setEvents([]);
-    indexRef.current = 0;
-    schedule();
-  }, [schedule, stop]);
-
-  const resume = useCallback(() => {
-    if (!timerRef.current && indexRef.current < MOCK_SANDBOX_EVENTS.length) {
-      schedule();
-    }
-  }, [schedule]);
-
-  const clear = useCallback(() => setEvents([]), []);
-
-  useEffect(() => stop, [stop]);
-
-  return { events, connected, start, resume, stop, clear };
+function SandboxFooter(props: SandboxFooterProps) {
+  return (
+    <div className="shrink-0 border-t border-border bg-bg-secondary px-4 py-2 flex items-center gap-4">
+      <span className="text-xs font-mono text-text-secondary">{props.selectedTick === null ? "全部 Tick" : `Tick #${props.selectedTick}`}</span>
+      <button type="button" onClick={props.onClearTick} className="text-xs font-mono text-accent-blue hover:text-accent-blue/80 transition-colors">清除筛选</button>
+      <span className="ml-auto text-xs font-mono text-text-secondary">{props.eventCount} events · {props.agentCount} agents</span>
+    </div>
+  );
 }
 
 function getCurrentTick(events: SSEEvent[]): number {
   return events.reduce((current, event) => Math.max(current, event.tick), 0);
 }
+
+function getErrorMessage(cause: unknown, fallback: string): string {
+  return cause instanceof Error ? cause.message : fallback;
+}
+
+const INFRASTRUCTURE_EVENT_TYPES = new Set([
+  "connected",
+  "paused",
+  "error",
+  "session_end",
+]);

@@ -59,6 +59,7 @@ class LifeAgent:
         self.energy = 100.0
         self.created_at = datetime.now(timezone.utc).isoformat()
         self.updated_at = self.created_at
+        self._model_client = model_client
 
         # === 构建 AutoGen AssistantAgent ===
         from autogen_agentchat.agents import AssistantAgent
@@ -66,10 +67,13 @@ class LifeAgent:
         system_message = build_system_message(persona, background, goals)
         # AutoGen 要求 agent name 是合法的 Python 标识符
         agent_name = f"agent_{id.replace('-', '')[-8:]}"
+        display_name = persona.name or id
+        role_description = f"{display_name}：{persona.narrative[:160]}"
 
         self._agent = AssistantAgent(
             name=agent_name,
             model_client=model_client,
+            description=role_description,
             system_message=system_message,
             tools=tools or [],
             reflect_on_tool_use=True,
@@ -90,6 +94,11 @@ class LifeAgent:
             AssistantAgent: AutoGen 的 AssistantAgent 实例
         """
         return self._agent
+
+    @property
+    def model_client(self):
+        """Expose the shared model client for AutoGen team orchestration."""
+        return self._model_client
 
     def inject_context(self, world_state: str, memories: list[MemoryResponse] | None = None):
         """每 tick 前刷新系统提示——注入当前世界状态和近期记忆。

@@ -5,6 +5,8 @@ interface SandboxHeaderProps {
   scenario: string;
   currentTick: number;
   connected: boolean;
+  isPaused: boolean;
+  isPending: boolean;
   speed: SandboxSpeed;
   onToggleSpeed: () => void;
   onToggleRunning: () => void;
@@ -16,11 +18,15 @@ export default function SandboxHeader({
   scenario,
   currentTick,
   connected,
+  isPaused,
+  isPending,
   speed,
   onToggleSpeed,
   onToggleRunning,
   onReset,
 }: SandboxHeaderProps) {
+  const statusLabel = isPaused ? "PAUSED" : connected ? "RUNNING" : "CONNECTING";
+
   return (
     <header className="shrink-0 border-b border-border bg-bg-secondary px-4 py-3 flex items-center gap-4">
       <div>
@@ -31,19 +37,21 @@ export default function SandboxHeader({
         Tick #{currentTick}
       </span>
       <span className="ml-auto flex items-center gap-2 text-xs font-mono text-text-secondary">
-        <StatusDot status={connected ? "active" : "idle"} label="" />
-        {connected ? "RUNNING" : "PAUSED"}
+        <StatusDot status={connected && !isPaused ? "active" : "idle"} label="" />
+        {statusLabel}
       </span>
       <button
         type="button"
         onClick={onToggleRunning}
+        disabled={isPending}
         className="text-xs font-mono text-accent-green hover:text-accent-green/80 transition-colors"
       >
-        {connected ? "⏸ 暂停" : "▶ 继续"}
+        {isPaused ? "▶ 继续" : "⏸ 暂停"}
       </button>
       <button
         type="button"
         onClick={onToggleSpeed}
+        disabled={isPending}
         className="text-xs font-mono text-accent-blue hover:text-accent-blue/80 transition-colors"
       >
         ⏩ Speed {speed}x
@@ -51,6 +59,7 @@ export default function SandboxHeader({
       <button
         type="button"
         onClick={onReset}
+        disabled={isPending}
         className="text-xs font-mono text-accent-orange hover:text-accent-orange/80 transition-colors"
       >
         重置

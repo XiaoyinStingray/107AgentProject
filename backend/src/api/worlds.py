@@ -20,10 +20,13 @@ from sqlalchemy import select
 from db import async_session
 from api.agents import AgentStore, get_agent_store
 from api.sse import register_world as sse_register, reset_world as sse_reset, _active_worlds
+from api.simulations import create_simulation, finish_simulation
+from api.world_helpers import resolve_world_scenario
 from engines.world.engine import WorldEngine
-from engines.world.scenarios import get_scenario_by_name
 from models.event import Event, SimEvent
-from models.world import Scenario, WorldCreate, WorldResponse
+from models.relationship import RelationshipSnapshotResponse
+from models.world import WorldCreate, WorldResponse
+from models.world_control import WorldControlResponse
 
 router = APIRouter(prefix="/api/worlds", tags=["worlds"])
 
@@ -95,10 +98,8 @@ async def create_world(
     store: WorldStore = Depends(get_world_store),
     agent_store: AgentStore = Depends(get_agent_store),
 ):
-    """创建 World。如果 scenario 为空，使用第一个内置场景。"""
-    scenario = req.scenario
-    if not scenario.name:
-        scenario = get_scenario_by_name("新生报到") or Scenario(name="默认场景")
+    """创建 World，并补齐同名内置场景的完整参数。"""
+    scenario = resolve_world_scenario(req.scenario)
 
     world = WorldResponse(
         id=str(uuid.uuid4()),
@@ -129,7 +130,7 @@ async def get_world(
     return world
 
 
-@router.post("/{world_id}/start")
+@router.post("/{world_id}/start", response_model=WorldControlResponse)
 async def start_world(
     world_id: str,
     background_tasks: BackgroundTasks,
@@ -150,6 +151,8 @@ async def start_world(
         return {"status": "resumed", "world_id": world_id}
 
     engine = await _build_world_engine(world, agent_store)
+    simulation = create_simulation(world_id)
+    engine.simulation_id = simulation.id
     world.status = "running"
 
     # 注册到 SSE 端点可见
@@ -160,7 +163,7 @@ async def start_world(
     return {"status": "started", "world_id": world_id}
 
 
-@router.post("/{world_id}/pause")
+@router.post("/{world_id}/pause", response_model=WorldControlResponse)
 async def pause_world(
     world_id: str,
     store: WorldStore = Depends(get_world_store),
@@ -170,7 +173,7 @@ async def pause_world(
         raise HTTPException(status_code=404, detail=f"World {world_id!r} not found")
 
     world.status = "paused"
-    return {"status": "paused"}
+    return {"status": "paused", "world_id": world_id}
 
 
 @router.post("/{world_id}/inject")
@@ -198,7 +201,7 @@ async def inject_event(
     return {"status": "injected"}
 
 
-@router.post("/{world_id}/reset")
+@router.post("/{world_id}/reset", response_model=WorldControlResponse)
 async def reset_world_endpoint(
     world_id: str,
     store: WorldStore = Depends(get_world_store),
@@ -207,6 +210,10 @@ async def reset_world_endpoint(
     world = store.get(world_id)
     if not world:
         raise HTTPException(status_code=404, detail=f"World {world_id!r} not found")
+
+    engine = _active_worlds.get(world_id)
+    if engine and engine.simulation_id:
+        finish_simulation(engine.simulation_id, engine.current_tick)
 
     # 取消注册引擎 + 标记 idle
     sse_reset(world_id)
@@ -246,7 +253,10 @@ async def get_world_events(
     return [e.to_response() for e in orm_events]
 
 
-@router.get("/{world_id}/relationships")
+@router.get(
+    "/{world_id}/relationships",
+    response_model=RelationshipSnapshotResponse,
+)
 async def get_world_relationships(world_id: str):
     """获取当前世界的关系网络快照——供前端 RelationshipGraph 首次加载。"""
     engine = _active_worlds.get(world_id)

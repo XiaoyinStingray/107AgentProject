@@ -6,6 +6,8 @@ interface SandboxSetupProps {
   scenarios: Scenario[];
   selectedAgentIds: string[];
   selectedScenario: string;
+  isLoading?: boolean;
+  error?: string | null;
   onToggleAgent: (agentId: string) => void;
   onSelectScenario: (scenario: string) => void;
   onStart: () => void;
@@ -17,6 +19,8 @@ export default function SandboxSetup({
   scenarios,
   selectedAgentIds,
   selectedScenario,
+  isLoading = false,
+  error = null,
   onToggleAgent,
   onSelectScenario,
   onStart,
@@ -35,6 +39,11 @@ export default function SandboxSetup({
         selectedAgentIds={selectedAgentIds}
         onToggleAgent={onToggleAgent}
       />
+      {error && (
+        <p role="alert" className="text-sm text-accent-red font-mono">
+          {error}
+        </p>
+      )}
       <ScenarioSelection
         scenarios={scenarios}
         selectedScenario={selectedScenario}
@@ -42,11 +51,13 @@ export default function SandboxSetup({
       />
       <button
         type="button"
-        disabled={selectedAgentIds.length === 0}
+        disabled={selectedAgentIds.length < 2 || isLoading}
         onClick={onStart}
         className="w-full rounded border border-accent-green/50 bg-accent-green/10 py-3 text-sm font-mono text-accent-green hover:bg-accent-green/20 disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
       >
-        开始群体模拟 · {selectedAgentIds.length} Agents
+        {isLoading
+          ? "正在加载 Agent..."
+          : `开始群体模拟 · ${selectedAgentIds.length} Agents`}
       </button>
     </div>
   );
@@ -61,6 +72,11 @@ function AgentSelection({
     <section className="space-y-3">
       <h2 className="text-sm font-mono text-text-secondary">选择 Agent</h2>
       <div className="grid grid-cols-3 gap-3">
+        {agents.length === 0 && (
+          <p className="col-span-3 text-sm text-text-secondary">
+            暂无可用 Agent，请先在铸造厂创建至少两个 Agent。
+          </p>
+        )}
         {agents.map((agent) => {
           const selected = selectedAgentIds.includes(agent.id);
           return (
