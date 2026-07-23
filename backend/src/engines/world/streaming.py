@@ -1,14 +1,39 @@
 """Streaming interaction methods mixed into WorldEngine."""
 
+from __future__ import annotations
+
+import asyncio
 from collections.abc import AsyncGenerator
+from typing import Any
 
 from loguru import logger
 
+from config import settings
 from models.event import SimEvent
 
 
 class WorldStreamingMixin:
-    """Provide streaming solo and GroupChat event conversion."""
+    """Provide streaming solo and GroupChat event conversion.
+
+    This is a Mixin — the following attributes/methods are provided by
+    the host class (WorldEngine) via sibling mixins:
+        world, _name_to_id, _extract_events_from_response,
+        _make_error_event, build_group_chat, _build_group_task,
+        _tool_call_to_event, _clean_group_content,
+        _has_identity_conflict, _make_message_event
+    """
+
+    # Mixin host-class attribute stubs (satisfied by WorldEngine at runtime)
+    world: Any
+    _name_to_id: dict[str, str]
+    _extract_events_from_response: Any
+    _make_error_event: Any
+    build_group_chat: Any
+    _build_group_task: Any
+    _tool_call_to_event: Any
+    _clean_group_content: Any
+    _has_identity_conflict: Any
+    _make_message_event: Any
 
     async def _stream_solo_tick(self, agent) -> AsyncGenerator[SimEvent, None]:
         """Stream one solo response as thought, action, and message events."""
@@ -22,14 +47,20 @@ class WorldStreamingMixin:
             "不要提\"我需要以XX的身份\"。你就是你。"
         )
         try:
-            response = await agent.autogen_agent.on_messages(
-                [TextMessage(content=prompt, source="world")],
-                cancellation_token=CancellationToken(),
+            response = await asyncio.wait_for(
+                agent.autogen_agent.on_messages(
+                    [TextMessage(content=prompt, source="world")],
+                    cancellation_token=CancellationToken(),
+                ),
+                timeout=settings.agent_timeout_seconds,
             )
             for event in self._extract_events_from_response(response, agent.id):
                 yield event
                 if self.world.status == "paused":
                     break
+        except asyncio.TimeoutError:
+            logger.warning(f"Solo tick timed out for agent {agent.id}")
+            yield self._make_error_event(agent.id, "LLM 调用超时，Agent 跳过本轮")
         except Exception as error:
             logger.error(f"stream solo error: {error}")
             yield self._make_error_event(agent.id, str(error))

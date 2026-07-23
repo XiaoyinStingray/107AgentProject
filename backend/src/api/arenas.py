@@ -13,9 +13,13 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.agents import get_agent_store, AgentStore
+from api.agents import _rebuild_agent_from_row
+from db import get_db
 from engines.arena.engine import ArenaEngine, ArenaMode, ArenaResult
+from models.agent_orm import AgentRow
 
 router = APIRouter(prefix="/api/arenas", tags=["arenas"])
 
@@ -62,6 +66,15 @@ def get_arena_engine() -> ArenaEngine:
     return _arena_engine
 
 
+async def _load_agent(db: AsyncSession, agent_id: str):
+    """从 SQLite 加载 Agent 并重建 LifeAgent 实例。"""
+    result = await db.execute(select(AgentRow).where(AgentRow.id == agent_id))
+    row = result.scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
+    return await _rebuild_agent_from_row(row)
+
+
 # =============================================================================
 # 路由
 # =============================================================================
@@ -70,18 +83,14 @@ def get_arena_engine() -> ArenaEngine:
 @router.post("/debate", response_model=ArenaResultResponse, status_code=201)
 async def run_debate(
     req: ArenaCreateRequest,
-    store: AgentStore = Depends(get_agent_store),
+    db: AsyncSession = Depends(get_db),
     engine: ArenaEngine = Depends(get_arena_engine),
 ):
     """运行一场 1v1 辩论——两个 Agent 轮转发言，LLM 裁判独立评分。"""
 
-    # 取 Agent 实例
-    agent_a = store.get(req.agent_a_id)
-    if agent_a is None:
-        raise HTTPException(status_code=404, detail=f"Agent not found: {req.agent_a_id}")
-    agent_b = store.get(req.agent_b_id)
-    if agent_b is None:
-        raise HTTPException(status_code=404, detail=f"Agent not found: {req.agent_b_id}")
+    # 从 SQLite 取 Agent 实例
+    agent_a = await _load_agent(db, req.agent_a_id)
+    agent_b = await _load_agent(db, req.agent_b_id)
 
     try:
         result = await engine.run_debate(agent_a, agent_b, req.topic, req.rounds)
@@ -110,16 +119,12 @@ async def run_debate(
 @router.post("/interview", response_model=ArenaResultResponse, status_code=201)
 async def run_interview(
     req: ArenaCreateRequest,
-    store: AgentStore = Depends(get_agent_store),
+    db: AsyncSession = Depends(get_db),
     engine: ArenaEngine = Depends(get_arena_engine),
 ):
     """运行一场面试竞争——两 Agent 竞争同一岗位。"""
-    agent_a = store.get(req.agent_a_id)
-    if agent_a is None:
-        raise HTTPException(status_code=404, detail=f"Agent not found: {req.agent_a_id}")
-    agent_b = store.get(req.agent_b_id)
-    if agent_b is None:
-        raise HTTPException(status_code=404, detail=f"Agent not found: {req.agent_b_id}")
+    agent_a = await _load_agent(db, req.agent_a_id)
+    agent_b = await _load_agent(db, req.agent_b_id)
 
     try:
         result = await engine.run_interview(agent_a, agent_b, req.topic, req.rounds)
@@ -147,16 +152,12 @@ async def run_interview(
 @router.post("/pitch", response_model=ArenaResultResponse, status_code=201)
 async def run_pitch(
     req: ArenaCreateRequest,
-    store: AgentStore = Depends(get_agent_store),
+    db: AsyncSession = Depends(get_db),
     engine: ArenaEngine = Depends(get_arena_engine),
 ):
     """运行一场创业路演——两 Agent 各自陈述方案。"""
-    agent_a = store.get(req.agent_a_id)
-    if agent_a is None:
-        raise HTTPException(status_code=404, detail=f"Agent not found: {req.agent_a_id}")
-    agent_b = store.get(req.agent_b_id)
-    if agent_b is None:
-        raise HTTPException(status_code=404, detail=f"Agent not found: {req.agent_b_id}")
+    agent_a = await _load_agent(db, req.agent_a_id)
+    agent_b = await _load_agent(db, req.agent_b_id)
 
     try:
         result = await engine.run_pitch(agent_a, agent_b, req.topic, req.rounds)

@@ -1,17 +1,20 @@
 """
-World API 路由 单元测试。
+World API 路由 单元测试 — SQLite 持久化版。
 """
 
 import json
+import tempfile
 from types import SimpleNamespace
 
 import pytest
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
 
-from api.agents import get_agent_store, AgentStore, router as agents_router
+from api.agents import get_agent_factory, router as agents_router
 from api.simulations import router as simulations_router
-from api.worlds import get_world_store, WorldStore, router
+from api.worlds import router
 
 
 # =============================================================================
@@ -36,26 +39,62 @@ def _mock_factory():
 
 
 # =============================================================================
-# Fixtures
+# DB fixtures — 用同步 SQLite 管理测试数据库
 # =============================================================================
 
+_tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+_tmp_db.close()
+_TEST_DB_URL = f"sqlite+aiosqlite:///{_tmp_db.name}"
+_SYNC_DB_URL = f"sqlite:///{_tmp_db.name}"
+
+
+def _sync_create_tables():
+    from db import Base
+    import models.agent_orm   # noqa: F401
+    import models.world_orm   # noqa: F401
+    import models.event       # noqa: F401
+    import models.memory      # noqa: F401
+
+    engine = create_engine(_SYNC_DB_URL)
+    Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+
+def _sync_drop_tables():
+    from db import Base
+    engine = create_engine(_SYNC_DB_URL)
+    Base.metadata.drop_all(engine)
+    engine.dispose()
+
+
+@asynccontextmanager
+async def _test_lifespan(app):
+    from db import init_db
+    await init_db()
+    yield
+
+
 @pytest.fixture(autouse=True)
-def _reset_stores():
-    import api.agents as agents_mod
-    import api.simulations as simulations_mod
+def _setup_db():
+    from db import reset_db_state
+    from config import settings
     import api.sse as sse_mod
-    import api.worlds as worlds_mod
-    agents_mod._agent_store = AgentStore()
-    worlds_mod._world_store = WorldStore()
-    simulations_mod._simulations.clear()
+
+    reset_db_state()
+    settings.database_url = _TEST_DB_URL
+    _sync_create_tables()
+    sse_mod._active_worlds.clear()
+
+    yield
+
+    _sync_drop_tables()
     sse_mod._active_worlds.clear()
 
 
 @pytest.fixture
 def app():
-    from api.agents import get_agent_factory
-
-    app = FastAPI()
+    app = FastAPI(lifespan=_test_lifespan)
     app.include_router(agents_router)
     app.include_router(router)
     app.include_router(simulations_router)
@@ -65,7 +104,8 @@ def app():
 
 @pytest.fixture
 def client(app):
-    return TestClient(app)
+    with TestClient(app) as c:
+        yield c
 
 
 def _create_agent(client, description="测试角色"):

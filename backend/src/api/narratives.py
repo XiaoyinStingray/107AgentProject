@@ -10,10 +10,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.agents import get_agent_store, AgentStore
-from db import async_session
+from api.agents import _rebuild_agent_from_row
+from db import async_session, get_db
 from engines.narrative.engine import NarrativeEngine, NarrativeRequest, NarrativeStyle
+from models.agent_orm import AgentRow
 from models.event import Event
 
 router = APIRouter(prefix="/api/narratives", tags=["narratives"])
@@ -64,15 +66,17 @@ def get_narrative_engine() -> NarrativeEngine:
 async def _generate_narrative(
     style: NarrativeStyle,
     req: NarrativeGenRequest,
-    store: AgentStore,
+    db: AsyncSession,
     engine: NarrativeEngine,
 ) -> NarrativeGenResponse:
     """通用叙事生成逻辑——三种端点共用。"""
 
-    # 1. 取 Agent persona
-    agent = store.get(req.agent_id)
-    if agent is None:
+    # 1. 从 SQLite 取 Agent persona
+    result = await db.execute(select(AgentRow).where(AgentRow.id == req.agent_id))
+    row = result.scalar_one_or_none()
+    if row is None:
         raise HTTPException(status_code=404, detail=f"Agent not found: {req.agent_id}")
+    agent = await _rebuild_agent_from_row(row)
 
     # 2. 取 World 事件（从 SQLite events 表）
     async with async_session() as session:
@@ -114,12 +118,12 @@ async def _generate_narrative(
 @router.post("/story", response_model=NarrativeGenResponse)
 async def generate_story(
     req: NarrativeGenRequest,
-    store: AgentStore = Depends(get_agent_store),
+    db: AsyncSession = Depends(get_db),
     engine: NarrativeEngine = Depends(get_narrative_engine),
 ):
     """生成第一人称短篇小说（800-1500 字）。"""
     try:
-        return await _generate_narrative(NarrativeStyle.STORY, req, store, engine)
+        return await _generate_narrative(NarrativeStyle.STORY, req, db, engine)
     except HTTPException:
         raise
     except Exception as e:
@@ -129,12 +133,12 @@ async def generate_story(
 @router.post("/diary", response_model=NarrativeGenResponse)
 async def generate_diary(
     req: NarrativeGenRequest,
-    store: AgentStore = Depends(get_agent_store),
+    db: AsyncSession = Depends(get_db),
     engine: NarrativeEngine = Depends(get_narrative_engine),
 ):
     """生成 Agent 日记（300-500 字）。"""
     try:
-        return await _generate_narrative(NarrativeStyle.DIARY, req, store, engine)
+        return await _generate_narrative(NarrativeStyle.DIARY, req, db, engine)
     except HTTPException:
         raise
     except Exception as e:
@@ -144,12 +148,12 @@ async def generate_diary(
 @router.post("/letter", response_model=NarrativeGenResponse)
 async def generate_letter(
     req: NarrativeGenRequest,
-    store: AgentStore = Depends(get_agent_store),
+    db: AsyncSession = Depends(get_db),
     engine: NarrativeEngine = Depends(get_narrative_engine),
 ):
     """生成未来的信。"""
     try:
-        return await _generate_narrative(NarrativeStyle.LETTER, req, store, engine)
+        return await _generate_narrative(NarrativeStyle.LETTER, req, db, engine)
     except HTTPException:
         raise
     except Exception as e:
@@ -159,12 +163,12 @@ async def generate_letter(
 @router.post("/podcast", response_model=NarrativeGenResponse)
 async def generate_podcast(
     req: NarrativeGenRequest,
-    store: AgentStore = Depends(get_agent_store),
+    db: AsyncSession = Depends(get_db),
     engine: NarrativeEngine = Depends(get_narrative_engine),
 ):
     """生成播客脚本。"""
     try:
-        return await _generate_narrative(NarrativeStyle.PODCAST, req, store, engine)
+        return await _generate_narrative(NarrativeStyle.PODCAST, req, db, engine)
     except HTTPException:
         raise
     except Exception as e:

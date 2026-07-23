@@ -13,10 +13,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from loguru import logger
 
-from api.agents import AgentStore, get_agent_store
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from db import get_db
 from api.sse import _active_worlds
-from api.worlds import WorldStore, get_world_store
+from models.agent_orm import AgentRow
 from models.event import SimEvent
+from models.world_orm import WorldRow
 
 router = APIRouter(prefix="/api/export", tags=["export"])
 
@@ -164,17 +168,19 @@ def _collect_events(world_id: str) -> list[SimEvent]:
     return []
 
 
-def _collect_agent_names(world_id: str, agent_store: AgentStore) -> dict[str, str]:
-    """收集 Agent ID → 名称映射。"""
-    engine = _active_worlds.get(world_id)
+async def _collect_agent_names(world_id: str, db: AsyncSession) -> dict[str, str]:
+    """收集 Agent ID → 名称映射（从活跃引擎 + SQLite）。"""
     names: dict[str, str] = {}
+    engine = _active_worlds.get(world_id)
     if engine:
         for aid, agent in engine.agents.items():
             names[aid] = agent.persona.name or aid[:8]
-    # 补充从 AgentStore 中查找
-    for agent in agent_store.list_all():
-        if agent.id not in names:
-            names[agent.id] = agent.persona.name or agent.id[:8]
+    # 补充从 SQLite 中查找
+    result = await db.execute(select(AgentRow))
+    for row in result.scalars().all():
+        if row.id not in names:
+            persona = json.loads(row.persona_json)
+            names[row.id] = persona.get("name", "") or row.id[:8]
     return names
 
 
@@ -186,13 +192,15 @@ def _collect_agent_names(world_id: str, agent_store: AgentStore) -> dict[str, st
 @router.get("/report/{world_id}")
 async def export_report_markdown(
     world_id: str,
-    store: WorldStore = Depends(get_world_store),
-    agent_store: AgentStore = Depends(get_agent_store),
+    db: AsyncSession = Depends(get_db),
 ):
     """生成实验报告 Markdown → 返回文件下载。"""
-    world = store.get(world_id)
-    if not world:
+    result = await db.execute(select(WorldRow).where(WorldRow.id == world_id))
+    row = result.scalar_one_or_none()
+    if not row:
         raise HTTPException(status_code=404, detail=f"World {world_id!r} not found")
+
+    world_data = row.to_dict()
 
     events = _collect_events(world_id)
     if not events:
@@ -201,16 +209,16 @@ async def export_report_markdown(
             detail=f"No events found for world {world_id!r}. Start a simulation first.",
         )
 
-    agent_names = _collect_agent_names(world_id, agent_store)
+    agent_names = await _collect_agent_names(world_id, db)
     report = build_report_markdown(
         world_id=world_id,
-        world_name=world.name,
+        world_name=world_data["name"],
         events=events,
         agent_names=agent_names,
-        scenario_name=world.scenario.name,
+        scenario_name=world_data["scenario"].get("name", ""),
     )
 
-    safe_name = _ascii_slug(world.name)
+    safe_name = _ascii_slug(world_data["name"])
     filename = f"report-{safe_name}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.md"
     logger.info(f"Export report: world={world_id}, events={len(events)}, file={filename}")
 
@@ -224,24 +232,26 @@ async def export_report_markdown(
 @router.get("/report/{world_id}/json")
 async def export_report_json(
     world_id: str,
-    store: WorldStore = Depends(get_world_store),
-    agent_store: AgentStore = Depends(get_agent_store),
+    db: AsyncSession = Depends(get_db),
 ):
     """生成 JSON 格式的实验报告。"""
-    world = store.get(world_id)
-    if not world:
+    result = await db.execute(select(WorldRow).where(WorldRow.id == world_id))
+    row = result.scalar_one_or_none()
+    if not row:
         raise HTTPException(status_code=404, detail=f"World {world_id!r} not found")
 
+    world_data = row.to_dict()
+
     events = _collect_events(world_id)
-    agent_names = _collect_agent_names(world_id, agent_store)
+    agent_names = await _collect_agent_names(world_id, db)
 
     report_data = {
         "world_id": world_id,
-        "world_name": world.name,
-        "scenario": world.scenario.name,
+        "world_name": world_data["name"],
+        "scenario": world_data["scenario"].get("name", ""),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "total_events": len(events),
-        "total_ticks": world.current_tick,
+        "total_ticks": world_data["current_tick"],
         "agents": [
             {"id": aid, "name": name}
             for aid, name in agent_names.items()
@@ -249,7 +259,7 @@ async def export_report_json(
         "events": [e.model_dump() for e in events],
     }
 
-    safe_name = _ascii_slug(world.name)
+    safe_name = _ascii_slug(world_data["name"])
     filename = f"report-{safe_name}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.json"
     content = json.dumps(report_data, ensure_ascii=False, indent=2)
 

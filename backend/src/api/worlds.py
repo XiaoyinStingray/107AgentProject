@@ -1,5 +1,5 @@
 """
-World 路由 — CRUD + 控制 API。
+World 路由 — CRUD + 控制 API（SQLite 持久化版）。
 
 路由:
     POST   /api/worlds             创建 World
@@ -8,83 +8,92 @@ World 路由 — CRUD + 控制 API。
     POST   /api/worlds/{id}/start  启动模拟（后台）
     POST   /api/worlds/{id}/pause  暂停模拟
     POST   /api/worlds/{id}/inject 注入事件（M7 干预台）
+    POST   /api/worlds/{id}/reset  重置模拟
+    DELETE /api/worlds/{id}        删除 World
+    GET    /api/worlds/{id}/events       查询历史事件
+    GET    /api/worlds/{id}/relationships 关系网络快照
 """
 
+import json
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from sqlalchemy import select, delete
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from sqlalchemy import select
-
-from db import async_session
-from api.agents import AgentStore, get_agent_store
+from db import async_session, get_db
 from api.sse import register_world as sse_register, reset_world as sse_reset, _active_worlds
 from api.simulations import create_simulation, finish_simulation
 from api.world_helpers import resolve_world_scenario
 from engines.world.engine import WorldEngine
+from models.agent import Persona, Background, Goal, EmotionalState
+from models.agent_orm import AgentRow
 from models.event import Event, SimEvent
 from models.relationship import RelationshipSnapshotResponse
-from models.world import WorldCreate, WorldResponse
+from models.world import WorldCreate, WorldResponse, Scenario
 from models.world_control import WorldControlResponse
+from models.world_orm import WorldRow
 
 router = APIRouter(prefix="/api/worlds", tags=["worlds"])
 
 
 # =============================================================================
-# 内存 World 存储（P0）
+# 辅助：从 DB 重建 LifeAgent（不调用 LLM）
 # =============================================================================
 
-class WorldStore:
-    def __init__(self):
-        self._worlds: dict[str, WorldResponse] = {}
+async def _rebuild_agents_from_db(agent_ids: list[str]) -> list:
+    """从 SQLite 加载 Agent 数据并重建 LifeAgent 实例列表。"""
+    from api.agents import get_agent_factory
 
-    def save(self, world: WorldResponse):
-        self._worlds[world.id] = world
-
-    def list_all(self) -> list[WorldResponse]:
-        return list(self._worlds.values())
-
-    def get(self, world_id: str) -> WorldResponse | None:
-        return self._worlds.get(world_id)
-
-
-_world_store = WorldStore()
-
-
-def get_world_store() -> WorldStore:
-    return _world_store
-
-
-# =============================================================================
-# 辅助：从 WorldCreate + AgentStore → WorldEngine
-# =============================================================================
-
-async def _build_world_engine(
-    world: WorldResponse,
-    agent_store: AgentStore,
-) -> WorldEngine:
-    """从存储中获取 Agent 实例，构建 WorldEngine。"""
-    from engines.agent_factory.factory import LifeAgent
-    from db import async_session
-
-    # 从 AgentStore 中查找所有引用的 Agent
-    agents: list[LifeAgent] = []
-    for aid in world.agent_ids:
-        agent = agent_store.get(aid)
-        if not agent:
+    factory = get_agent_factory()
+    agents = []
+    for aid in agent_ids:
+        async with async_session() as session:
+            result = await session.execute(select(AgentRow).where(AgentRow.id == aid))
+            row = result.scalar_one_or_none()
+        if not row:
             raise HTTPException(
                 status_code=400,
                 detail=f"Agent {aid!r} not found. Create agents first.",
             )
+        data = row.to_dict()
+        persona = Persona(**data["persona"])
+        background = Background(**data["background"])
+        goals = [Goal(**g) for g in data["goals"]]
+        agent = factory.create_from_persona(
+            agent_id=row.id, persona=persona, background=background, goals=goals,
+        )
+        agent.emotional_state = EmotionalState(**data["emotional_state"])
+        agent.energy = row.energy
+        agent.created_at = row.created_at
+        agent.updated_at = row.updated_at
         agents.append(agent)
 
     if not agents:
         raise HTTPException(status_code=400, detail="World must have at least 1 agent")
+    return agents
 
-    # 获取 DB session（WorldEngine 持有 session，生命周期由 engine 管理）
+
+async def _build_world_engine(world: WorldResponse) -> WorldEngine:
+    """从 DB 获取 Agent 实例，构建 WorldEngine。"""
+    agents = await _rebuild_agents_from_db(world.agent_ids)
     session = async_session()
     return WorldEngine(world, agents, session)
+
+
+async def _sync_world_to_db(world: WorldResponse) -> None:
+    """将 WorldResponse 的当前状态同步回 SQLite。"""
+    async with async_session() as session:
+        result = await session.execute(select(WorldRow).where(WorldRow.id == world.id))
+        row = result.scalar_one_or_none()
+        if row:
+            row.status = world.status
+            row.current_tick = world.current_tick
+            row.scenario_json = json.dumps(
+                world.scenario.model_dump(), ensure_ascii=False
+            )
+            await session.commit()
 
 
 # =============================================================================
@@ -95,10 +104,9 @@ async def _build_world_engine(
 @router.post("", response_model=WorldResponse, status_code=201)
 async def create_world(
     req: WorldCreate,
-    store: WorldStore = Depends(get_world_store),
-    agent_store: AgentStore = Depends(get_agent_store),
+    db: AsyncSession = Depends(get_db),
 ):
-    """创建 World，并补齐同名内置场景的完整参数。"""
+    """创建 World，持久化到 SQLite。"""
     scenario = resolve_world_scenario(req.scenario)
 
     world = WorldResponse(
@@ -110,69 +118,83 @@ async def create_world(
         status="idle",
         created_at=datetime.now(timezone.utc).isoformat(),
     )
-    store.save(world)
+
+    row = WorldRow.from_response(world.model_dump())
+    db.add(row)
+    await db.commit()
     return world
 
 
 @router.get("", response_model=list[WorldResponse])
-async def list_worlds(store: WorldStore = Depends(get_world_store)):
-    return store.list_all()
+async def list_worlds(db: AsyncSession = Depends(get_db)):
+    """从 SQLite 列出所有 World。"""
+    result = await db.execute(select(WorldRow).order_by(WorldRow.created_at.desc()))
+    rows = result.scalars().all()
+    return [WorldResponse(**row.to_dict()) for row in rows]
 
 
 @router.get("/{world_id}", response_model=WorldResponse)
 async def get_world(
     world_id: str,
-    store: WorldStore = Depends(get_world_store),
+    db: AsyncSession = Depends(get_db),
 ):
-    world = store.get(world_id)
-    if not world:
+    """从 SQLite 获取 World 详情。"""
+    result = await db.execute(select(WorldRow).where(WorldRow.id == world_id))
+    row = result.scalar_one_or_none()
+    if not row:
         raise HTTPException(status_code=404, detail=f"World {world_id!r} not found")
-    return world
+    return WorldResponse(**row.to_dict())
 
 
 @router.post("/{world_id}/start", response_model=WorldControlResponse)
 async def start_world(
     world_id: str,
     background_tasks: BackgroundTasks,
-    store: WorldStore = Depends(get_world_store),
-    agent_store: AgentStore = Depends(get_agent_store),
+    db: AsyncSession = Depends(get_db),
 ):
     """启动模拟——在后台运行 WorldEngine.tick_stream()。"""
-    world = store.get(world_id)
-    if not world:
+    result = await db.execute(select(WorldRow).where(WorldRow.id == world_id))
+    row = result.scalar_one_or_none()
+    if not row:
         raise HTTPException(status_code=404, detail=f"World {world_id!r} not found")
+
+    world = WorldResponse(**row.to_dict())
 
     if world.status == "running":
         raise HTTPException(status_code=409, detail="World is already running")
 
-    # paused → running（恢复），直接改状态让 SSE 循环继续
+    # paused → running（恢复）
     if world.status == "paused":
         world.status = "running"
+        await _sync_world_to_db(world)
         return {"status": "resumed", "world_id": world_id}
 
-    engine = await _build_world_engine(world, agent_store)
+    engine = await _build_world_engine(world)
     simulation = create_simulation(world_id)
     engine.simulation_id = simulation.id
     world.status = "running"
+    await _sync_world_to_db(world)
 
     # 注册到 SSE 端点可见
     sse_register(world_id, engine)
 
-    # 后台启动——第一个 tick 由 SSE 流驱动（前端连接时触发）
-    # background_tasks 仅用于非流式的 batch 模式
     return {"status": "started", "world_id": world_id}
 
 
 @router.post("/{world_id}/pause", response_model=WorldControlResponse)
 async def pause_world(
     world_id: str,
-    store: WorldStore = Depends(get_world_store),
+    db: AsyncSession = Depends(get_db),
 ):
-    world = store.get(world_id)
-    if not world:
+    """暂停模拟，同步状态到 SQLite。"""
+    result = await db.execute(select(WorldRow).where(WorldRow.id == world_id))
+    row = result.scalar_one_or_none()
+    if not row:
         raise HTTPException(status_code=404, detail=f"World {world_id!r} not found")
 
+    world = WorldResponse(**row.to_dict())
     world.status = "paused"
+    await _sync_world_to_db(world)
     return {"status": "paused", "world_id": world_id}
 
 
@@ -180,13 +202,14 @@ async def pause_world(
 async def inject_event(
     world_id: str,
     event: dict,
-    store: WorldStore = Depends(get_world_store),
+    db: AsyncSession = Depends(get_db),
 ):
     """注入事件（M7 干预台）——用户可随时向运行中的世界插入事件。"""
     from api.sse import get_world_engine
 
-    world = store.get(world_id)
-    if not world:
+    result = await db.execute(select(WorldRow).where(WorldRow.id == world_id))
+    row = result.scalar_one_or_none()
+    if not row:
         raise HTTPException(status_code=404, detail=f"World {world_id!r} not found")
 
     try:
@@ -204,11 +227,12 @@ async def inject_event(
 @router.delete("/{world_id}", status_code=204)
 async def delete_world(
     world_id: str,
-    store: WorldStore = Depends(get_world_store),
+    db: AsyncSession = Depends(get_db),
 ):
-    """删除 World——清理活跃引擎、结束 simulation、从存储移除。"""
-    world = store.get(world_id)
-    if not world:
+    """删除 World——清理活跃引擎、结束 simulation、从 SQLite 移除。"""
+    result = await db.execute(select(WorldRow).where(WorldRow.id == world_id))
+    row = result.scalar_one_or_none()
+    if not row:
         raise HTTPException(status_code=404, detail=f"World {world_id!r} not found")
 
     # 清理 SSE 引擎
@@ -218,20 +242,24 @@ async def delete_world(
             finish_simulation(engine.simulation_id, engine.current_tick)
         sse_reset(world_id)
 
-    # 从内存存储移除
-    store._worlds.pop(world_id, None)
+    # 从 SQLite 移除
+    await db.execute(delete(WorldRow).where(WorldRow.id == world_id))
+    await db.commit()
     return None
 
 
 @router.post("/{world_id}/reset", response_model=WorldControlResponse)
 async def reset_world_endpoint(
     world_id: str,
-    store: WorldStore = Depends(get_world_store),
+    db: AsyncSession = Depends(get_db),
 ):
-    """重置模拟——停止引擎、标记 idle，前端可重新开始。"""
-    world = store.get(world_id)
-    if not world:
+    """重置模拟——停止引擎、标记 idle，同步到 SQLite。"""
+    result = await db.execute(select(WorldRow).where(WorldRow.id == world_id))
+    row = result.scalar_one_or_none()
+    if not row:
         raise HTTPException(status_code=404, detail=f"World {world_id!r} not found")
+
+    world = WorldResponse(**row.to_dict())
 
     engine = _active_worlds.get(world_id)
     if engine and engine.simulation_id:
@@ -241,6 +269,7 @@ async def reset_world_endpoint(
     sse_reset(world_id)
     world.status = "idle"
     world.current_tick = 0
+    await _sync_world_to_db(world)
     return {"status": "reset", "world_id": world_id}
 
 
@@ -286,7 +315,6 @@ async def get_world_relationships(world_id: str):
         return {"nodes": [], "edges": []}
 
     relationships = getattr(engine, "relationships", {})
-    # relationships: dict[tuple[str, str], float] → nodes + edges
     agent_names: dict[str, str] = {}
     for agent in engine.agents.values():
         agent_names[agent.id] = agent.persona.name or agent.id

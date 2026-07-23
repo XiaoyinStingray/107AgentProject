@@ -77,3 +77,29 @@
     - `backend/src/llm/client.py` — LLM 客户端初始化
     - `frontend/src/api/client.ts` — 错误展示逻辑
   - **临时解决方案**：确保 `.env` 中的 `LLM_API_KEY` 有效。
+
+---
+
+## BUG-006：M4/M5/M6 页面仍使用 Mock 数据，新创建 Agent 不出现
+
+- **状态**：待处理
+- **优先级**：P1（核心功能链路断裂——铸造厂创建的 Agent 无法在竞技场、叙事工厂、控制台中使用）
+- **发现日期**：2026-07-23
+- **环境**：前端 Arena / NarrativeFactory / ControlPanel 页面
+- **复现步骤**：
+  1. 在 M1 铸造厂通过 `POST /api/agents` 创建新 Agent。
+  2. 切换到 M4 竞技场（`/arena`）→ Agent 选择列表中没有刚创建的 Agent。
+  3. 切换到 M5 叙事工厂（`/narratives`）→ Agent 选择列表中没有刚创建的 Agent。
+  4. 切换到 M6 控制台（`/control`）→ 仪表盘/搜索等面板未显示新 Agent。
+- **实际结果**：M4/M5/M6 的 Agent 列表仍从 Mock 数据或本地 Zustand Store 获取，未走真实 API（`GET /api/agents`）。铸造厂创建的 Agent 已持久化到 SQLite，但这些页面无法感知。
+- **期望结果**：所有页面的 Agent 列表应统一从 `useAgents()` hook（React Query + `GET /api/agents`）获取，创建 Agent 后通过 `invalidateQueries(['agents'])` 自动刷新所有消费方。
+- **影响范围**：
+  - M4 竞技场：无法选择真实 Agent 进行辩论/面试/路演
+  - M5 叙事工厂：无法选择真实 Agent 生成叙事
+  - M6 控制台：仪表盘/热力图/搜索/决策模式均显示 Mock 数据
+- **关联位置**：
+  - `frontend/src/pages/Arena.tsx` — Agent 选择组件
+  - `frontend/src/pages/NarrativeFactory.tsx` — Agent 选择组件
+  - `frontend/src/pages/ControlPanel.tsx` — Dashboard / Search 面板
+  - 根因：这些页面尚未完成 Step 36（API 层收敛），仍使用 Step 29 之前的 Mock/Store 数据源
+- **修复方向**：Step 36 中统一将上述页面切换为 `useAgents()` hook，消除 Mock 数据依赖。

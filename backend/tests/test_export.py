@@ -9,42 +9,99 @@
 """
 
 import json
+import tempfile
 from datetime import datetime, timezone
+from contextlib import asynccontextmanager
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
-from api.agents import AgentStore, get_agent_store
 from api.export import build_report_markdown, router
 from api.sse import _active_worlds
-from api.worlds import WorldStore, get_world_store
 from models.event import SimEvent
-from models.world import Scenario, WorldResponse
 
 
 # =============================================================================
-# Fixtures
+# DB fixtures — 用同步 SQLite 管理测试数据库
 # =============================================================================
+
+_tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+_tmp_db.close()
+_TEST_DB_URL = f"sqlite+aiosqlite:///{_tmp_db.name}"
+_SYNC_DB_URL = f"sqlite:///{_tmp_db.name}"
+
+
+def _sync_create_tables():
+    from db import Base
+    import models.agent_orm   # noqa: F401
+    import models.world_orm   # noqa: F401
+    import models.event       # noqa: F401
+    import models.memory      # noqa: F401
+
+    engine = create_engine(_SYNC_DB_URL)
+    Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+
+def _sync_drop_tables():
+    from db import Base
+    engine = create_engine(_SYNC_DB_URL)
+    Base.metadata.drop_all(engine)
+    engine.dispose()
+
+
+def _insert_world_sync(world_id: str, name: str = "测试世界", scenario_name: str = "新生报到"):
+    """用同步 SQLite 插入 world 测试数据。"""
+    from models.world_orm import WorldRow
+
+    scenario = {"name": scenario_name, "description": "测试场景"}
+    row = WorldRow(
+        id=world_id,
+        name=name,
+        scenario_json=json.dumps(scenario, ensure_ascii=False),
+        agent_ids_json=json.dumps(["agent-1"]),
+        current_tick=3,
+        status="finished",
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+    engine = create_engine(_SYNC_DB_URL)
+    with Session(engine) as session:
+        session.add(row)
+        session.commit()
+    engine.dispose()
+
+
+@asynccontextmanager
+async def _test_lifespan(app):
+    from db import init_db
+    await init_db()
+    yield
+
 
 @pytest.fixture(autouse=True)
-def _reset_stores():
-    """每个测试前重置内存存储。"""
-    import api.agents as agents_mod
-    import api.worlds as worlds_mod
+def _setup_db():
+    from db import reset_db_state
+    from config import settings
 
-    agents_mod._agent_store = AgentStore()
-    worlds_mod._world_store = WorldStore()
+    reset_db_state()
+    settings.database_url = _TEST_DB_URL
+    _sync_create_tables()
     _active_worlds.clear()
+
     yield
+
+    _sync_drop_tables()
     _active_worlds.clear()
 
 
 @pytest.fixture
 def app():
-    app = FastAPI()
+    app = FastAPI(lifespan=_test_lifespan)
     app.include_router(router)
-    # 同时挂载 worlds + agents 用于依赖注入
     from api.worlds import router as worlds_router
     from api.agents import router as agents_router
     app.include_router(worlds_router)
@@ -54,11 +111,11 @@ def app():
 
 @pytest.fixture
 def client(app):
-    return TestClient(app)
+    with TestClient(app) as c:
+        yield c
 
 
 def _make_events(world_id: str, n: int = 5) -> list[SimEvent]:
-    """生成 n 条测试事件。"""
     events = []
     for i in range(n):
         events.append(SimEvent(
@@ -73,25 +130,12 @@ def _make_events(world_id: str, n: int = 5) -> list[SimEvent]:
     return events
 
 
-def _make_world(world_id: str = "w-1", name: str = "测试世界") -> WorldResponse:
-    return WorldResponse(
-        id=world_id,
-        name=name,
-        scenario=Scenario(name="新生报到", description="测试场景"),
-        agent_ids=["agent-1"],
-        current_tick=3,
-        status="finished",
-        created_at=datetime.now(timezone.utc).isoformat(),
-    )
-
-
 # =============================================================================
 # build_report_markdown() 纯函数测试
 # =============================================================================
 
 class TestBuildReportMarkdown:
     def test_returns_markdown_string(self):
-        """返回非空 Markdown 字符串。"""
         events = _make_events("w-1", 5)
         result = build_report_markdown(
             world_id="w-1",
@@ -104,7 +148,6 @@ class TestBuildReportMarkdown:
         assert len(result) > 100
 
     def test_contains_world_name(self):
-        """报告标题包含世界名称。"""
         result = build_report_markdown(
             world_id="w-1",
             world_name="我的实验",
@@ -114,7 +157,6 @@ class TestBuildReportMarkdown:
         assert "我的实验" in result
 
     def test_contains_agent_names(self):
-        """报告包含 Agent 名称。"""
         result = build_report_markdown(
             world_id="w-1",
             world_name="W",
@@ -124,7 +166,6 @@ class TestBuildReportMarkdown:
         assert "小红" in result
 
     def test_contains_event_summary(self):
-        """报告摘要包含事件总数。"""
         events = _make_events("w-1", 7)
         result = build_report_markdown(
             world_id="w-1",
@@ -135,7 +176,6 @@ class TestBuildReportMarkdown:
         assert "7" in result
 
     def test_empty_events_still_works(self):
-        """空事件列表也能生成报告。"""
         result = build_report_markdown(
             world_id="w-1",
             world_name="W",
@@ -145,7 +185,6 @@ class TestBuildReportMarkdown:
         assert "实验报告" in result
 
     def test_scenario_name_included(self):
-        """场景名称出现在报告中。"""
         result = build_report_markdown(
             world_id="w-1",
             world_name="W",
@@ -166,31 +205,22 @@ class TestExportMarkdownEndpoint:
         assert resp.status_code == 404
 
     def test_no_events_returns_404(self, client):
-        """世界存在但无事件时返回 404。"""
-        # 先创建世界
-        from api.worlds import _world_store
-        world = _make_world("w-1")
-        _world_store.save(world)
-
+        _insert_world_sync("w-1")
         resp = client.get("/api/export/report/w-1")
         assert resp.status_code == 404
-        assert "no events" in resp.json()["detail"].lower() or "No events" in resp.json()["detail"]
+        detail = resp.json()["detail"].lower()
+        assert "no events" in detail
 
     def test_with_events_returns_markdown(self, client):
-        """有事件时返回 Markdown 文件。"""
-        from api.worlds import _world_store
-        world = _make_world("w-1")
-        _world_store.save(world)
-
-        # 注入事件到活跃世界（通过 mock engine）
+        _insert_world_sync("w-1")
         events = _make_events("w-1", 5)
 
         class FakeEngine:
-            def __init__(self, events):
-                self.events = events
+            def __init__(self, evts):
+                self.events = evts
                 self.agents = {}
 
-        _active_worlds["w-1"] = FakeEngine(events)  # type: ignore[assignment]
+        _active_worlds["w-1"] = FakeEngine(events)  # type: ignore
 
         resp = client.get("/api/export/report/w-1")
         assert resp.status_code == 200
@@ -199,17 +229,14 @@ class TestExportMarkdownEndpoint:
         assert "实验报告" in resp.text
 
     def test_filename_includes_world_name(self, client):
-        """下载文件名包含世界名称的 ASCII slug。"""
-        from api.worlds import _world_store
-        world = _make_world("w-1", name="TestWorld")
-        _world_store.save(world)
+        _insert_world_sync("w-1", name="TestWorld")
 
         class FakeEngine:
             def __init__(self):
                 self.events = _make_events("w-1", 2)
                 self.agents = {}
 
-        _active_worlds["w-1"] = FakeEngine()  # type: ignore[assignment]
+        _active_worlds["w-1"] = FakeEngine()  # type: ignore
 
         resp = client.get("/api/export/report/w-1")
         assert "TestWorld" in resp.headers["content-disposition"]
@@ -225,11 +252,7 @@ class TestExportJsonEndpoint:
         assert resp.status_code == 404
 
     def test_returns_json_report(self, client):
-        """返回 JSON 格式报告。"""
-        from api.worlds import _world_store
-        world = _make_world("w-1")
-        _world_store.save(world)
-
+        _insert_world_sync("w-1")
         events = _make_events("w-1", 3)
 
         class FakeEngine:
@@ -237,7 +260,7 @@ class TestExportJsonEndpoint:
                 self.events = events
                 self.agents = {}
 
-        _active_worlds["w-1"] = FakeEngine()  # type: ignore[assignment]
+        _active_worlds["w-1"] = FakeEngine()  # type: ignore
 
         resp = client.get("/api/export/report/w-1/json")
         assert resp.status_code == 200

@@ -1,14 +1,17 @@
 """
-Agent API 路由 单元测试 — 用 Mock LLM + TestClient。
+Agent API 路由 单元测试 — Mock LLM + SQLite 持久化。
 """
 
 import json
+import tempfile
 
 import pytest
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, text
 
-from api.agents import get_agent_factory, get_agent_store, router
+from api.agents import get_agent_factory, router
 
 
 # =============================================================================
@@ -33,20 +36,63 @@ def _mock_factory():
 
 
 # =============================================================================
-# Test app
+# DB fixtures — 用同步 SQLite 管理测试数据库
 # =============================================================================
 
+_tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+_tmp_db.close()
+_TEST_DB_URL = f"sqlite+aiosqlite:///{_tmp_db.name}"
+# 同步 URL 用于 setup/teardown
+_SYNC_DB_URL = f"sqlite:///{_tmp_db.name}"
+
+
+def _sync_create_tables():
+    """用同步 SQLAlchemy 创建所有表。"""
+    from db import Base
+    import models.agent_orm   # noqa: F401
+    import models.world_orm   # noqa: F401
+    import models.event       # noqa: F401
+    import models.memory      # noqa: F401
+
+    engine = create_engine(_SYNC_DB_URL)
+    Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+
+def _sync_drop_tables():
+    """用同步 SQLAlchemy 删除所有表。"""
+    from db import Base
+    engine = create_engine(_SYNC_DB_URL)
+    Base.metadata.drop_all(engine)
+    engine.dispose()
+
+
+@asynccontextmanager
+async def _test_lifespan(app):
+    from db import init_db
+    await init_db()
+    yield
+
+
 @pytest.fixture(autouse=True)
-def _reset_store():
-    """每个测试前清空 Agent 存储。"""
-    from api.agents import AgentStore, get_agent_store
-    import api.agents as mod
-    mod._agent_store = AgentStore()
+def _setup_db():
+    """每个测试前重置数据库表。"""
+    from db import reset_db_state
+    from config import settings
+
+    reset_db_state()
+    settings.database_url = _TEST_DB_URL
+    _sync_create_tables()
+
+    yield
+
+    _sync_drop_tables()
 
 
 @pytest.fixture
 def app():
-    app = FastAPI()
+    app = FastAPI(lifespan=_test_lifespan)
     app.include_router(router)
     app.dependency_overrides[get_agent_factory] = _mock_factory
     return app
@@ -54,7 +100,8 @@ def app():
 
 @pytest.fixture
 def client(app):
-    return TestClient(app)
+    with TestClient(app) as c:
+        yield c
 
 
 # =============================================================================
