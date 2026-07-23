@@ -1,10 +1,11 @@
+import { useState } from "react";
 import type { AgentResponse } from "../../types/agent";
-import type { Scenario } from "../../types/world";
 import type { WorldResponse } from "../../types/world";
+import { useScenarios, useDeleteScenario } from "../../api/scenarios";
+import ScenarioEditor from "./ScenarioEditor";
 
 interface SandboxSetupProps {
   agents: AgentResponse[];
-  scenarios: Scenario[];
   worlds: WorldResponse[];
   selectedAgentIds: string[];
   selectedScenario: string;
@@ -20,7 +21,6 @@ interface SandboxSetupProps {
 /** 群体沙盒投放前的 Agent 与场景选择区，含已有 World 列表。 */
 export default function SandboxSetup({
   agents,
-  scenarios,
   worlds,
   selectedAgentIds,
   selectedScenario,
@@ -32,6 +32,9 @@ export default function SandboxSetup({
   onResumeWorld,
   onDeleteWorld,
 }: SandboxSetupProps) {
+  const { data: scenarios = [] } = useScenarios();
+  const deleteScenario = useDeleteScenario();
+  const [showEditor, setShowEditor] = useState(false);
   return (
     <div className="min-h-full p-6 max-w-5xl mx-auto space-y-6">
       <div>
@@ -122,6 +125,8 @@ export default function SandboxSetup({
         scenarios={scenarios}
         selectedScenario={selectedScenario}
         onSelectScenario={onSelectScenario}
+        onDeleteScenario={(id) => deleteScenario.mutate(id)}
+        onNewScenario={() => setShowEditor(true)}
       />
       <button
         type="button"
@@ -133,6 +138,8 @@ export default function SandboxSetup({
           ? "正在加载 Agent..."
           : `开始群体模拟 · ${selectedAgentIds.length} Agents`}
       </button>
+
+      {showEditor && <ScenarioEditor onClose={() => setShowEditor(false)} />}
     </div>
   );
 }
@@ -190,32 +197,65 @@ function ScenarioSelection({
   scenarios,
   selectedScenario,
   onSelectScenario,
-}: Pick<SandboxSetupProps, "scenarios" | "selectedScenario" | "onSelectScenario">) {
+  onDeleteScenario,
+  onNewScenario,
+}: {
+  scenarios: { id?: string | null; name?: string; description?: string; time_range?: string }[];
+  selectedScenario: string;
+  onSelectScenario: (name: string) => void;
+  onDeleteScenario: (id: string) => void;
+  onNewScenario: () => void;
+}) {
   return (
     <section className="space-y-3">
-      <h2 className="text-sm font-mono text-text-secondary">选择场景</h2>
+      <div className="flex items-center gap-2">
+        <h2 className="text-sm font-mono text-text-secondary">选择场景</h2>
+        <button
+          type="button"
+          onClick={onNewScenario}
+          className="text-xs font-mono text-accent-green hover:text-accent-green/80 transition-colors"
+        >
+          ＋ 新建场景
+        </button>
+      </div>
       <div className="grid grid-cols-3 gap-3">
         {scenarios.map((scenario) => {
           const name = scenario.name ?? "未命名场景";
+          const isCustom = !!scenario.id;
           return (
-            <button
-              key={name}
-              type="button"
-              onClick={() => onSelectScenario(name)}
-              className={`text-left rounded border p-4 transition-colors ${
-                selectedScenario === name
-                  ? "border-accent-blue/60 bg-accent-blue/10"
-                  : "border-border bg-bg-card hover:border-accent-blue/30"
-              }`}
-            >
-              <p className="font-mono text-sm text-text-primary">{name}</p>
-              <p className="text-xs text-text-secondary mt-2">
-                {scenario.description}
-              </p>
-              <p className="text-xs text-accent-blue/70 font-mono mt-3">
-                Tick {scenario.time_range}
-              </p>
-            </button>
+            <div key={name} className="relative">
+              <button
+                type="button"
+                onClick={() => onSelectScenario(name)}
+                className={`w-full text-left rounded border p-4 transition-colors ${
+                  selectedScenario === name
+                    ? "border-accent-blue/60 bg-accent-blue/10"
+                    : "border-border bg-bg-card hover:border-accent-blue/30"
+                }`}
+              >
+                <p className="font-mono text-sm text-text-primary pr-5">
+                  {name}
+                </p>
+                <p className="text-xs text-text-secondary mt-2">
+                  {scenario.description}
+                </p>
+                <p className="text-xs text-accent-blue/70 font-mono mt-3">
+                  Tick {scenario.time_range}
+                </p>
+              </button>
+              {isCustom && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeleteScenario(scenario.id!);
+                  }}
+                  className="absolute top-2 right-2 text-xs font-mono text-accent-red/50 hover:text-accent-red transition-colors"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           );
         })}
       </div>

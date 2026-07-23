@@ -6,7 +6,16 @@ import type { SSEEvent } from "../../types/events";
 import SandboxHeader from "./SandboxHeader";
 import SandboxSetup from "./SandboxSetup";
 import { MOCK_AGENTS } from "../../mocks/agents";
-import { MOCK_SANDBOX_SCENARIOS } from "../../mocks/sandbox";
+
+vi.mock("../../api/scenarios", () => ({
+  useScenarios: () => ({
+    data: [
+      { name: "新生报到", description: "大学开学", time_range: "1-20" },
+      { name: "期末周", description: "考试周", time_range: "1-30" },
+    ],
+  }),
+  useDeleteScenario: () => ({ mutate: vi.fn() }),
+}));
 
 const events: SSEEvent[] = [
   {
@@ -77,17 +86,13 @@ describe("Step 20 world components", () => {
     const onStart = vi.fn();
     const onResumeWorld = vi.fn();
     const onDeleteWorld = vi.fn();
-    const firstScenarioName = MOCK_SANDBOX_SCENARIOS[0]!.name ?? "scenario-1";
-    const secondScenarioName =
-      MOCK_SANDBOX_SCENARIOS[1]!.name ?? "scenario-2";
 
     render(
       <SandboxSetup
         agents={MOCK_AGENTS.slice(0, 2)}
-        scenarios={MOCK_SANDBOX_SCENARIOS}
         worlds={[]}
         selectedAgentIds={[]}
-        selectedScenario={firstScenarioName}
+        selectedScenario="新生报到"
         onToggleAgent={onToggleAgent}
         onSelectScenario={onSelectScenario}
         onStart={onStart}
@@ -106,14 +111,12 @@ describe("Step 20 world components", () => {
     );
     fireEvent.click(
       screen.getByRole("button", {
-        name: new RegExp(secondScenarioName),
+        name: /期末周/,
       }),
     );
 
     expect(onToggleAgent).toHaveBeenCalledWith(MOCK_AGENTS[0].id);
-    expect(onSelectScenario).toHaveBeenCalledWith(
-      secondScenarioName,
-    );
+    expect(onSelectScenario).toHaveBeenCalledWith("期末周");
   });
 
   it("wires runtime header controls to their callbacks", () => {

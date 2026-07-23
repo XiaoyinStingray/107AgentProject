@@ -21,6 +21,10 @@ export const narrativeKeys = {
   all: ["narratives"] as const,
 };
 
+export const scenarioKeys = {
+  all: ["scenarios"] as const,
+};
+
 export const arenaKeys = {
   all: ["arenas"] as const,
   detail: (id: string) => ["arenas", id] as const,

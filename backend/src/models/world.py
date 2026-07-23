@@ -9,6 +9,8 @@ from .base import Timestamped
 
 class Scenario(BaseModel):
     """场景定义"""
+
+    id: str | None = Field(default=None, description="自定义场景 ID；内置场景无此字段")
     name: str = Field(default="")
     description: str = Field(default="")
     time_range: str = Field(default="1-30", description="tick 范围，如 '1-30'")

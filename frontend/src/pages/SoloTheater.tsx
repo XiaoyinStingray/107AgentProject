@@ -1,6 +1,8 @@
 import { useState, useMemo } from "react";
 import { useAgents } from "../api/agents";
 import { useCreateWorld, useStartWorld, usePauseWorld, useResetWorld } from "../api/worlds";
+import { useScenarios } from "../api/scenarios";
+import ScenarioEditor from "../components/world/ScenarioEditor";
 import { useSSE } from "../hooks/useSSE";
 import AgentStatusPanel from "../components/world/AgentStatusPanel";
 import ThoughtStream from "../components/agent/ThoughtStream";
@@ -16,39 +18,16 @@ import StatusDot from "../components/shared/StatusDot";
    2. 投放后——三栏布局：左(Agent状态) 中(思维流) 右(事件统计)
    ================================================================ */
 
-/** 内置场景（与后端 BUILTIN_SCENARIOS 对应） */
-const BUILTIN_SCENARIOS = [
-  {
-    name: "新生报到",
-    emoji: "🏫",
-    description: "大学开学第一天，4人一间宿舍",
-    timeRange: "1-20",
-  },
-  {
-    name: "期末周",
-    emoji: "📚",
-    description: "期末考试周，图书馆座位紧张",
-    timeRange: "1-30",
-  },
-  {
-    name: "毕业选择",
-    emoji: "🎓",
-    description: "保研/考研/工作/出国的十字路口",
-    timeRange: "1-25",
-  },
-] as const;
-
-type ScenarioName = (typeof BUILTIN_SCENARIOS)[number]["name"];
-
 export default function SoloTheater() {
   // Agent 列表：从后端拉取（铸造厂创建的真 Agent）
   const { data: agents = [], isLoading: agentsLoading } = useAgents();
+  const { data: scenarios = [] } = useScenarios();
 
   const [selectedAgentId, setSelectedAgentId] = useState<string>(
     agents[0]?.id ?? "",
   );
-  const [selectedScenario, setSelectedScenario] =
-    useState<ScenarioName>("期末周");
+  const [selectedScenario, setSelectedScenario] = useState("期末周");
+  const [showEditor, setShowEditor] = useState(false);
   const [worldId, setWorldId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -202,16 +181,25 @@ export default function SoloTheater() {
 
         {/* 场景选择 */}
         <Card className="mb-6">
-          <label className="block text-sm text-text-secondary font-mono mb-2">
-            选择场景
-          </label>
+          <div className="flex items-center gap-2 mb-2">
+            <label className="text-sm text-text-secondary font-mono">
+              选择场景
+            </label>
+            <button
+              type="button"
+              onClick={() => setShowEditor(true)}
+              className="text-xs font-mono text-accent-green hover:text-accent-green/80 transition-colors"
+            >
+              ＋ 新建场景
+            </button>
+          </div>
           <div className="grid grid-cols-3 gap-2">
-            {BUILTIN_SCENARIOS.map((s) => {
+            {scenarios.map((s) => {
               const isSelected = s.name === selectedScenario;
               return (
                 <button
                   key={s.name}
-                  onClick={() => setSelectedScenario(s.name)}
+                  onClick={() => setSelectedScenario(s.name ?? "")}
                   className={`
                     text-center p-3 rounded-lg border transition-colors
                     ${
@@ -221,7 +209,7 @@ export default function SoloTheater() {
                     }
                   `}
                 >
-                  <span className="text-2xl block mb-1">{s.emoji}</span>
+                  <span className="text-2xl block mb-1">{s.id ? "📝" : "📚"}</span>
                   <p className="text-sm font-mono text-text-primary">
                     {s.name}
                   </p>
@@ -261,7 +249,7 @@ export default function SoloTheater() {
       {/* 顶栏 */}
       <div className="shrink-0 flex items-center gap-3 px-4 py-2 border-b border-border bg-bg-secondary">
         <span className="text-2xl select-none">
-          {BUILTIN_SCENARIOS.find((s) => s.name === selectedScenario)?.emoji}
+          {scenarios.find((s) => s.name === selectedScenario)?.id ? "📝" : "📚"}
         </span>
         <div className="flex-1 min-w-0">
           <h1 className="text-sm font-mono text-text-primary">
@@ -376,9 +364,8 @@ export default function SoloTheater() {
             </p>
             <p className="text-xs text-text-secondary mt-1">
               {
-                BUILTIN_SCENARIOS.find(
-                  (s) => s.name === selectedScenario,
-                )?.description
+                scenarios.find((s) => s.name === selectedScenario)
+                  ?.description
               }
             </p>
           </Card>
@@ -396,6 +383,8 @@ export default function SoloTheater() {
           )}
         </div>
       </div>
+
+      {showEditor && <ScenarioEditor onClose={() => setShowEditor(false)} />}
     </div>
   );
 }

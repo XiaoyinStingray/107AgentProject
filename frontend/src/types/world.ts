@@ -2,6 +2,7 @@
 //   Python 侧字段有 default 的 → TS 用 ? 标记为可选
 
 export interface Scenario {
+  id?: string | null;
   name?: string;
   description?: string;
   time_range?: string;

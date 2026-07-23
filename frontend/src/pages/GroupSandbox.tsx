@@ -14,7 +14,6 @@ import {
 import { useSSE } from "../hooks/useSSE";
 import { useThrottledEvents } from "../hooks/useThrottledEvents";
 import { useSandboxStore } from "../stores/useSandboxStore";
-import { SANDBOX_SCENARIOS } from "../data/sandboxScenarios";
 import type { AgentResponse } from "../types/agent";
 import type { SSEEvent } from "../types/events";
 import type { RelationshipState } from "../types/relationships";
@@ -232,7 +231,6 @@ export default function GroupSandbox() {
     return (
       <SandboxSetup
         agents={agents}
-        scenarios={SANDBOX_SCENARIOS}
         worlds={worlds}
         selectedAgentIds={selectedAgentIds}
         selectedScenario={selectedScenario}
