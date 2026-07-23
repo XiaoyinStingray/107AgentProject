@@ -217,7 +217,7 @@ export default function SoloTheater() {
                     {s.description}
                   </p>
                   <p className="text-xs text-text-secondary/50 mt-1 font-mono">
-                    Tick {s.timeRange}
+                    Tick {s.time_range}
                   </p>
                 </button>
               );
