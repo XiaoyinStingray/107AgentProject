@@ -22,8 +22,9 @@
 | 32 | 10.4 | 单人剧场 SSE 打通 | 11, 19 | SoloTheater 真实 SSE + pause/resume + 8tick 自动结束 | ✅ |
 | 33 | 10.5 | 群体沙盒 SSE + 竞争博弈 (#18) | 11, 20 | GroupSandbox 真实多 Agent 交互 + 资源模型 | 3h |
 | 34 | 10.6 | 叙事 + 竞技 + 干预联通 | 30, 31, 23, 22 | 剩余模块全部切换真 API | ✅ |
-| 34-W | 10.6.5 | World 管理完善 | 34 | World 列表/切换/删除 + setup 页改为两段式 | 2h |
-| 35 | 10.7 | 持久化 + 鲁棒性 | 02, 14, 34-W | Agent/World SQLite 存储 + LLM fallback | 3h |
+| 34-W | 10.6.5 | World 管理完善 | 34 | World 列表/切换/删除 + setup 改为两段式 + 返回列表 | ✅ |
+| 34-S | 10.6.6 | 场景自定义 | 34-W | 用户自定义场景 CRUD，SandboxSetup + SoloTheater 可选自定义场景 | 1.5h |
+| 35 | 10.7 | 持久化 + 鲁棒性 | 02, 14, 34-W, 34-S | Agent/World SQLite 存储 + LLM fallback | 3h |
 | **🏗️ Phase 11: 前端架构重整** | | | | | |
 | 36 | 11.1 | API 层收敛 + 重复代码消除 | 34 | api/{worlds,events,narratives,arenas...}.ts + 数据同步验证 | 3h |
 | 37 | 11.2 | 共享组件 + 常量抽取 | 36 | SelectableCard, labels/, scenarios/ | 3h |
@@ -43,7 +44,7 @@
 | 49 | 13.3 | P3 占位页补齐 | 38 | 20 个 P3 菜单统一占位 | 1h |
 | 50 | 13.4 | 演示排练 + 最终文档 | 49 | 真实 API 版 demo-script + README | 2h |
 
-> **共 23 个 Step。** 联通阶段 8 步（29–35），重整阶段 3 步（36–38），功能补全 8 步（39–46），交付 4 步（47–50）。
+> **共 24 个 Step。** 联通阶段 9 步（29–35），重整阶段 3 步（36–38），功能补全 8 步（39–46），交付 4 步（47–50）。
 > **总计估时：** ~55 小时（一人 + AI）
 
 ---
@@ -1083,6 +1084,44 @@ const result = await fetch(`/api/worlds/${worldId}/inject`, {
 
 ---
 
+### Step 34-S — 场景自定义
+
+> **目标：** 用户可创建、编辑、删除自定义场景，SandboxSetup 和 SoloTheater 均可选用。
+> **估时：** 1.5 小时
+
+#### 问题背景
+
+当前只有 3 个硬编码场景（新生报到、期末周、毕业选择），用户无法定义自己的实验场景。
+
+#### 改动方案
+
+**后端：**
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `backend/src/api/scenarios.py` | **新建** | `GET /api/scenarios`（内置+自定义）、`POST /api/scenarios`（创建）、`DELETE /api/scenarios/{id}`（删除自定义） |
+| `backend/src/engines/world/scenarios.py` | 修改 | 自定义场景存内存 dict（Step 35 迁 SQLite） |
+| `backend/src/main.py` | 修改 | 注册 scenarios router |
+
+**前端：**
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `frontend/src/api/scenarios.ts` | **新建** | `useScenarios()`、`useCreateScenario()`、`useDeleteScenario()` |
+| `frontend/src/api/queryKeys.ts` | 修改 | +`scenarioKeys` |
+| `frontend/src/components/world/SandboxSetup.tsx` | 修改 | 场景选择区含自定义场景 + "新建场景"入口 |
+| `frontend/src/pages/SoloTheater.tsx` | 修改 | 场景选择同上 |
+
+#### 验收标准
+
+- [ ] 场景列表 = 3 个内置 + 用户自定义
+- [ ] 可创建自定义场景（名称、描述、时间范围、初始事件、环境参数）
+- [ ] 可删除自定义场景（内置场景不可删）
+- [ ] SandboxSetup 和 SoloTheater 均可选自定义场景
+- [ ] 新建场景后下拉列表立即刷新
+
+---
+
 ### Step 35 — 持久化 + 鲁棒性
 
 > **目标：** 服务重启不丢数据，LLM 挂了不卡死
@@ -1858,7 +1897,7 @@ State 1 产出（所有 Step 00–28 done）
 **串行执行顺序（单人开发）：**
 
 ```
-29 → 30 → 31 → 32 → 33 → 34 → 34-W → 35 → 36 → 37 → 38 → 39 → 40 → 41 → 42 → 43 → 44 → 45 → 46 → 47 → 48 → 49 → 50
+29 → 30 → 31 → 32 → 33 → 34 → 34-W → 34-S → 35 → 36 → 37 → 38 → 39 → 40 → 41 → 42 → 43 → 44 → 45 → 46 → 47 → 48 → 49 → 50
 ```
 
 **如果需要并行（多人）：**

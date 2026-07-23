@@ -10,6 +10,7 @@ interface SandboxHeaderProps {
   speed: SandboxSpeed;
   onToggleSpeed: () => void;
   onToggleRunning: () => void;
+  onBack: () => void;
   onReset: () => void;
 }
 
@@ -23,6 +24,7 @@ export default function SandboxHeader({
   speed,
   onToggleSpeed,
   onToggleRunning,
+  onBack,
   onReset,
 }: SandboxHeaderProps) {
   const statusLabel = isPaused ? "PAUSED" : connected ? "RUNNING" : "CONNECTING";
@@ -55,6 +57,14 @@ export default function SandboxHeader({
         className="text-xs font-mono text-accent-blue hover:text-accent-blue/80 transition-colors"
       >
         ⏩ Speed {speed}x
+      </button>
+      <button
+        type="button"
+        onClick={onBack}
+        disabled={isPending}
+        className="text-xs font-mono text-text-secondary hover:text-text-primary transition-colors"
+      >
+        ⏎ 返回列表
       </button>
       <button
         type="button"

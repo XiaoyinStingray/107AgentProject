@@ -75,6 +75,8 @@ describe("Step 20 world components", () => {
     const onToggleAgent = vi.fn();
     const onSelectScenario = vi.fn();
     const onStart = vi.fn();
+    const onResumeWorld = vi.fn();
+    const onDeleteWorld = vi.fn();
     const firstScenarioName = MOCK_SANDBOX_SCENARIOS[0]!.name ?? "scenario-1";
     const secondScenarioName =
       MOCK_SANDBOX_SCENARIOS[1]!.name ?? "scenario-2";
@@ -83,11 +85,14 @@ describe("Step 20 world components", () => {
       <SandboxSetup
         agents={MOCK_AGENTS.slice(0, 2)}
         scenarios={MOCK_SANDBOX_SCENARIOS}
+        worlds={[]}
         selectedAgentIds={[]}
         selectedScenario={firstScenarioName}
         onToggleAgent={onToggleAgent}
         onSelectScenario={onSelectScenario}
         onStart={onStart}
+        onResumeWorld={onResumeWorld}
+        onDeleteWorld={onDeleteWorld}
       />,
     );
 
@@ -114,6 +119,7 @@ describe("Step 20 world components", () => {
   it("wires runtime header controls to their callbacks", () => {
     const onToggleSpeed = vi.fn();
     const onToggleRunning = vi.fn();
+    const onBack = vi.fn();
     const onReset = vi.fn();
 
     render(
@@ -126,18 +132,21 @@ describe("Step 20 world components", () => {
         speed={1}
         onToggleSpeed={onToggleSpeed}
         onToggleRunning={onToggleRunning}
+        onBack={onBack}
         onReset={onReset}
       />,
     );
 
     const buttons = screen.getAllByRole("button");
-    expect(buttons).toHaveLength(3);
+    expect(buttons).toHaveLength(4);
     fireEvent.click(buttons[0]);
     fireEvent.click(buttons[1]);
     fireEvent.click(buttons[2]);
+    fireEvent.click(buttons[3]);
 
     expect(onToggleRunning).toHaveBeenCalledOnce();
     expect(onToggleSpeed).toHaveBeenCalledOnce();
+    expect(onBack).toHaveBeenCalledOnce();
     expect(onReset).toHaveBeenCalledOnce();
   });
 });

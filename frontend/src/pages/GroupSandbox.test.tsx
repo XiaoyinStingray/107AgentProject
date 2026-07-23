@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgents } from "../api/agents";
 import {
@@ -16,10 +17,12 @@ import GroupSandbox from "./GroupSandbox";
 vi.mock("../api/agents", () => ({ useAgents: vi.fn() }));
 vi.mock("../api/worlds", () => ({
   useCreateWorld: vi.fn(),
+  useDeleteWorld: () => ({ mutateAsync: vi.fn(), isPending: false }),
   usePauseWorld: vi.fn(),
   useResetWorld: vi.fn(),
   useStartWorld: vi.fn(),
   useWorldRelationships: vi.fn(),
+  useWorlds: () => ({ data: [] }),
 }));
 vi.mock("../hooks/useSSE", () => ({ useSSE: vi.fn() }));
 vi.mock("../stores/useSandboxStore", () => ({
@@ -111,10 +114,16 @@ describe("Step 33 GroupSandbox", () => {
   });
 });
 
+const testQueryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false } },
+});
+
 function renderPage() {
   return render(
-    <MemoryRouter>
-      <GroupSandbox />
-    </MemoryRouter>,
+    <QueryClientProvider client={testQueryClient}>
+      <MemoryRouter>
+        <GroupSandbox />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }

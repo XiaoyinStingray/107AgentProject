@@ -1,9 +1,11 @@
 import type { AgentResponse } from "../../types/agent";
 import type { Scenario } from "../../types/world";
+import type { WorldResponse } from "../../types/world";
 
 interface SandboxSetupProps {
   agents: AgentResponse[];
   scenarios: Scenario[];
+  worlds: WorldResponse[];
   selectedAgentIds: string[];
   selectedScenario: string;
   isLoading?: boolean;
@@ -11,12 +13,15 @@ interface SandboxSetupProps {
   onToggleAgent: (agentId: string) => void;
   onSelectScenario: (scenario: string) => void;
   onStart: () => void;
+  onResumeWorld: (worldId: string) => void;
+  onDeleteWorld: (worldId: string) => void;
 }
 
-/** 群体沙盒投放前的 Agent 与场景选择区。 */
+/** 群体沙盒投放前的 Agent 与场景选择区，含已有 World 列表。 */
 export default function SandboxSetup({
   agents,
   scenarios,
+  worlds,
   selectedAgentIds,
   selectedScenario,
   isLoading = false,
@@ -24,6 +29,8 @@ export default function SandboxSetup({
   onToggleAgent,
   onSelectScenario,
   onStart,
+  onResumeWorld,
+  onDeleteWorld,
 }: SandboxSetupProps) {
   return (
     <div className="min-h-full p-6 max-w-5xl mx-auto space-y-6">
@@ -34,6 +41,73 @@ export default function SandboxSetup({
           选择多个 Agent 和一个场景，观察他们在同一世界中的互动。
         </p>
       </div>
+
+      {/* ── 已有 World 列表 ── */}
+      {worlds.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-mono text-text-secondary">
+            已有的实验 · {worlds.length} 个
+          </h2>
+          <div className="space-y-2">
+            {worlds.map((world) => {
+              const statusIcon =
+                world.status === "running"
+                  ? "🟢"
+                  : world.status === "paused"
+                    ? "⏸️"
+                    : "⏹️";
+              const canResume =
+                world.status === "running" || world.status === "paused";
+              return (
+                <div
+                  key={world.id}
+                  className="flex items-center gap-3 rounded border border-border bg-bg-card px-4 py-3"
+                >
+                  <span className="text-sm select-none">{statusIcon}</span>
+                  <div className="flex-1 min-w-0">
+                    <span className="font-mono text-sm text-text-primary">
+                      {world.name}
+                    </span>
+                    <span className="ml-3 text-xs font-mono text-text-secondary/60">
+                      Tick {world.current_tick} · {world.agent_ids.length} Agent
+                      {world.agent_ids.length > 1 ? "s" : ""}
+                    </span>
+                  </div>
+                  {canResume && (
+                    <button
+                      type="button"
+                      onClick={() => onResumeWorld(world.id)}
+                      className="text-xs font-mono text-accent-green hover:text-accent-green/80 transition-colors"
+                    >
+                      继续
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => onDeleteWorld(world.id)}
+                    className="text-xs font-mono text-accent-red/60 hover:text-accent-red transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* ── 分隔 ── */}
+      {worlds.length > 0 && (
+        <div className="flex items-center gap-3">
+          <div className="flex-1 border-t border-border" />
+          <span className="text-xs font-mono text-text-secondary/50">
+            新建实验
+          </span>
+          <div className="flex-1 border-t border-border" />
+        </div>
+      )}
+
+      {/* ── 新建表单 ── */}
       <AgentSelection
         agents={agents}
         selectedAgentIds={selectedAgentIds}

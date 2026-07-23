@@ -231,6 +231,28 @@ class TestRelationships:
 
 
 # =============================================================================
+# DELETE /api/worlds/{id}
+# =============================================================================
+
+
+class TestDeleteWorld:
+    def test_delete_existing(self, client):
+        resp = client.post("/api/worlds/", json={
+            "name": "W", "scenario": {}, "agent_ids": [],
+        })
+        wid = resp.json()["id"]
+        resp = client.delete(f"/api/worlds/{wid}")
+        assert resp.status_code == 204
+
+        resp = client.get(f"/api/worlds/{wid}")
+        assert resp.status_code == 404
+
+    def test_delete_missing_returns_404(self, client):
+        resp = client.delete("/api/worlds/nonexistent")
+        assert resp.status_code == 404
+
+
+# =============================================================================
 # POST /api/worlds/{id}/inject
 # =============================================================================
 

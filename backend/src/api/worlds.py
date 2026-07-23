@@ -201,6 +201,28 @@ async def inject_event(
     return {"status": "injected"}
 
 
+@router.delete("/{world_id}", status_code=204)
+async def delete_world(
+    world_id: str,
+    store: WorldStore = Depends(get_world_store),
+):
+    """删除 World——清理活跃引擎、结束 simulation、从存储移除。"""
+    world = store.get(world_id)
+    if not world:
+        raise HTTPException(status_code=404, detail=f"World {world_id!r} not found")
+
+    # 清理 SSE 引擎
+    engine = _active_worlds.get(world_id)
+    if engine:
+        if engine.simulation_id:
+            finish_simulation(engine.simulation_id, engine.current_tick)
+        sse_reset(world_id)
+
+    # 从内存存储移除
+    store._worlds.pop(world_id, None)
+    return None
+
+
 @router.post("/{world_id}/reset", response_model=WorldControlResponse)
 async def reset_world_endpoint(
     world_id: str,

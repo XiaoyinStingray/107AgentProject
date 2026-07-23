@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAgents } from "../api/agents";
 import {
   useCreateWorld,
+  useDeleteWorld,
   usePauseWorld,
   useResetWorld,
   useStartWorld,
   useWorldRelationships,
+  useWorlds,
 } from "../api/worlds";
 import { useSSE } from "../hooks/useSSE";
 import { useThrottledEvents } from "../hooks/useThrottledEvents";
@@ -41,10 +44,13 @@ export default function GroupSandbox() {
   const [error, setError] = useState<string | null>(null);
   const [startGen, setStartGen] = useState(0); // 递增以重置节流器（仅新启动时）
   const { activeWorldId, setActiveWorld } = useSandboxStore();
+  const queryClient = useQueryClient();
+  const { data: worlds = [] } = useWorlds();
   const createWorld = useCreateWorld();
   const startWorld = useStartWorld();
   const pauseWorld = usePauseWorld();
   const resetWorld = useResetWorld();
+  const deleteWorld = useDeleteWorld();
   const relationshipQuery = useWorldRelationships(worldId);
   const {
     events,
@@ -176,6 +182,13 @@ export default function GroupSandbox() {
     }
   };
 
+  /** 返回列表——保留 World 当前状态，不重置；刷新 World 列表缓存 */
+  const handleBack = useCallback(() => {
+    disconnect();
+    queryClient.invalidateQueries({ queryKey: ["worlds"] });
+    setPhase("setup");
+  }, [disconnect, queryClient]);
+
   const handleReset = async () => {
     if (!worldId || pending) return;
     setError(null);
@@ -193,11 +206,34 @@ export default function GroupSandbox() {
     }
   };
 
+  /** 从 World 列表恢复已有实验 */
+  const handleResumeWorld = useCallback((id: string) => {
+    setError(null);
+    clear();
+    setWorldId(id);
+    setActiveWorld(id);
+    setSelectedTick(null);
+    setIsPaused(false);
+    setPhase("running");
+  }, [clear, setActiveWorld]);
+
+  /** 从 World 列表删除实验 */
+  const handleDeleteWorld = useCallback(async (id: string) => {
+    setError(null);
+    try {
+      await deleteWorld.mutateAsync(id);
+      if (activeWorldId === id) setActiveWorld(null);
+    } catch (cause) {
+      setError(getErrorMessage(cause, "删除失败"));
+    }
+  }, [deleteWorld, activeWorldId, setActiveWorld]);
+
   if (phase === "setup") {
     return (
       <SandboxSetup
         agents={agents}
         scenarios={SANDBOX_SCENARIOS}
+        worlds={worlds}
         selectedAgentIds={selectedAgentIds}
         selectedScenario={selectedScenario}
         isLoading={agentsLoading || pending}
@@ -205,6 +241,8 @@ export default function GroupSandbox() {
         onToggleAgent={handleToggleAgent}
         onSelectScenario={setSelectedScenario}
         onStart={handleStart}
+        onResumeWorld={handleResumeWorld}
+        onDeleteWorld={handleDeleteWorld}
       />
     );
   }
@@ -220,6 +258,7 @@ export default function GroupSandbox() {
         speed={speed}
         onToggleSpeed={() => setSpeed((value) => value === 1 ? 2 : 1)}
         onToggleRunning={handleToggleRunning}
+        onBack={handleBack}
         onReset={handleReset}
       />
       {error && <p role="alert" className="px-4 py-2 text-sm text-accent-red">{error}</p>}

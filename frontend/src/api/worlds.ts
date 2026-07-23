@@ -105,6 +105,17 @@ export function useResetWorld() {
   });
 }
 
+/** 删除 World——清理引擎、结束 simulation、从存储移除 */
+export function useDeleteWorld() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (worldId: string) => client.delete(`/worlds/${worldId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: worldKeys.all });
+    },
+  });
+}
+
 /** 向运行中的 World 注入干预事件 */
 export function useInjectEvent() {
   const qc = useQueryClient();
