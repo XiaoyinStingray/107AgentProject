@@ -23,7 +23,7 @@
 | 33 | 10.5 | 群体沙盒 SSE + 竞争博弈 (#18) | 11, 20 | GroupSandbox 真实多 Agent 交互 + 资源模型 | 3h |
 | 34 | 10.6 | 叙事 + 竞技 + 干预联通 | 30, 31, 23, 22 | 剩余模块全部切换真 API | ✅ |
 | 34-W | 10.6.5 | World 管理完善 | 34 | World 列表/切换/删除 + setup 改为两段式 + 返回列表 | ✅ |
-| 34-S | 10.6.6 | 场景自定义 | 34-W | 用户自定义场景 CRUD，SandboxSetup + SoloTheater 可选自定义场景 | 1.5h |
+| 34-S | 10.6.6 | 场景自定义 | 34-W | 用户自定义场景 CRUD，SandboxSetup + SoloTheater 可选自定义场景 | ✅ |
 | 35 | 10.7 | 持久化 + 鲁棒性 | 02, 14, 34-W, 34-S | Agent/World SQLite 存储 + LLM fallback | 3h |
 | **🏗️ Phase 11: 前端架构重整** | | | | | |
 | 36 | 11.1 | API 层收敛 + 重复代码消除 | 34 | api/{worlds,events,narratives,arenas...}.ts + 数据同步验证 | 3h |
