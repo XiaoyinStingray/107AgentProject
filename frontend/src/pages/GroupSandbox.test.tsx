@@ -22,6 +22,9 @@ vi.mock("../api/worlds", () => ({
   useWorldRelationships: vi.fn(),
 }));
 vi.mock("../hooks/useSSE", () => ({ useSSE: vi.fn() }));
+vi.mock("../stores/useSandboxStore", () => ({
+  useSandboxStore: () => ({ activeWorldId: null, setActiveWorld: vi.fn() }),
+}));
 
 const create = vi.fn();
 const start = vi.fn();
@@ -92,7 +95,7 @@ describe("Step 33 GroupSandbox", () => {
     fireEvent.click(screen.getByRole("button", { name: /继续/ }));
     await waitFor(() => expect(start).toHaveBeenCalledTimes(2));
 
-    fireEvent.click(screen.getByRole("button", { name: "重置" }));
+    fireEvent.click(screen.getByRole("button", { name: /结束/ }));
     await waitFor(() => expect(reset).toHaveBeenCalledWith("world-33"));
     expect(disconnect).toHaveBeenCalled();
     expect(screen.getByRole("button", { name: /3 Agents/ })).toBeInTheDocument();

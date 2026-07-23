@@ -10,6 +10,7 @@ import {
 } from "../api/worlds";
 import { useSSE } from "../hooks/useSSE";
 import { useThrottledEvents } from "../hooks/useThrottledEvents";
+import { useSandboxStore } from "../stores/useSandboxStore";
 import { SANDBOX_SCENARIOS } from "../data/sandboxScenarios";
 import type { AgentResponse } from "../types/agent";
 import type { SSEEvent } from "../types/events";
@@ -38,6 +39,8 @@ export default function GroupSandbox() {
   const [worldId, setWorldId] = useState<string | null>(null);
   const [isPaused, setIsPaused] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [startGen, setStartGen] = useState(0); // 递增以重置节流器（仅新启动时）
+  const { activeWorldId, setActiveWorld } = useSandboxStore();
   const createWorld = useCreateWorld();
   const startWorld = useStartWorld();
   const pauseWorld = usePauseWorld();
@@ -52,7 +55,32 @@ export default function GroupSandbox() {
     disconnect,
     clear,
   } = useSSE(worldId);
-  const displayedEvents = useThrottledEvents(events, speed, isPaused, worldId);
+  const displayedEvents = useThrottledEvents(events, speed, isPaused, String(startGen));
+
+  // 挂载时恢复活跃 World——存量事件直接全量展示，绕过节流器
+  const [restoring, setRestoring] = useState(false);
+  const restoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (activeWorldId && phase === "setup" && !worldId) {
+      setWorldId(activeWorldId);
+      setPhase("running");
+      if (events.length > 3) {
+        setRestoring(true);
+        restoreTimerRef.current = setTimeout(() => setRestoring(false), 2000);
+      }
+    }
+    return () => {
+      if (restoreTimerRef.current) clearTimeout(restoreTimerRef.current);
+    };
+  }, [activeWorldId, phase, worldId, events.length]);
+
+  // 模拟自然结束时清理活跃 World
+  useEffect(() => {
+    const hasSessionEnd = events.some((e) => e.type === "session_end");
+    if (hasSessionEnd && activeWorldId) {
+      setActiveWorld(null);
+    }
+  }, [events, activeWorldId, setActiveWorld]);
 
   useEffect(() => {
     if (initializedAgents.current || agents.length === 0) return;
@@ -64,23 +92,39 @@ export default function GroupSandbox() {
     if (relationshipQuery.data) hydrateRelationships(relationshipQuery.data);
   }, [hydrateRelationships, relationshipQuery.data]);
 
+  // 仅在恢复后首次收到 paused/boundary 时同步 isPaused，之后由按钮控制
+  const pauseSyncedRef = useRef(false);
   useEffect(() => {
     const streamError = [...events].reverse().find((event) => event.type === "error");
     if (streamError) {
       setError(streamError.message ?? streamError.content ?? "SSE 连接发生错误");
     }
+
+    if (pauseSyncedRef.current) return;
+    const lastPauseOrBoundary = [...events]
+      .reverse()
+      .find((event) => event.type === "paused" || event.type === "tick_boundary");
+    if (lastPauseOrBoundary) {
+      setIsPaused(lastPauseOrBoundary.type === "paused");
+      pauseSyncedRef.current = true;
+    }
   }, [events]);
+
+  // 新 World 启动时重置同步标记
+  useEffect(() => {
+    pauseSyncedRef.current = false;
+  }, [startGen]);
 
   const selectedAgents = useMemo(
     () => agents.filter((agent) => selectedAgentIds.includes(agent.id)),
     [agents, selectedAgentIds],
   );
-  const visibleEvents = useMemo(
-    () => displayedEvents.filter((event) =>
+  const visibleEvents = useMemo(() => {
+    const source = restoring ? events : displayedEvents;
+    return source.filter((event) =>
       !INFRASTRUCTURE_EVENT_TYPES.has(event.type)
-      && (!event.agent_id || selectedAgentIds.includes(event.agent_id))),
-    [displayedEvents, selectedAgentIds],
-  );
+      && (!event.agent_id || selectedAgentIds.includes(event.agent_id)));
+  }, [restoring, events, displayedEvents, selectedAgentIds]);
   const relationshipValues = useMemo(
     () => Object.values(relationships),
     [relationships],
@@ -106,6 +150,8 @@ export default function GroupSandbox() {
       });
       await startWorld.mutateAsync(world.id);
       setWorldId(world.id);
+      setActiveWorld(world.id);
+      setStartGen((n) => n + 1); // 重置节流器
       setSelectedTick(null);
       setIsPaused(false);
       setPhase("running");
@@ -138,6 +184,7 @@ export default function GroupSandbox() {
       disconnect();
       clear();
       setWorldId(null);
+      setActiveWorld(null);
       setSelectedTick(null);
       setIsPaused(false);
       setPhase("setup");

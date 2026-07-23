@@ -21,8 +21,9 @@
 | 31 | 10.3 | Arenas + Events + Relationships API | 26, 09 | /api/arenas/debate, /api/worlds/{id}/events, /api/worlds/{id}/relationships | ✅ |
 | 32 | 10.4 | 单人剧场 SSE 打通 | 11, 19 | SoloTheater 真实 SSE + pause/resume + 8tick 自动结束 | ✅ |
 | 33 | 10.5 | 群体沙盒 SSE + 竞争博弈 (#18) | 11, 20 | GroupSandbox 真实多 Agent 交互 + 资源模型 | 3h |
-| 34 | 10.6 | 叙事 + 竞技 + 干预联通 | 30, 31, 23, 22 | 剩余模块全部切换真 API | 3h |
-| 35 | 10.7 | 持久化 + 鲁棒性 | 02, 14 | Agent/World SQLite 存储 + LLM fallback | 3h |
+| 34 | 10.6 | 叙事 + 竞技 + 干预联通 | 30, 31, 23, 22 | 剩余模块全部切换真 API | ✅ |
+| 34-W | 10.6.5 | World 管理完善 | 34 | World 列表/切换/删除 + setup 页改为两段式 | 2h |
+| 35 | 10.7 | 持久化 + 鲁棒性 | 02, 14, 34-W | Agent/World SQLite 存储 + LLM fallback | 3h |
 | **🏗️ Phase 11: 前端架构重整** | | | | | |
 | 36 | 11.1 | API 层收敛 + 重复代码消除 | 34 | api/{worlds,events,narratives,arenas...}.ts + 数据同步验证 | 3h |
 | 37 | 11.2 | 共享组件 + 常量抽取 | 36 | SelectableCard, labels/, scenarios/ | 3h |
@@ -42,7 +43,7 @@
 | 49 | 13.3 | P3 占位页补齐 | 38 | 20 个 P3 菜单统一占位 | 1h |
 | 50 | 13.4 | 演示排练 + 最终文档 | 49 | 真实 API 版 demo-script + README | 2h |
 
-> **共 22 个 Step。** 联通阶段 7 步（29–35），重整阶段 3 步（36–38），功能补全 8 步（39–46），交付 4 步（47–50）。
+> **共 23 个 Step。** 联通阶段 8 步（29–35），重整阶段 3 步（36–38），功能补全 8 步（39–46），交付 4 步（47–50）。
 > **总计估时：** ~55 小时（一人 + AI）
 
 ---
@@ -1043,6 +1044,45 @@ const result = await fetch(`/api/worlds/${worldId}/inject`, {
 
 ---
 
+### Step 34-W — World 管理完善
+
+> **目标：** 解决 Step 34 验收中暴露的 World 管理问题——无法查看/切换/删除已有 World，setup 页没有入口。
+> **估时：** 2 小时
+
+#### 问题背景
+
+`useSandboxStore` 只能追踪一个 `activeWorldId`，用户无法：
+- 查看之前创建的所有 World 及其运行状态
+- 切换到另一个暂停中的 World 继续
+- 删除不需要的 World
+
+#### 改动方案
+
+**后端：**
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `backend/src/api/worlds.py` | 修改 | 新增 `DELETE /{id}` 端点 |
+
+**前端：**
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `frontend/src/components/world/SandboxSetup.tsx` | 修改 | 改为两段式：上半部分列出已有 World（状态 + 继续/删除按钮），下半部分新建表单 |
+| `frontend/src/pages/GroupSandbox.tsx` | 修改 | 从列表 resume World；去掉挂载自动恢复逻辑 |
+| `frontend/src/api/worlds.ts` | 修改 | 新增 `useDeleteWorld` mutation hook |
+| `frontend/src/stores/useSandboxStore.ts` | 删除 | 不再需要（用户显式选择 World 进入） |
+
+#### 验收标准
+
+- [ ] SandboxSetup 顶部显示所有已有 World 列表（状态图标 + tick 数 + Agent 数）
+- [ ] 点击已有 World 的「继续」→ 直接 resume 该 World
+- [ ] 点击已有 World 的「删除」→ `DELETE /api/worlds/{id}` → 从列表移除
+- [ ] 下半部分新建表单功能不变
+- [ ] 沙盒页面不再自动恢复——由用户显式选择
+
+---
+
 ### Step 35 — 持久化 + 鲁棒性
 
 > **目标：** 服务重启不丢数据，LLM 挂了不卡死
@@ -1818,7 +1858,7 @@ State 1 产出（所有 Step 00–28 done）
 **串行执行顺序（单人开发）：**
 
 ```
-29 → 30 → 31 → 32 → 33 → 34 → 35 → 36 → 37 → 38 → 39 → 40 → 41 → 42 → 43 → 44 → 45 → 46 → 47 → 48 → 49 → 50
+29 → 30 → 31 → 32 → 33 → 34 → 34-W → 35 → 36 → 37 → 38 → 39 → 40 → 41 → 42 → 43 → 44 → 45 → 46 → 47 → 48 → 49 → 50
 ```
 
 **如果需要并行（多人）：**

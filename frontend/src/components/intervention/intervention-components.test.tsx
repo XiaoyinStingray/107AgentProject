@@ -17,6 +17,18 @@ import type { InjectionEventType } from "../../types/intervention";
    Step 34c — M7 导演干预台组件测试（适配真实注入 API 路径）
    ================================================================ */
 
+const { mockAgents } = vi.hoisted(() => ({
+  mockAgents: [
+    { id: "mock-1", name: "小明", persona: { mbti: "INTJ-T", narrative: "..." } },
+    { id: "mock-2", name: "小红", persona: { mbti: "ENFP-A", narrative: "..." } },
+    { id: "mock-3", name: "小刚", persona: { mbti: "ESTJ-A", narrative: "..." } },
+  ],
+}));
+
+vi.mock("../../api/agents", () => ({
+  useAgents: () => ({ data: mockAgents, isLoading: false, error: null }),
+}));
+
 vi.mock("../../api/worlds", () => ({
   useWorlds: () => ({
     data: [

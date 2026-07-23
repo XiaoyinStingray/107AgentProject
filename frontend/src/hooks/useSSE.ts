@@ -14,6 +14,7 @@ import type { SSEEvent } from "../types/events";
 export function useSSE(worldId: string | null) {
   const eventSourceRef = useRef<EventSource | null>(null);
   const lastTickRef = useRef<number>(0);
+  const prevWorldIdRef = useRef<string | null>(null);
   const {
     events,
     appendEvent,
@@ -82,12 +83,21 @@ export function useSSE(worldId: string | null) {
     setConnected(false);
   }, [setConnected]);
 
-  // worldId 变化时重连，并清除上一个 World 的残留事件
+  // worldId 变化时重连；仅切换到不同 World 时才清空事件
   useEffect(() => {
-    lastTickRef.current = 0;
-    clear(); // 防止切换页面时旧 World 事件污染新页面
+    const prevId = prevWorldIdRef.current;
+    prevWorldIdRef.current = worldId;
+
+    if (worldId !== prevId && prevId !== null) {
+      // 切换到了不同的 World → 清空
+      clear();
+      lastTickRef.current = 0;
+    }
+
     if (worldId) {
-      connect();
+      if (!eventSourceRef.current) {
+        connect();
+      }
     } else {
       disconnect();
     }

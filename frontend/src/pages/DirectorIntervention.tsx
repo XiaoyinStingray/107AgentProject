@@ -1,7 +1,5 @@
-import { useMemo, useState, useCallback } from "react";
-import type { AgentResponse } from "../types/agent";
+import { useState, useCallback } from "react";
 import type { InjectionEventType, InjectionRecord } from "../types/intervention";
-import { MOCK_AGENTS } from "../mocks/agents";
 import {
   INJECTION_TYPES,
   INTERVENTION_PLACEHOLDERS,
@@ -10,7 +8,7 @@ import {
   formatInjectionTime,
   getInjectionTypeMeta,
 } from "../mocks/intervention";
-import { useAgentStore } from "../stores/useAgentStore";
+import { useAgents } from "../api/agents";
 import { useWorlds, useInjectEvent } from "../api/worlds";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
@@ -22,7 +20,7 @@ import StatusDot from "../components/shared/StatusDot";
    ================================================================ */
 
 export default function DirectorIntervention() {
-  const agents = useAvailableAgents();
+  const { data: agents = [] } = useAgents();
   const { data: worlds = [] } = useWorlds();
   const injectEvent = useInjectEvent();
   const [history, setHistory] = useState<InjectionRecord[]>(
@@ -380,13 +378,3 @@ function HistoryItem({ record }: { record: InjectionRecord }) {
   );
 }
 
-/* —— 工具函数 —— */
-
-function useAvailableAgents(): AgentResponse[] {
-  const createdAgents = useAgentStore((s) => s.agents);
-  return useMemo(() => {
-    const byId = new Map<string, AgentResponse>();
-    [...MOCK_AGENTS, ...createdAgents].forEach((a) => byId.set(a.id, a));
-    return [...byId.values()];
-  }, [createdAgents]);
-}

@@ -62,7 +62,7 @@ export default function SandboxHeader({
         disabled={isPending}
         className="text-xs font-mono text-accent-orange hover:text-accent-orange/80 transition-colors"
       >
-        重置
+        ✕ 结束
       </button>
     </header>
   );
