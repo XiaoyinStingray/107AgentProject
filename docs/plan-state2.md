@@ -28,8 +28,9 @@
 | 35-S | 10.7.5 | 安全加固 — 删除保护 + 数量上限 | 35, 36 | Agent 删除前引用检查 + Agent≤25 / World≤45 上限 | ✅ |
 | **🏗️ Phase 11: 前端架构重整** | | | | | |
 | 36 | 11.1 | API 层收敛 + 重复代码消除 | 34 | api/{worlds,events,narratives,arenas...}.ts + 数据同步验证 | ✅ |
-| 37 | 11.2 | 共享组件 + 常量抽取 | 36 | SelectableCard, labels/, scenarios/ | 3h |
-| 38 | 11.3 | 大文件拆分 + 路由优化 | 37 | 懒加载, 死代码清理, 包体积 < 400KB | 3h |
+| 37 | 11.2 | LoadingSpinner + 标签常量抽取 | 36 | LoadingSpinner 组件 + EMOTION/DECISION labels → constants/labels.ts | 1h |
+| 38 | 11.3 | 死代码清理 + 路由懒加载 | 37 | 删未使用文件/类型 + React.lazy 8 页面 | 1h |
+| 38-S | 11.3.5 | 大文件拆分（可选） | 37 | Archive/NarrativeFactory/SoloTheater/mocks 拆分 ≤300 行，风险高可跳过 | 2h |
 | **🧩 Phase 12: 功能补全** | | | | | |
 | 39 | 12.1 | Agent Remix + 模板库 (#6, #7) | 29 | remix API + 前端模板浏览器 | 3h |
 | 40 | 12.2 | 目标系统 + 动态计划 (#10, #11) | 32, 33 | 目标生命周期 + 计划调整 UI | 3h |
@@ -1413,106 +1414,88 @@ export const simulationKeys = {
 
 ### Step 37 — 共享组件 + 常量抽取
 
-> **对应审计问题：** A1.5, A6, A7, A2.1 (部分)
-> **估时：** 3 小时
+> **对应审计问题：** A1.5, A6, A7
+> **估时：** 1 小时（精简版）
 
-#### 37a. `<SelectableCard>` 组件
+#### 37a. `<LoadingSpinner>` 组件
 
-**新建：** `frontend/src/components/shared/SelectableCard.tsx`
+**新建：** `frontend/src/components/shared/LoadingSpinner.tsx`
 
 ```typescript
-interface SelectableCardProps {
-  selected: boolean;
-  onClick: () => void;
-  accentColor?: string;  // "green" | "blue" | "orange" | "purple"（默认 green）
-  children: React.ReactNode;
-  className?: string;
+interface LoadingSpinnerProps {
+  icon?: React.ReactNode;  // 默认 spinner 动画
+  title: string;           // "正在构建人格…"
+  detail?: string;         // 可选副文本
 }
 ```
 
-替换 ~15 处重复的选中按钮 CSS 模式。
+替换位置：`AgentFoundry.tsx`（创建中）+ `NarrativeFactory.tsx`（生成中）。
 
-#### 37b. 合并场景数据
+#### 37b. 标签常量
 
-`SoloTheater.tsx` 的 `BUILTIN_SCENARIOS` + `mocks/sandbox.ts` 的 `MOCK_SANDBOX_SCENARIOS` → 统一到 `mocks/scenarios.ts`，数据一致化（当前时间范围不一致）。
+- `EMOTION_LABELS`（AgentStatusPanel + AgentCard 两处完全重复）→ `constants/labels.ts`
+- `DECISION_LABELS` + `DECISION_VALUE_LABELS`（AgentFoundry）→ 同上
 
-#### 37c. 合并标签常量
+#### 不在此步做
 
-- `EMOTION_LABELS`（2 处）→ `constants/labels.ts`
-- `DECISION_LABELS` + `DECISION_VALUE_LABELS`（2 处）→ `constants/labels.ts`
-
-#### 37d. `<LoadingSpinner>` 组件
-
-`AgentFoundry.tsx` 和 `NarrativeFactory.tsx` 各有一套内联 loading UI → 抽取为 `<LoadingSpinner text={...}>`。
+- ~~`<SelectableCard>`~~ — 7 个文件 20+ 处引用，accent 颜色/结构不一致，抽象后反而限制灵活性。放弃。
+- ~~场景数据合并~~ — SoloTheater 已切 `useScenarios()` API，本地常量已不存在。自然消解。
 
 #### 验收标准
 
-- [ ] `<SelectableCard>` 组件存在，各处使用一致
-- [ ] 场景数据单一来源（`mocks/scenarios.ts`）
-- [ ] 标签常量单一来源（`constants/labels.ts`）
+- [ ] `<LoadingSpinner>` 存在，AgentFoundry + NarrativeFactory 使用
+- [ ] `constants/labels.ts` 存在，EMOTION_LABELS / DECISION_LABELS / DECISION_VALUE_LABELS 单一来源
 - [ ] 前端测试全量通过
-- [ ] 视觉一致性走查（暗色主题、选中态统一）
+- [ ] 视觉走查：loading 动画一致、暗色主题一致
 
 ---
 
-### Step 38 — 大文件拆分 + 路由优化
+### Step 38 — 死代码清理 + 路由懒加载
 
-> **对应审计问题：** A2.1, A3.1, A3.2, A5, A2.2
-> **估时：** 3 小时
+> **对应审计问题：** A3.1, A3.2, A5, A2.2
+> **估时：** 1 小时
 
-#### 38a. 大文件拆分
+#### 38a. 死代码清理
 
-| 文件 | 行数 | 拆分方案 |
-|------|------|---------|
-| `mocks/narratives.ts` | 673 | 按 Agent 拆为 `narratives/mock-1.ts`, `mock-2.ts`, `mock-3.ts` |
-| `pages/Archive.tsx` | 489 | 拆为 `pages/archive/HighlightsPanel.tsx`, `TemplatesPanel.tsx`, `AchievementsPanel.tsx`, `ExportPanel.tsx` |
-| `pages/NarrativeFactory.tsx` | 456 | 拆 `pages/narratives/StyleSelector.tsx`, `AgentSelector.tsx`, `ResultDisplay.tsx` |
-| `pages/SoloTheater.tsx` | 373 | 拆 `pages/theater/SetupPhase.tsx`, `RunningPhase.tsx`, `StatRow.tsx` |
-| `mocks/control.ts` | 347 | 拆 `mocks/control/stats.ts`, `heatmap.ts`, `patterns.ts`, `search.ts` |
-
-每个文件 ≤ 300 行。
+| 删除项 | 文件 | 现状 |
+|--------|------|------|
+| `SSEDebug` 页面 | `pages/debug/SSEDebug.tsx` | 存在，未使用 |
+| `.gitkeep` | `components/world/.gitkeep` | 存在 |
+| `useSSE` 旧版 hook | `hooks/useSSE.ts` | 存在，已被新版替代 |
+| `SimEvent`, `ThoughtEvent` 等未使用接口 | `types/events.ts` | 待检查 |
+| 未使用的 Props 接口 | `types/archive.ts`, `types/control.ts` | 待检查 |
 
 #### 38b. 路由懒加载
 
-```typescript
-// App.tsx — React.lazy 拆分
-const AgentFoundry = lazy(() => import("./pages/AgentFoundry"));
-const SoloTheater = lazy(() => import("./pages/SoloTheater"));
-const GroupSandbox = lazy(() => import("./pages/GroupSandbox"));
-const Arena = lazy(() => import("./pages/Arena"));
-const NarrativeFactory = lazy(() => import("./pages/NarrativeFactory"));
-const ControlPanel = lazy(() => import("./pages/ControlPanel"));
-const DirectorIntervention = lazy(() => import("./pages/DirectorIntervention"));
-const Archive = lazy(() => import("./pages/Archive"));
+8 个模块页面 `React.lazy` + `<Suspense fallback={...}>`。纯机械改动。
 
-// 包裹 Suspense
-<Route path="/agents" element={<Suspense fallback={<LoadingSkeleton />}><AgentFoundry /></Suspense>} />
-```
+#### 不在此步做
 
-#### 38c. 死代码清理
-
-| 删除项 | 文件 |
-|--------|------|
-| `useSSE` 旧版 hook（如果 Step 36 没处理完） | `hooks/useSSE.ts` |
-| `SimEvent`, `ThoughtEvent` 等未使用接口 | `types/events.ts` 12-43 |
-| `WorldCreate` | `types/world.ts` 12-16 |
-| `ExportConfig` | `types/archive.ts` 62-68 |
-| 8 个未使用的 Props 接口 | `types/archive.ts`, `types/control.ts` |
-| `SSEDebug` 页面 | `pages/debug/SSEDebug.tsx` |
-| `.gitkeep` | `components/world/.gitkeep` |
-
-#### 38d. 路由统一（降低优先级—可在 Phase 12 做）
-
-将 hash fragment 导航（`#item-N`）迁移为 React Router search params（`?feature=N`），消除 Arena 和 FeatureRouteBoundary 中的重复 hash 解析。
+- **38-S 大文件拆分（可选）：** Archive 465行 / NarrativeFactory 518行 / SoloTheater 412行 / narratives.ts 672行 → 拆分为子组件。文件拆分涉及 props 传递、状态提升、测试重写，改动高风险。标记为"可选，Phase 12 后如需要再决定"。
 
 #### 验收标准
 
-- [ ] 每个拆分后的文件 ≤ 300 行
+- [ ] 死代码文件/类型已删除
 - [ ] 8 个模块页面全部懒加载
-- [ ] 生产包首屏 < 400KB
-- [ ] 无未使用类型/组件的 import
 - [ ] 前端测试全量通过
 - [ ] 视觉走查：所有页面功能不变
+
+---
+
+### Step 38-S — 大文件拆分（可选，默认跳过）
+
+> **优先级：** 低。各文件目前 ≤520 行，尚未严重影响可维护性。
+> **何时做：** Phase 12 功能补全后如果某个文件继续膨胀，再针对性地拆。
+
+| 文件 | 行数 | 拆分方向 |
+|------|------|---------|
+| `mocks/narratives.ts` | 672 | 按 Agent 拆 |
+| `pages/NarrativeFactory.tsx` | 518 | StyleSelector / AgentSelector / ResultDisplay |
+| `pages/Archive.tsx` | 465 | HighlightsPanel / TemplatesPanel / AchievementsPanel / ExportPanel |
+| `pages/SoloTheater.tsx` | 412 | SetupPhase / RunningPhase |
+| `mocks/control.ts` | 346 | stats / heatmap / patterns / search |
+
+每个文件 ≤ 300 行。
 
 ---
 
