@@ -1,23 +1,28 @@
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import Layout from "./components/layout/Layout";
 import Home from "./pages/Home";
-import AgentFoundry from "./pages/AgentFoundry";
-import SoloTheater from "./pages/SoloTheater";
-import GroupSandbox from "./pages/GroupSandbox";
-import Arena from "./pages/Arena";
-import NarrativeFactory from "./pages/NarrativeFactory";
-import ControlPanel from "./pages/ControlPanel";
-import DirectorIntervention from "./pages/DirectorIntervention";
-import Archive from "./pages/Archive";
-import SSEDebug from "./pages/debug/SSEDebug";
 import EmptyState from "./components/shared/EmptyState";
 import Badge from "./components/shared/Badge";
+import LoadingSpinner from "./components/shared/LoadingSpinner";
 import { findItemById } from "./data/menuData";
 
-/**
- * 占位页面——解析 URL hash（如 #item-25），显示对应功能项名称。
- * 后续 Step 逐模块替换为完整页面。
- */
+// --- 懒加载：8 个模块页面按需加载 ---
+const AgentFoundry = lazy(() => import("./pages/AgentFoundry"));
+const SoloTheater = lazy(() => import("./pages/SoloTheater"));
+const GroupSandbox = lazy(() => import("./pages/GroupSandbox"));
+const Arena = lazy(() => import("./pages/Arena"));
+const NarrativeFactory = lazy(() => import("./pages/NarrativeFactory"));
+const ControlPanel = lazy(() => import("./pages/ControlPanel"));
+const DirectorIntervention = lazy(() => import("./pages/DirectorIntervention"));
+const Archive = lazy(() => import("./pages/Archive"));
+
+/** Suspense 占位——加载中显示 */
+function PageFallback() {
+  return <LoadingSpinner title="加载中…" fullscreen />;
+}
+
+/** 占位页面——解析 URL hash（如 #item-25），显示对应功能项名称。 */
 function PlaceholderPage({
   title,
   description,
@@ -29,14 +34,12 @@ function PlaceholderPage({
 }) {
   const { hash } = useLocation();
 
-  // 解析 hash: "#item-25" → id=25 → 查找对应功能项
   const itemId = hash.startsWith("#item-") ? parseInt(hash.slice(6), 10) : null;
   const selectedItem = itemId ? findItemById(itemId) : null;
 
   return (
     <div className="h-full flex items-center justify-center">
       {selectedItem ? (
-        /* 选中了具体功能项——展示功能名 + 所属模块 */
         <div className="flex flex-col items-center gap-3">
           <span className="text-4xl">{selectedItem.emoji}</span>
           <div className="text-center">
@@ -55,7 +58,6 @@ function PlaceholderPage({
           <EmptyState title="🚧 建设中" description={description} />
         </div>
       ) : (
-        /* 未选中具体功能项——模块默认占位 */
         <EmptyState title={title} description={description} tier={tier} />
       )}
     </div>
@@ -71,7 +73,14 @@ export default function App() {
           <Route index element={<Home />} />
 
           {/* M1 铸造厂 */}
-          <Route path="agents" element={<AgentFoundry />} />
+          <Route
+            path="agents"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <AgentFoundry />
+              </Suspense>
+            }
+          />
           <Route
             path="agents/:id"
             element={
@@ -84,30 +93,74 @@ export default function App() {
           />
 
           {/* M2 单人剧场 */}
-          <Route path="theater" element={<SoloTheater />} />
+          <Route
+            path="theater"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <SoloTheater />
+              </Suspense>
+            }
+          />
 
           {/* M3 群体沙盒 */}
-          <Route path="sandbox" element={<GroupSandbox />} />
+          <Route
+            path="sandbox"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <GroupSandbox />
+              </Suspense>
+            }
+          />
 
           {/* M4 竞技场 */}
-          <Route path="arena" element={<Arena />} />
+          <Route
+            path="arena"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <Arena />
+              </Suspense>
+            }
+          />
 
           {/* M5 叙事工厂 */}
-          <Route path="narratives" element={<NarrativeFactory />} />
+          <Route
+            path="narratives"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <NarrativeFactory />
+              </Suspense>
+            }
+          />
 
           {/* M6 控制台 */}
-          <Route path="control" element={<ControlPanel />} />
+          <Route
+            path="control"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <ControlPanel />
+              </Suspense>
+            }
+          />
 
           {/* M7 干预台 */}
-          <Route path="intervention" element={<DirectorIntervention />} />
+          <Route
+            path="intervention"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <DirectorIntervention />
+              </Suspense>
+            }
+          />
 
           {/* M8 档案馆 */}
-          <Route path="archive" element={<Archive />} />
-
-          {/* 调试入口仅在开发服务器开放，不进入生产路由。 */}
-          {import.meta.env.DEV && (
-            <Route path="debug/sse" element={<SSEDebug />} />
-          )}
+          <Route
+            path="archive"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <Archive />
+              </Suspense>
+            }
+          />
 
           {/* 404 */}
           <Route

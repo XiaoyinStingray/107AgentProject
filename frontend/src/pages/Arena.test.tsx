@@ -280,17 +280,19 @@ describe("Step 16 Arena route regression", () => {
     ["/theater", "M2 单人剧场"],
     ["/sandbox", "群体投放"],
     ["/narratives", "M5 叙事工厂"],
-  ])("keeps the existing %s route mounted", (path, heading) => {
+  ])("keeps the existing %s route mounted", async (path, heading) => {
     window.history.pushState({}, "", path);
     renderApp();
-    expect(screen.getByRole("heading", { name: heading })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: heading }),
+    ).toBeInTheDocument();
   });
 
-  it("mounts the Step 22 page through App at /arena", () => {
+  it("mounts the Step 22 page through App at /arena", async () => {
     window.history.pushState({}, "", "/arena#item-22");
     renderApp();
     expect(
-      screen.getByRole("heading", { name: "1v1 Agent 对抗" }),
+      await screen.findByRole("heading", { name: "1v1 Agent 对抗" }),
     ).toBeInTheDocument();
   });
 });

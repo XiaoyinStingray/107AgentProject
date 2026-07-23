@@ -25,13 +25,6 @@ export interface SimEvent {
   created_at: string;
 }
 
-export interface ThoughtEvent extends SimEvent {
-  type: "thought_stream";
-  phase: string;
-  content: string;
-  tokens_used: number;
-}
-
 export interface AgentMessageEvent extends SimEvent {
   type: "agent_message";
   message: string;

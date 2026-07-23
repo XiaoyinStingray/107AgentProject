@@ -103,3 +103,70 @@
   - `frontend/src/pages/ControlPanel.tsx` — Dashboard / Search 面板
   - 根因：这些页面尚未完成 Step 36（API 层收敛），仍使用 Step 29 之前的 Mock/Store 数据源
 - **修复方向**：Step 36 中统一将上述页面切换为 `useAgents()` hook，消除 Mock 数据依赖。
+
+---
+
+## BUG-007：M8 精彩回放使用静态 Mock 数据，且点击跳转到沙盒创建页而非回放
+
+- **状态**：待处理
+- **优先级**：P2（展示时可看到数据，但无实际追踪价值）
+- **发现日期**：2026-07-23
+- **环境**：前端 Archive → 精彩回放 Tab
+- **复现步骤**：
+  1. 在沙盒运行一次模拟（如期末周，3 Agent × 几 tick）。
+  2. 模拟结束。
+  3. 进入 `/archive` → 精彩回放 Tab。
+- **实际结果**：
+  - 回放列表始终显示 MOCK_REPLAYS（新生报到、期末周、毕业选择），与用户实际运行的模拟无关。
+  - 点击回放卡片跳转到 `/sandbox` 并传入 `{ scenario: scenarioName }`，进入的是**沙盒创建页**（新建模拟），而非该次模拟的回放/详情页。
+- **期望结果**：
+  - 回放列表应从 `GET /api/simulations` 读取真实模拟记录。
+  - 点击应跳转到该次模拟的**历史事件回放页面**（加载已有 World 的事件流，只读模式），而非创建新模拟。
+- **影响范围**：M8 档案馆 → 精彩回放 Tab
+- **关联位置**：
+  - `frontend/src/pages/Archive.tsx` — HighlightsPanel 组件（行 90-140）
+  - `frontend/src/mocks/archive.ts` — MOCK_REPLAYS 静态数据
+  - `backend/src/api/simulations.py` — 已有 `GET /api/simulations` 端点可用
+  - 缺少：历史 World 回放模式（加载已有事件流）
+- **修复方向**：Step 45（档案馆功能 #51）
+
+---
+
+## BUG-008：M8 实验模板使用 Mock 数据，点击行为与回放相同
+
+- **状态**：待处理
+- **优先级**：P2
+- **发现日期**：2026-07-23
+- **环境**：前端 Archive → 实验模板 Tab
+- **复现步骤**：
+  1. 进入 `/archive` → 实验模板 Tab。
+  2. 点击"使用模板"。
+- **实际结果**：
+  - 模板列表始终显示 MOCK_TEMPLATES（3 个硬编码模板），无法反映用户保存的场景配置。
+  - 点击跳转到 `/sandbox` 并传入模板名称——进入沙盒创建页，但不会自动填入模板的场景参数。
+- **期望结果**：
+  - 模板列表应从后端 `GET /api/worlds?type=template` 或 `GET /api/scenarios` 获取用户可复用的场景。
+  - 点击应在沙盒创建页预填所选场景配置。
+- **关联位置**：
+  - `frontend/src/pages/Archive.tsx` — TemplatesPanel 组件（行 145-184）
+  - `frontend/src/mocks/archive.ts` — MOCK_TEMPLATES 静态数据
+  - `backend/src/api/scenarios.py` — 已有场景 CRUD 端点
+- **修复方向**：Step 45（档案馆功能 #52）
+
+---
+
+## BUG-009：M8 研究报告导出使用裸 fetch，未复用 useExportReport hook
+
+- **状态**：待处理  
+- **优先级**：P3（功能可用，但代码不规范——Step 36 创建的 hook 未被使用）
+- **发现日期**：2026-07-23
+- **环境**：前端 Archive → 研究报告导出 Tab
+- **复现步骤**：
+  1. Step 36 新建了 `api/export.ts`（`useExportReport()` hook）。
+  2. 进入 `/archive` → 导出 Tab。
+- **实际结果**：ExportPanel 仍使用裸 `fetch(/api/export/report/${worldId}${ext})` 和内联 blob 下载逻辑，未复用 `useExportReport()`。
+- **期望结果**：导出面板应使用 `useExportReport` mutation hook，保持一致性。
+- **关联位置**：
+  - `frontend/src/pages/Archive.tsx` — ExportPanel 组件 handleApiExport（行 265-290）
+  - `frontend/src/api/export.ts` — useExportReport hook
+- **修复方向**：Step 45 中顺手改
