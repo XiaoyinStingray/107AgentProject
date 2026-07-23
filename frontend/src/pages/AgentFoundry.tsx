@@ -6,6 +6,8 @@ import AgentCard from "../components/agent/AgentCard";
 import PersonaRadar from "../components/agent/PersonaRadar";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
+import LoadingSpinner from "../components/shared/LoadingSpinner";
+import { DECISION_LABELS, DECISION_VALUE_LABELS } from "../constants/labels";
 
 /** Step 29 — Agent 创建链路打通，切到真实 POST /api/agents */
 export default function AgentFoundry() {
@@ -146,13 +148,10 @@ export default function AgentFoundry() {
 
       {/* Loading */}
       {loading && (
-        <div className="flex flex-col items-center py-12 text-text-secondary">
-          <div className="w-8 h-8 border-2 border-accent-green/30 border-t-accent-green rounded-full animate-spin mb-3" />
-          <p className="text-sm font-mono">正在构建人格…</p>
-          <p className="text-sm text-text-secondary/60 mt-1">
-            LLM 正在推理角色设定、背景故事和价值观
-          </p>
-        </div>
+        <LoadingSpinner
+          title="正在构建人格…"
+          detail="LLM 正在推理角色设定、背景故事和价值观"
+        />
       )}
 
       {/* 结果展示 */}
@@ -341,26 +340,3 @@ export default function AgentFoundry() {
     </div>
   );
 }
-
-const DECISION_LABELS = [
-  ["info_processing", "信息处理"],
-  ["risk_preference", "风险偏好"],
-  ["social_tendency", "社交倾向"],
-  ["stress_response", "压力反应"],
-] as const;
-
-const DECISION_VALUE_LABELS: Record<string, string> = {
-  intuitive: "直觉型",
-  analytical: "分析型",
-  balanced: "平衡型",
-  averse: "规避",
-  moderate: "适中",
-  seeking: "寻求",
-  competitive: "竞争型",
-  cooperative: "合作型",
-  independent: "独立型",
-  avoidant: "回避型",
-  reactive: "反应型",
-  adaptive: "适应型",
-  resilient: "韧性型",
-};

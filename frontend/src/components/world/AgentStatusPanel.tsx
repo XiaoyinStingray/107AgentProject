@@ -3,6 +3,7 @@ import type { SSEEvent } from "../../types/events";
 import Card from "../shared/Card";
 import StatusDot from "../shared/StatusDot";
 import Badge from "../shared/Badge";
+import { EMOTION_LABELS } from "../../constants/labels";
 
 interface AgentStatusPanelProps {
   agent: AgentResponse;
@@ -175,12 +176,3 @@ function VadBar({
     </div>
   );
 }
-
-const EMOTION_LABELS: Record<string, string> = {
-  happy: "😊 开心",
-  sad: "😢 悲伤",
-  angry: "😤 愤怒",
-  anxious: "😰 焦虑",
-  excited: "😆 兴奋",
-  neutral: "😐 平静",
-};

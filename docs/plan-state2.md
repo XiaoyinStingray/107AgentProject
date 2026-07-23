@@ -28,7 +28,7 @@
 | 35-S | 10.7.5 | 安全加固 — 删除保护 + 数量上限 | 35, 36 | Agent 删除前引用检查 + Agent≤25 / World≤45 上限 | ✅ |
 | **🏗️ Phase 11: 前端架构重整** | | | | | |
 | 36 | 11.1 | API 层收敛 + 重复代码消除 | 34 | api/{worlds,events,narratives,arenas...}.ts + 数据同步验证 | ✅ |
-| 37 | 11.2 | LoadingSpinner + 标签常量抽取 | 36 | LoadingSpinner 组件 + EMOTION/DECISION labels → constants/labels.ts | 1h |
+| 37 | 11.2 | LoadingSpinner + 标签常量抽取 | 36 | LoadingSpinner 组件 + EMOTION/DECISION labels → constants/labels.ts | ✅ |
 | 38 | 11.3 | 死代码清理 + 路由懒加载 | 37 | 删未使用文件/类型 + React.lazy 8 页面 | 1h |
 | 38-S | 11.3.5 | 大文件拆分（可选） | 37 | Archive/NarrativeFactory/SoloTheater/mocks 拆分 ≤300 行，风险高可跳过 | 2h |
 | **🧩 Phase 12: 功能补全** | | | | | |

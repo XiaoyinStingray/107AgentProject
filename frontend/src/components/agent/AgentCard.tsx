@@ -2,6 +2,7 @@ import type { AgentResponse } from "../../types/agent";
 import Card from "../shared/Card";
 import StatusDot from "../shared/StatusDot";
 import Badge from "../shared/Badge";
+import { EMOTION_LABELS } from "../../constants/labels";
 
 interface AgentCardProps {
   agent: AgentResponse;
@@ -72,12 +73,3 @@ export default function AgentCard({ agent, className = "" }: AgentCardProps) {
     </Card>
   );
 }
-
-const EMOTION_LABELS: Record<string, string> = {
-  happy: "😊 开心",
-  sad: "😢 悲伤",
-  angry: "😤 愤怒",
-  anxious: "😰 焦虑",
-  excited: "😆 兴奋",
-  neutral: "😐 平静",
-};

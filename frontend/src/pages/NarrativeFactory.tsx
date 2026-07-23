@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
 import StatusDot from "../components/shared/StatusDot";
+import LoadingSpinner from "../components/shared/LoadingSpinner";
 import { useAgents } from "../api/agents";
 import { useWorlds } from "../api/worlds";
 import {
@@ -141,24 +142,12 @@ export default function NarrativeFactory() {
   // === generating ===
   if (phase === "generating") {
     return (
-      <div className="h-full flex items-center justify-center animate-fade-in">
-        <div className="text-center">
-          <div className="text-5xl mb-4 animate-pulse">
-            {selectedStyle?.emoji ?? "✨"}
-          </div>
-          <h2 className="text-lg font-mono text-text-primary mb-2">
-            正在生成{selectedStyle?.label}…
-          </h2>
-          <p className="text-sm text-text-secondary font-mono">
-            {selectedAgent?.name} · {effectiveTarget || "默认主题"}
-          </p>
-          <div className="mt-6 flex justify-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-accent-green/60 animate-pulse" />
-            <span className="w-2 h-2 rounded-full bg-accent-green/40 animate-pulse [animation-delay:200ms]" />
-            <span className="w-2 h-2 rounded-full bg-accent-green/20 animate-pulse [animation-delay:400ms]" />
-          </div>
-        </div>
-      </div>
+      <LoadingSpinner
+        icon={selectedStyle?.emoji ?? "✨"}
+        title={`正在生成${selectedStyle?.label}…`}
+        detail={`${selectedAgent?.name} · ${effectiveTarget || "默认主题"}`}
+        fullscreen
+      />
     );
   }
 
