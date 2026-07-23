@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import ControlPanel from "../../pages/ControlPanel";
 import AgentDashboard from "./AgentDashboard";
@@ -23,6 +24,26 @@ import { MOCK_SANDBOX_EVENTS } from "../../mocks/sandbox";
 import type { AgentResponse } from "../../types/agent";
 import type { SSEEvent } from "../../types/events";
 
+// --- Mock useAgents：所有控制台测试共享 ---
+vi.mock("../../api/agents", () => ({
+  useAgents: () => ({ data: MOCK_AGENTS }),
+  useAgent: () => ({ data: null }),
+  useCreateAgent: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteAgent: () => ({ mutateAsync: vi.fn() }),
+}));
+
+const testQueryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false } },
+});
+
+function renderControlPanel() {
+  return render(
+    <QueryClientProvider client={testQueryClient}>
+      <ControlPanel />
+    </QueryClientProvider>,
+  );
+}
+
 /* ================================================================
    Step 24 — M6 控制台组件测试
    Layer 1: 组件渲染 + 关键交互
@@ -38,7 +59,7 @@ const EVENTS: SSEEvent[] = MOCK_SANDBOX_EVENTS;
 
 describe("Step 24 ControlPanel — Tab 栏与切换", () => {
   it("renders title and all 7 tabs (4 available + 3 P3)", () => {
-    render(<ControlPanel />);
+    renderControlPanel();
 
     // 标题
     expect(screen.getByText("M6 控制台")).toBeInTheDocument();
@@ -56,7 +77,7 @@ describe("Step 24 ControlPanel — Tab 栏与切换", () => {
   });
 
   it("disables P3 placeholder tabs", () => {
-    render(<ControlPanel />);
+    renderControlPanel();
 
     expect(screen.getByRole("button", { name: /异常检测/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: /长期追踪/ })).toBeDisabled();
@@ -64,7 +85,7 @@ describe("Step 24 ControlPanel — Tab 栏与切换", () => {
   });
 
   it("renders dashboard tab by default", () => {
-    render(<ControlPanel />);
+    renderControlPanel();
 
     // 仪表盘的顶部汇总标签——Agent 数
     expect(screen.getByText("Agent 数")).toBeInTheDocument();
@@ -72,14 +93,14 @@ describe("Step 24 ControlPanel — Tab 栏与切换", () => {
   });
 
   it("switches to heatmap tab on click", () => {
-    render(<ControlPanel />);
+    renderControlPanel();
 
     fireEvent.click(screen.getByRole("button", { name: /事件热力图/ }));
     expect(screen.getByText("🗺️ 事件密度矩阵")).toBeInTheDocument();
   });
 
   it("switches to search tab on click", () => {
-    render(<ControlPanel />);
+    renderControlPanel();
 
     fireEvent.click(screen.getByRole("button", { name: /Agent 搜索/ }));
     expect(
@@ -88,7 +109,7 @@ describe("Step 24 ControlPanel — Tab 栏与切换", () => {
   });
 
   it("switches to patterns tab on click", () => {
-    render(<ControlPanel />);
+    renderControlPanel();
 
     fireEvent.click(screen.getByRole("button", { name: /决策模式识别/ }));
     // emoji 与文本在不同元素中，只查文本部分
@@ -96,7 +117,7 @@ describe("Step 24 ControlPanel — Tab 栏与切换", () => {
   });
 
   it("shows EmptyState for P3 tabs (disabled, cannot click)", () => {
-    render(<ControlPanel />);
+    renderControlPanel();
 
     // P3 Tab 是 disabled，无法点击——验证其 disabled 属性
     const anomalyTab = screen.getByRole("button", { name: /异常检测/ });

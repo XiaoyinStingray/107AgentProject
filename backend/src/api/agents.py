@@ -12,13 +12,15 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, delete
+from sqlalchemy import func, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import settings
 from db import get_db
 from engines.agent_factory.factory import AgentFactory, LifeAgent
 from models.agent import AgentCreate, AgentResponse, Persona, Background, Goal, EmotionalState
 from models.agent_orm import AgentRow
+from models.world_orm import WorldRow
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 
@@ -74,6 +76,15 @@ async def create_agent(
     db: AsyncSession = Depends(get_db),
 ):
     """自然语言描述 → 完整 Agent，持久化到 SQLite。"""
+    # 数量上限检查
+    count_result = await db.execute(select(func.count()).select_from(AgentRow))
+    existing = count_result.scalar()
+    if existing >= settings.max_agents:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Agent 数量已达上限 ({existing}/{settings.max_agents})",
+        )
+
     try:
         agent = await factory.create_from_description(req.description)
     except ValueError as e:
@@ -113,11 +124,24 @@ async def delete_agent(
     agent_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """从 SQLite 删除 Agent。"""
+    """从 SQLite 删除 Agent。被任何 World 引用时拒绝删除（409）。"""
     result = await db.execute(select(AgentRow).where(AgentRow.id == agent_id))
     row = result.scalar_one_or_none()
     if not row:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id!r} not found")
+
+    # 引用检查：查询所有 agent_ids_json 包含此 ID 的 World
+    ref_result = await db.execute(
+        select(WorldRow).where(WorldRow.agent_ids_json.contains(agent_id))
+    )
+    refs = ref_result.scalars().all()
+    if refs:
+        names = [w.name for w in refs]
+        raise HTTPException(
+            status_code=409,
+            detail=f"Agent 被 {len(refs)} 个 World 使用: {', '.join(names)}",
+        )
+
     await db.execute(delete(AgentRow).where(AgentRow.id == agent_id))
     await db.commit()
     return {"ok": True}

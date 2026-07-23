@@ -1,9 +1,8 @@
-import { useMemo, useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
 import StatusDot from "../components/shared/StatusDot";
-import { MOCK_AGENTS } from "../mocks/agents";
-import { useAgentStore } from "../stores/useAgentStore";
+import { useAgents } from "../api/agents";
 import { useWorlds } from "../api/worlds";
 import {
   useGenerateStory,
@@ -18,7 +17,7 @@ import {
   DEFAULT_PODCAST_TARGET,
 } from "../mocks/narratives";
 import type { NarrativeStyle, NarrativeResult } from "../mocks/narratives";
-import type { AgentResponse } from "../types/agent";
+import { formatDateTime } from "../utils/formatDate";
 
 /* ================================================================
    Step 34a — 叙事工厂页面 (M5)
@@ -29,7 +28,7 @@ import type { AgentResponse } from "../types/agent";
 type NarrativePhase = "setup" | "generating" | "result";
 
 export default function NarrativeFactory() {
-  const agents = useAvailableAgents();
+  const { data: agents = [] } = useAgents();
   const { data: worlds = [] } = useWorlds();
 
   // === setup 状态 ===
@@ -178,7 +177,7 @@ export default function NarrativeFactory() {
           </button>
           <div className="flex items-center gap-3 text-xs font-mono text-text-secondary">
             <span>
-              生成于 {formatTime(result.generated_at)}
+              生成于 {formatDateTime(result.generated_at)}
             </span>
             <span>·</span>
             <span>{result.word_count} 字</span>
@@ -499,16 +498,6 @@ export default function NarrativeFactory() {
    子组件 & 工具函数
    ================================================================ */
 
-/** Agent 来源——Zustand store + MOCK_AGENTS 合并去重（与 Arena/SoloTheater 同模式） */
-function useAvailableAgents(): AgentResponse[] {
-  const createdAgents = useAgentStore((s) => s.agents);
-  return useMemo(() => {
-    const byId = new Map<string, AgentResponse>();
-    [...MOCK_AGENTS, ...createdAgents].forEach((a) => byId.set(a.id, a));
-    return [...byId.values()];
-  }, [createdAgents]);
-}
-
 /** 风格 key → 中文标签（用于 result 阶段展示） */
 function styleLabel(style: NarrativeStyle): string {
   const map: Record<NarrativeStyle, string> = {
@@ -527,17 +516,3 @@ function getDefaultTarget(style: NarrativeStyle): string {
   return "";
 }
 
-/** ISO 时间 → 可读格式 */
-function formatTime(iso: string): string {
-  try {
-    const d = new Date(iso);
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    const hh = String(d.getHours()).padStart(2, "0");
-    const mi = String(d.getMinutes()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
-  } catch {
-    return iso;
-  }
-}

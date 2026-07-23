@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     # === Agent 限制 ===
     max_ticks_per_simulation: int = 100
     max_agents_per_world: int = 8
+    max_agents: int = 25
+    max_worlds: int = 45
     agent_timeout_seconds: int = 30
 
 

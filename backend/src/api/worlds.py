@@ -19,9 +19,10 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from sqlalchemy import select, delete
+from sqlalchemy import func, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import settings
 from db import async_session, get_db
 from api.sse import register_world as sse_register, reset_world as sse_reset, _active_worlds
 from api.simulations import create_simulation, finish_simulation
@@ -107,6 +108,15 @@ async def create_world(
     db: AsyncSession = Depends(get_db),
 ):
     """创建 World，持久化到 SQLite。"""
+    # 数量上限检查
+    count_result = await db.execute(select(func.count()).select_from(WorldRow))
+    existing = count_result.scalar()
+    if existing >= settings.max_worlds:
+        raise HTTPException(
+            status_code=400,
+            detail=f"World 数量已达上限 ({existing}/{settings.max_worlds})",
+        )
+
     scenario = resolve_world_scenario(req.scenario)
 
     world = WorldResponse(

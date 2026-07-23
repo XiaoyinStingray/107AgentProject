@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import ArenaMatch from "../components/arena/ArenaMatch";
 import ArenaResultPanel from "../components/arena/ArenaResultPanel";
@@ -6,15 +6,13 @@ import ArenaSetup from "../components/arena/ArenaSetup";
 import EmptyState from "../components/shared/EmptyState";
 import { findItemById } from "../data/menuData";
 import { useRunDebate, adaptArenaResult } from "../api/arenas";
-import { MOCK_AGENTS } from "../mocks/agents";
+import { useAgents } from "../api/agents";
 import {
   ARENA_MODE_OPTIONS,
   ARENA_TOPICS,
   buildMockArenaResult,
   MOCK_ARENA_ROUNDS,
 } from "../mocks/arena";
-import { useAgentStore } from "../stores/useAgentStore";
-import type { AgentResponse } from "../types/agent";
 import type {
   ArenaConfig,
   ArenaMode,
@@ -28,7 +26,7 @@ const JUDGE_DELAY_MS = 1200;
 /** Step 34b 竞技场页面：debate 走真实 API，interview/pitch 保留 Mock。 */
 export default function Arena() {
   const { hash } = useLocation();
-  const agents = useAvailableAgents();
+  const { data: agents = [] } = useAgents();
   const itemId = parseArenaItemId(hash);
   const selectedMenuItem = itemId === null ? undefined : findItemById(itemId);
 
@@ -267,18 +265,6 @@ export default function Arena() {
       />
     </>
   );
-}
-
-function useAvailableAgents(): AgentResponse[] {
-  const createdAgents = useAgentStore((state) => state.agents);
-
-  return useMemo(() => {
-    const byId = new Map<string, AgentResponse>();
-    [...MOCK_AGENTS, ...createdAgents].forEach((agent) => {
-      byId.set(agent.id, agent);
-    });
-    return [...byId.values()];
-  }, [createdAgents]);
 }
 
 function parseArenaItemId(hash: string): number | null {

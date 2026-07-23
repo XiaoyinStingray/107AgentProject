@@ -1,12 +1,22 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import NarrativeFactory from "../../pages/NarrativeFactory";
+import { MOCK_AGENTS } from "../../mocks/agents";
 import { getMockNarrative, countWords, NARRATIVE_STYLES } from "../../mocks/narratives";
 import type { NarrativeStyle } from "../../mocks/narratives";
 
 /* ================================================================
    Step 34a — 叙事工厂组件测试（适配真实 API 路径）
    ================================================================ */
+
+// Mock useAgents — 返回 MOCK_AGENTS
+vi.mock("../../api/agents", () => ({
+  useAgents: () => ({ data: MOCK_AGENTS }),
+  useAgent: () => ({ data: null }),
+  useCreateAgent: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteAgent: () => ({ mutateAsync: vi.fn() }),
+}));
 
 // Mock useWorlds — 提供一个可选 World
 vi.mock("../../api/worlds", () => ({
@@ -54,13 +64,25 @@ vi.mock("../../api/narratives", () => ({
   }),
 }));
 
+const testQueryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false } },
+});
+
+function renderNarrativeFactory() {
+  return render(
+    <QueryClientProvider client={testQueryClient}>
+      <NarrativeFactory />
+    </QueryClientProvider>,
+  );
+}
+
 function selectWorld() {
   fireEvent.click(screen.getByRole("button", { name: /测试 World/ }));
 }
 
 describe("Step 23 NarrativeFactory — setup phase", () => {
   it("renders style tabs including P3 placeholders", () => {
-    render(<NarrativeFactory />);
+    renderNarrativeFactory();
 
     // 4 个可用风格——用 button role 精确定位，避免与「当前选择」摘要卡冲突
     expect(screen.getByRole("button", { name: /小说化叙事/ })).toBeInTheDocument();
@@ -75,7 +97,7 @@ describe("Step 23 NarrativeFactory — setup phase", () => {
   });
 
   it("disables generate button until agent and world are selected", () => {
-    render(<NarrativeFactory />);
+    renderNarrativeFactory();
 
     const generateBtn = screen.getByRole("button", { name: /生成叙事/ });
     expect(generateBtn).toBeDisabled();
@@ -90,7 +112,7 @@ describe("Step 23 NarrativeFactory — setup phase", () => {
   });
 
   it("disables P3 placeholder style tabs", () => {
-    render(<NarrativeFactory />);
+    renderNarrativeFactory();
 
     // P3 占位项应该是 disabled button
     const microFilm = screen.getByRole("button", { name: /微电影大纲/ });
@@ -98,7 +120,7 @@ describe("Step 23 NarrativeFactory — setup phase", () => {
   });
 
   it("shows target input only for letter and podcast styles", () => {
-    render(<NarrativeFactory />);
+    renderNarrativeFactory();
 
     // 默认 story 风格——无 target 输入
     expect(screen.queryByPlaceholderText(/未来的自己/)).not.toBeInTheDocument();
@@ -119,7 +141,7 @@ describe("Step 23 NarrativeFactory — setup phase", () => {
 
 describe("Step 34a NarrativeFactory — generating & result phases", () => {
   it("generates narrative (story via API) and shows result", async () => {
-    render(<NarrativeFactory />);
+    renderNarrativeFactory();
 
     // 选 Agent + World + 默认 story 风格
     fireEvent.click(screen.getByRole("button", { name: /小明/ }));
@@ -132,7 +154,7 @@ describe("Step 34a NarrativeFactory — generating & result phases", () => {
   });
 
   it("supports reset back to setup from result", async () => {
-    render(<NarrativeFactory />);
+    renderNarrativeFactory();
 
     fireEvent.click(screen.getByRole("button", { name: /小明/ }));
     selectWorld();
@@ -145,7 +167,7 @@ describe("Step 34a NarrativeFactory — generating & result phases", () => {
   });
 
   it("generates podcast via API", async () => {
-    render(<NarrativeFactory />);
+    renderNarrativeFactory();
 
     fireEvent.click(screen.getByRole("button", { name: /小红/ }));
     selectWorld();

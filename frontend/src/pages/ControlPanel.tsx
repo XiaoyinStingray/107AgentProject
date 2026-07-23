@@ -1,11 +1,9 @@
-import { useMemo, useState } from "react";
-import type { AgentResponse } from "../types/agent";
+import { useState } from "react";
 import type { SSEEvent } from "../types/events";
 import type { ControlTab } from "../types/control";
-import { MOCK_AGENTS } from "../mocks/agents";
 import { MOCK_SANDBOX_EVENTS } from "../mocks/sandbox";
 import { CONTROL_TABS } from "../mocks/control";
-import { useAgentStore } from "../stores/useAgentStore";
+import { useAgents } from "../api/agents";
 import Badge from "../components/shared/Badge";
 import EmptyState from "../components/shared/EmptyState";
 import AgentDashboard from "../components/control/AgentDashboard";
@@ -14,13 +12,14 @@ import AgentSearch from "../components/control/AgentSearch";
 import DecisionPatterns from "../components/control/DecisionPatterns";
 
 /* ================================================================
-   Step 24 — M6 控制台
+   Step 24 → 36 — M6 控制台
    多 Agent 仪表盘 + 事件热力图 + Agent 搜索 + 决策模式识别。
-   数据源：MOCK_AGENTS + MOCK_SANDBOX_EVENTS（与 GroupSandbox 同源）。
+   Agent 数据源：useAgents()（React Query 真实 API）。
+   Events 数据源：MOCK_SANDBOX_EVENTS（Step 43 切真实数据）。
    ================================================================ */
 
 export default function ControlPanel() {
-  const agents = useAvailableAgents();
+  const { data: agents = [] } = useAgents();
   const events: SSEEvent[] = MOCK_SANDBOX_EVENTS;
   const [activeTab, setActiveTab] = useState<ControlTab>("dashboard");
 
@@ -95,13 +94,3 @@ export default function ControlPanel() {
   );
 }
 
-/* —— 工具函数 —— */
-
-function useAvailableAgents(): AgentResponse[] {
-  const createdAgents = useAgentStore((s) => s.agents);
-  return useMemo(() => {
-    const byId = new Map<string, AgentResponse>();
-    [...MOCK_AGENTS, ...createdAgents].forEach((a) => byId.set(a.id, a));
-    return [...byId.values()];
-  }, [createdAgents]);
-}

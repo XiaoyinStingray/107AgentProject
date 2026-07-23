@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
 import StatusDot from "../components/shared/StatusDot";
-import { MOCK_AGENTS } from "../mocks/agents";
+import { useAgents } from "../api/agents";
 
 /**
  * Dashboard 总览——首页。
@@ -10,6 +10,7 @@ import { MOCK_AGENTS } from "../mocks/agents";
  */
 export default function Home() {
   const navigate = useNavigate();
+  const { data: agents = [] } = useAgents();
 
   return (
     <div className="p-6 animate-fade-in">
@@ -47,39 +48,47 @@ export default function Home() {
 
       {/* 最近 Agent */}
       <h2 className="text-sm font-mono text-text-secondary uppercase tracking-wider mb-3">
-        最近创建的 Agent
+        最近创建的 Agent · {agents.length} 个
       </h2>
-      <div className="grid grid-cols-3 gap-4">
-        {MOCK_AGENTS.map((agent) => (
-          <Card key={agent.id} hover onClick={() => navigate(`/agents/${agent.id}`)}>
-            <div className="flex items-center gap-2 mb-2">
-              <StatusDot
-                status={agent.energy > 70 ? "active" : "idle"}
-                label=""
-              />
-              <span className="font-mono text-sm text-text-primary">
-                {agent.name}
-              </span>
-              <span className="ml-auto text-sm text-text-secondary font-mono">
-                {agent.persona.mbti}
-              </span>
-            </div>
-            <p className="text-sm text-text-secondary line-clamp-3">
-              {agent.persona.narrative}
-            </p>
-            <div className="flex gap-2 mt-2">
-              {agent.goals.slice(0, 2).map((g) => (
-                <span
-                  key={g.id}
-                  className="text-xs font-mono text-accent-blue/70 bg-accent-blue/10 px-1.5 py-0.5 rounded"
-                >
-                  {g.description}
+      {agents.length === 0 ? (
+        <Card>
+          <p className="text-sm text-text-secondary/60 font-mono text-center py-6">
+            暂无 Agent — 前往 M1 铸造厂创建你的第一个 AI 角色
+          </p>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-3 gap-4">
+          {agents.map((agent) => (
+            <Card key={agent.id} hover onClick={() => navigate(`/agents/${agent.id}`)}>
+              <div className="flex items-center gap-2 mb-2">
+                <StatusDot
+                  status={agent.energy > 70 ? "active" : "idle"}
+                  label=""
+                />
+                <span className="font-mono text-sm text-text-primary">
+                  {agent.name}
                 </span>
-              ))}
-            </div>
-          </Card>
-        ))}
-      </div>
+                <span className="ml-auto text-sm text-text-secondary font-mono">
+                  {agent.persona.mbti}
+                </span>
+              </div>
+              <p className="text-sm text-text-secondary line-clamp-3">
+                {agent.persona.narrative.slice(0, 120)}…
+              </p>
+              <div className="flex gap-2 mt-2">
+                {agent.goals.slice(0, 2).map((g) => (
+                  <span
+                    key={g.id}
+                    className="text-xs font-mono text-accent-blue/70 bg-accent-blue/10 px-1.5 py-0.5 rounded"
+                  >
+                    {g.description}
+                  </span>
+                ))}
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

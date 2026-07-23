@@ -5,8 +5,18 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "../App";
 import { MOCK_AGENTS } from "../mocks/agents";
 import { ARENA_MODE_OPTIONS } from "../mocks/arena";
-import { useAgentStore } from "../stores/useAgentStore";
 import Arena from "./Arena";
+import type { AgentResponse } from "../types/agent";
+
+// --- Arena 测试用 Agent 数据控制 ---
+let testAgents: AgentResponse[] = [];
+
+vi.mock("../api/agents", () => ({
+  useAgents: () => ({ data: testAgents }),
+  useAgent: () => ({ data: null }),
+  useCreateAgent: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteAgent: () => ({ mutateAsync: vi.fn() }),
+}));
 
 // Step 34b: Mock useRunDebate — real API path, returns mock data
 const { arenaMockResult } = vi.hoisted(() => ({
@@ -72,19 +82,23 @@ const JUDGE_DELAY_MS = 1200;
 
 function renderArena(initialEntry = "/arena") {
   return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <Arena />
-    </MemoryRouter>,
+    <QueryClientProvider client={testQueryClient}>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Arena />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
 function renderArenaWithNavigation(initialEntry = "/arena") {
   return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <Link to="/arena#item-23">前往大乱斗</Link>
-      <Link to="/arena#item-22">返回 1v1</Link>
-      <Arena />
-    </MemoryRouter>,
+    <QueryClientProvider client={testQueryClient}>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Link to="/arena#item-23">前往大乱斗</Link>
+        <Link to="/arena#item-22">返回 1v1</Link>
+        <Arena />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -96,7 +110,15 @@ function advanceMatchToResult() {
 }
 
 beforeEach(() => {
-  useAgentStore.setState({ agents: [] });
+  // jsdom polyfill — recharts 依赖 ResizeObserver
+  if (typeof ResizeObserver === "undefined") {
+    (window as any).ResizeObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+  }
+  testAgents = [...MOCK_AGENTS];
   window.history.pushState({}, "", "/");
 });
 
@@ -142,7 +164,7 @@ describe("Step 22 Arena page state", () => {
     ).toBeEnabled();
   });
 
-  it("includes Agents created in the Step 17 store", () => {
+  it("includes Agents from useAgents hook", () => {
     const createdAgent = {
       ...MOCK_AGENTS[0]!,
       id: "created-arena-agent",
@@ -152,7 +174,8 @@ describe("Step 22 Arena page state", () => {
         name: "竞技新人",
       },
     };
-    useAgentStore.setState({ agents: [createdAgent] });
+    // Arena 至少需要 2 个 Agent，加上第二个保证不走 empty state
+    testAgents = [createdAgent, MOCK_AGENTS[1]!];
 
     renderArena();
     expect(

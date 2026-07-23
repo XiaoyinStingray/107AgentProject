@@ -29,3 +29,12 @@ export const arenaKeys = {
   all: ["arenas"] as const,
   detail: (id: string) => ["arenas", id] as const,
 };
+
+export const simulationKeys = {
+  all: ["simulations"] as const,
+  detail: (id: string) => ["simulations", id] as const,
+};
+
+export const achievementKeys = {
+  all: ["achievements"] as const,
+};

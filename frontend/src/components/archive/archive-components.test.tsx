@@ -1,7 +1,9 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import Archive from "../../pages/Archive";
+import { MOCK_AGENTS } from "../../mocks/agents";
 import {
   ARCHIVE_TABS,
   MOCK_REPLAYS,
@@ -21,13 +23,35 @@ import {
    Layer 2: Mock 工具函数
    ================================================================ */
 
+// Mock useAgents + useWorlds — Archive 内部子组件调用这些 hooks
+vi.mock("../../api/agents", () => ({
+  useAgents: () => ({ data: MOCK_AGENTS }),
+  useAgent: () => ({ data: null }),
+  useCreateAgent: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteAgent: () => ({ mutateAsync: vi.fn() }),
+}));
+vi.mock("../../api/worlds", () => ({
+  useWorlds: () => ({ data: [] }),
+  useWorld: () => ({ data: null }),
+}));
+
+const testQueryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false } },
+});
+
+function renderArchive() {
+  return render(
+    <QueryClientProvider client={testQueryClient}>
+      <MemoryRouter>
+        <Archive />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
 /** 辅助：渲染 Archive 并点击指定 Tab */
 function renderAndClickTab(tabLabel: string) {
-  render(
-    <MemoryRouter>
-      <Archive />
-    </MemoryRouter>
-  );
+  renderArchive();
   const tabEl = screen.getByText(tabLabel);
   act(() => { fireEvent.click(tabEl); });
   return tabEl;
@@ -37,11 +61,7 @@ function renderAndClickTab(tabLabel: string) {
 
 describe("Step 25 Archive — Tab 栏与切换", () => {
   it("renders title and all 7 tabs (4 available + 3 P3)", () => {
-    render(
-      <MemoryRouter>
-        <Archive />
-      </MemoryRouter>
-    );
+    renderArchive();
     expect(screen.getByText("M8 Agent 档案馆")).toBeInTheDocument();
     // 4 个可用 Tab
     expect(screen.getByText("精彩回放")).toBeInTheDocument();
@@ -58,11 +78,7 @@ describe("Step 25 Archive — Tab 栏与切换", () => {
   });
 
   it("defaults to highlights tab", () => {
-    render(
-      <MemoryRouter>
-        <Archive />
-      </MemoryRouter>
-    );
+    renderArchive();
     // 精彩回放面板默认显示——3 个场景名
     expect(screen.getByText("新生报到")).toBeInTheDocument();
     expect(screen.getByText("期末周")).toBeInTheDocument();
@@ -85,11 +101,7 @@ describe("Step 25 Archive — Tab 栏与切换", () => {
   });
 
   it("P3 tabs cannot be clicked", () => {
-    render(
-      <MemoryRouter>
-        <Archive />
-      </MemoryRouter>
-    );
+    renderArchive();
     const marketBtn = screen.getByText("Agent 市场").closest("button")!;
     expect(marketBtn).toBeDisabled();
     // 仍在 highlights tab
@@ -99,11 +111,7 @@ describe("Step 25 Archive — Tab 栏与切换", () => {
 
 describe("Step 25 Archive — 精彩回放面板", () => {
   it("renders all replay cards", () => {
-    render(
-      <MemoryRouter>
-        <Archive />
-      </MemoryRouter>
-    );
+    renderArchive();
     expect(screen.getByText("新生报到")).toBeInTheDocument();
     expect(screen.getByText("期末周")).toBeInTheDocument();
     expect(screen.getByText("毕业选择")).toBeInTheDocument();
@@ -113,22 +121,14 @@ describe("Step 25 Archive — 精彩回放面板", () => {
   });
 
   it("shows agent names in replay cards", () => {
-    render(
-      <MemoryRouter>
-        <Archive />
-      </MemoryRouter>
-    );
+    renderArchive();
     expect(screen.getAllByText("小明").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("小红").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("小刚").length).toBeGreaterThanOrEqual(1);
   });
 
   it("shows tick and event counts", () => {
-    render(
-      <MemoryRouter>
-        <Archive />
-      </MemoryRouter>
-    );
+    renderArchive();
     expect(screen.getByText("⏱ 20 Tick")).toBeInTheDocument();
     expect(screen.getByText("📋 47 事件")).toBeInTheDocument();
   });

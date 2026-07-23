@@ -24,9 +24,10 @@
 | 34 | 10.6 | 叙事 + 竞技 + 干预联通 | 30, 31, 23, 22 | 剩余模块全部切换真 API | ✅ |
 | 34-W | 10.6.5 | World 管理完善 | 34 | World 列表/切换/删除 + setup 改为两段式 + 返回列表 | ✅ |
 | 34-S | 10.6.6 | 场景自定义 | 34-W | 用户自定义场景 CRUD，SandboxSetup + SoloTheater 可选自定义场景 | ✅ |
-| 35 | 10.7 | 持久化 + 鲁棒性 | 02, 14, 34-W, 34-S | Agent/World SQLite 存储 + LLM fallback | 3h |
+| 35 | 10.7 | 持久化 + 鲁棒性 | 02, 14, 34-W, 34-S | Agent/World SQLite 存储 + LLM fallback | ✅ |
+| 35-S | 10.7.5 | 安全加固 — 删除保护 + 数量上限 | 35, 36 | Agent 删除前引用检查 + Agent≤25 / World≤45 上限 | ✅ |
 | **🏗️ Phase 11: 前端架构重整** | | | | | |
-| 36 | 11.1 | API 层收敛 + 重复代码消除 | 34 | api/{worlds,events,narratives,arenas...}.ts + 数据同步验证 | 3h |
+| 36 | 11.1 | API 层收敛 + 重复代码消除 | 34 | api/{worlds,events,narratives,arenas...}.ts + 数据同步验证 | ✅ |
 | 37 | 11.2 | 共享组件 + 常量抽取 | 36 | SelectableCard, labels/, scenarios/ | 3h |
 | 38 | 11.3 | 大文件拆分 + 路由优化 | 37 | 懒加载, 死代码清理, 包体积 < 400KB | 3h |
 | **🧩 Phase 12: 功能补全** | | | | | |
@@ -1179,6 +1180,58 @@ es.addEventListener('open', async () => {
 - [ ] 创建 World → 重启 → World 可查询
 - [ ] LLM API 超时 → Agent 不卡死，返回默认行为
 - [ ] SSE 断开重连 → 不丢事件
+- [ ] 后端测试全量通过
+
+---
+
+### Step 35-S — 安全加固：删除保护 + 数量上限
+
+> **目标：** Agent 删除防数据损坏 + Agent/World 数量硬上限
+> **估时：** 0.5 小时
+
+#### 35-Sa. Agent 删除前引用检查
+
+**问题：** 当前 `DELETE /api/agents/{id}` 不检查 World 是否引用了该 Agent。删除后，引用方 World 下次启动时 `_rebuild_agents_from_db()` 因找不到行而抛 400。
+
+**方案：** 删除前 `SELECT * FROM worlds WHERE agent_ids_json LIKE '%{agent_id}%'`。
+- 无引用 → 正常删除 200
+- 有引用 → 返回 409 + `"Agent 被 N 个 World 使用: [world_name, ...]"`，前端显示警告
+
+涉及文件：
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `backend/src/api/agents.py` | 修改 | `delete_agent` 加引用检查查询 |
+| `frontend/src/pages/AgentFoundry.tsx` | 修改 | 删除按钮前展示引用信息（如有关联 World 则按钮 disable + tooltip） |
+
+#### 35-Sb. Agent/World 数量上限
+
+**问题：** 无上限，可被脚本批量创建撑爆 SQLite 或消耗完 LLM quota。
+
+**方案：**
+
+| 实体 | 上限 | 配置键 |
+|------|------|--------|
+| Agent | 25 | `max_agents` |
+| World | 45 | `max_worlds` |
+
+在 `POST /api/agents` 和 `POST /api/worlds` 创建前 `SELECT COUNT(*)` 检查。
+超限 → 400 + `"Agent/World 数量已达上限 (N/25)"`。
+
+涉及文件：
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `backend/src/config.py` | 修改 | 加 `max_agents: int = 25` `max_worlds: int = 45` |
+| `backend/src/api/agents.py` | 修改 | `create_agent` 加 count 检查 |
+| `backend/src/api/worlds.py` | 修改 | `create_world` 加 count 检查 |
+
+#### 验收标准
+
+- [ ] 删除未被引用的 Agent → 200 成功
+- [ ] 删除被 World 引用的 Agent → 409 + 列出引用 World 名
+- [ ] 创建第 26 个 Agent → 400 + "Agent 数量已达上限 (25/25)"
+- [ ] 创建第 46 个 World → 400 + "World 数量已达上限 (45/45)"
 - [ ] 后端测试全量通过
 
 ---

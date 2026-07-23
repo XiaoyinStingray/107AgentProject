@@ -1,10 +1,10 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
 import EmptyState from "../components/shared/EmptyState";
-import { MOCK_AGENTS } from "../mocks/agents";
-import { useAgentStore } from "../stores/useAgentStore";
+import { useAgents } from "../api/agents";
+import { useWorlds } from "../api/worlds";
 import {
   ARCHIVE_TABS,
   MOCK_REPLAYS,
@@ -18,8 +18,6 @@ import {
   downloadAsFile,
 } from "../mocks/archive";
 import type { ArchiveTab } from "../types/archive";
-import type { AgentResponse } from "../types/agent";
-import type { WorldResponse } from "../types/world";
 
 /* ================================================================
    Step 25 — 档案馆页面 (M8)
@@ -251,8 +249,8 @@ function AchievementsPanel() {
    ================================================================ */
 
 function ExportPanel() {
-  const agents = useAvailableAgents();
-  const worlds = useAvailableWorlds();
+  const { data: agents = [] } = useAgents();
+  const { data: worlds = [] } = useWorlds();
   const [mode, setMode] = useState<"api" | "mock">(worlds.length > 0 ? "api" : "mock");
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [selectedWorldId, setSelectedWorldId] = useState("");
@@ -465,24 +463,3 @@ function ExportPanel() {
    工具函数
    ================================================================ */
 
-/** Agent 来源——Zustand store + MOCK_AGENTS 合并去重 */
-function useAvailableAgents(): AgentResponse[] {
-  const createdAgents = useAgentStore((s) => s.agents);
-  return useMemo(() => {
-    const byId = new Map<string, AgentResponse>();
-    [...MOCK_AGENTS, ...createdAgents].forEach((a) => byId.set(a.id, a));
-    return [...byId.values()];
-  }, [createdAgents]);
-}
-
-/** 模拟世界列表——从 API 获取，无后端时返回空数组（降级到 Mock 模式）。 */
-function useAvailableWorlds(): WorldResponse[] {
-  const [worlds, setWorlds] = useState<WorldResponse[]>([]);
-  useEffect(() => {
-    fetch("/api/worlds")
-      .then((r) => r.ok ? r.json() : [])
-      .then((data: WorldResponse[]) => setWorlds(data))
-      .catch(() => setWorlds([]));
-  }, []);
-  return worlds;
-}

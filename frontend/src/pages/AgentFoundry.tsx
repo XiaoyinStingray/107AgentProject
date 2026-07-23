@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { AgentResponse } from "../types/agent";
-import { useAgents, useCreateAgent } from "../api/agents";
-import { useAgentStore } from "../stores/useAgentStore";
+import { useAgents, useCreateAgent, useDeleteAgent } from "../api/agents";
+import { useWorlds } from "../api/worlds";
 import AgentCard from "../components/agent/AgentCard";
 import PersonaRadar from "../components/agent/PersonaRadar";
 import Card from "../components/shared/Card";
@@ -12,23 +12,46 @@ export default function AgentFoundry() {
   const [input, setInput] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // React Query：服务端数据缓存（新架构）
+  // React Query：服务端数据缓存，全模块共享
   const { data: serverAgents } = useAgents();
   const createAgent = useCreateAgent();
+  const deleteAgent = useDeleteAgent();
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const { data: worlds = [] } = useWorlds();
 
-  // Zustand：过渡兼容——Step 36 统一移除，在此之前仍写一份保证其他页面可用
-  const addAgent = useAgentStore((s) => s.addAgent);
+  // 计算每个 Agent 被哪些 World 引用（用于禁用删除按钮）
+  const agentWorldRefs = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const w of worlds) {
+      for (const aid of w.agent_ids) {
+        const refs = map.get(aid) ?? [];
+        refs.push(w.name);
+        map.set(aid, refs);
+      }
+    }
+    return map;
+  }, [worlds]);
 
   const handleCreate = async () => {
     if (!input.trim() || createAgent.isPending) return;
     try {
       const result = await createAgent.mutateAsync(input.trim());
-      // 过渡双写：Zustand store 供其他 6 个页面兼容（Step 36 移除）
-      addAgent(result);
+      // invalidateQueries(['agents']) → 其他页面 useAgents() 自动刷新
       setSelectedId(result.id);
       setInput("");
     } catch {
       // 错误由 createAgent.error 展示
+    }
+  };
+
+  const handleDelete = async (e: React.MouseEvent, agentId: string) => {
+    e.stopPropagation();
+    setDeleteError(null);
+    try {
+      await deleteAgent.mutateAsync(agentId);
+      if (selectedId === agentId) setSelectedId(null);
+    } catch (err: any) {
+      setDeleteError(err?.message ?? "删除失败");
     }
   };
 
@@ -106,6 +129,18 @@ export default function AgentFoundry() {
       {createAgent.error && (
         <div className="mb-4 px-4 py-2 border border-accent-red/30 bg-accent-red/10 rounded text-sm text-accent-red font-mono">
           {(createAgent.error as Error)?.message ?? "创建失败，请检查后端是否启动"}
+        </div>
+      )}
+      {deleteError && (
+        <div className="mb-4 px-4 py-2 border border-accent-orange/30 bg-accent-orange/10 rounded text-sm text-accent-orange font-mono flex items-center justify-between">
+          <span>{deleteError}</span>
+          <button
+            type="button"
+            onClick={() => setDeleteError(null)}
+            className="text-accent-orange/60 hover:text-accent-orange ml-3"
+          >
+            ×
+          </button>
         </div>
       )}
 
@@ -236,12 +271,23 @@ export default function AgentFoundry() {
             {agents.map((agent) => {
               const isSelected = agent.id === selectedId;
               const isLatest = agent.id === agents[agents.length - 1]?.id;
+              const worldRefs = agentWorldRefs.get(agent.id);
+              const isInUse = worldRefs && worldRefs.length > 0;
+              const deleteTitle = isInUse
+                ? `无法删除：被 ${worldRefs.length} 个 World 使用（${worldRefs.join("、")}）`
+                : "删除 Agent";
               return (
-                <button
+                <div
                   key={agent.id}
                   onClick={() => setSelectedId(agent.id)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") setSelectedId(agent.id);
+                  }}
                   className={`
-                    text-left bg-bg-card border rounded-lg p-3 w-full
+                    relative text-left bg-bg-card border rounded-lg p-3 w-full
+                    cursor-pointer
                     hover:border-accent-green/40 transition-colors duration-200
                     ${isSelected
                       ? "border-accent-green/60 ring-1 ring-accent-green/20"
@@ -249,7 +295,18 @@ export default function AgentFoundry() {
                     }
                   `}
                 >
-                  <div className="flex items-center gap-2 mb-2">
+                  {/* 删除按钮 */}
+                  <button
+                    type="button"
+                    onClick={(e) => handleDelete(e, agent.id)}
+                    disabled={deleteAgent.isPending || isInUse}
+                    className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded transition-colors disabled:opacity-20 disabled:cursor-not-allowed text-text-secondary/40 hover:text-accent-red hover:bg-accent-red/10"
+                    title={deleteTitle}
+                  >
+                    ×
+                  </button>
+
+                  <div className="flex items-center gap-2 mb-2 pr-6">
                     <span className="font-mono text-sm text-text-primary">
                       {agent.name}
                     </span>
@@ -275,7 +332,7 @@ export default function AgentFoundry() {
                       </span>
                     ))}
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
