@@ -8,7 +8,7 @@ import type { AgentResponse } from "../types/agent";
    ================================================================ */
 
 /** 叙事风格——与后端 NarrativeStyle StrEnum 一一对应 */
-export type NarrativeStyle = "story" | "diary" | "letter" | "podcast";
+export type NarrativeStyle = "story" | "diary" | "letter" | "podcast" | "parallel";
 
 /** 叙事结果——与后端 NarrativeResponse 对齐 */
 export interface NarrativeResult {
@@ -82,6 +82,17 @@ export const NARRATIVE_STYLES: NarrativeStyleMeta[] = [
     needsTarget: true,
     targetLabel: "播客主题",
     targetPlaceholder: "例如：小镇做题家的逆袭 / 内向者的社交策略",
+    priority: "P2",
+    available: true,
+  },
+  {
+    key: "parallel",
+    label: "平行对话",
+    emoji: "💬",
+    description: "两个角色之间的剧本式对话，600-1000 字，体现观点碰撞",
+    needsTarget: true,
+    targetLabel: "对话对象",
+    targetPlaceholder: "例如：小红 / 未来的自己 / 导师",
     priority: "P2",
     available: true,
   },

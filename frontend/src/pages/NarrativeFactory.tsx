@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
 import StatusDot from "../components/shared/StatusDot";
@@ -10,6 +10,7 @@ import {
   useGenerateDiary,
   useGenerateLetter,
   useGeneratePodcast,
+  useGenerateParallel,
 } from "../api/narratives";
 import type { NarrativeGenRequest } from "../api/narratives";
 import {
@@ -18,6 +19,14 @@ import {
   DEFAULT_PODCAST_TARGET,
 } from "../mocks/narratives";
 import type { NarrativeStyle, NarrativeResult } from "../mocks/narratives";
+
+/** 时间跨度选项——letter 风格用 */
+const TIME_SPAN_OPTIONS = [
+  { label: "1年后", value: "1年后" },
+  { label: "3年后", value: "3年后" },
+  { label: "5年后", value: "5年后" },
+  { label: "10年后", value: "10年后" },
+];
 import { formatDateTime } from "../utils/formatDate";
 
 /* ================================================================
@@ -37,20 +46,46 @@ export default function NarrativeFactory() {
   const [worldId, setWorldId] = useState<string>("");
   const [styleKey, setStyleKey] = useState<NarrativeStyle>("story");
   const [target, setTarget] = useState<string>("");
+  const [timeSpan, setTimeSpan] = useState<string>("5年后");
+  const [guestAgentIds, setGuestAgentIds] = useState<string[]>([]);
   const [phase, setPhase] = useState<NarrativePhase>("setup");
   const [result, setResult] = useState<NarrativeResult | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // 切换风格时清空附加参数，避免残留上一个风格的输入
+  useEffect(() => {
+    setTarget("");
+    setGuestAgentIds([]);
+    setTimeSpan("5年后");
+  }, [styleKey]);
+
+  // 同步 URL hash，让顶部“当前功能”显示正确
+  useEffect(() => {
+    const styleToItemId: Record<string, number> = {
+      story: 29,
+      letter: 30,
+      parallel: 31,
+      podcast: 32,
+    };
+    const itemId = styleToItemId[styleKey];
+    if (itemId && window.location.hash !== `#item-${itemId}`) {
+      // 静默更新 hash，不触发页面刷新
+      window.history.replaceState(null, "", `#item-${itemId}`);
+    }
+  }, [styleKey]);
 
   // 叙事 mutations
   const generateStory = useGenerateStory();
   const generateDiary = useGenerateDiary();
   const generateLetter = useGenerateLetter();
   const generatePodcast = useGeneratePodcast();
+  const generateParallel = useGenerateParallel();
   const isPending =
     generateStory.isPending ||
     generateDiary.isPending ||
     generateLetter.isPending ||
-    generatePodcast.isPending;
+    generatePodcast.isPending ||
+    generateParallel.isPending;
 
   const selectedAgent = agents.find((a) => a.id === agentId);
   const selectedStyle = NARRATIVE_STYLES.find(
@@ -60,11 +95,30 @@ export default function NarrativeFactory() {
   const canGenerate = !!agentId && !!worldId && !!selectedStyle;
 
   /** 构建通用叙事请求 */
-  const buildRequest = useCallback((): NarrativeGenRequest => ({
-    agent_id: agentId,
-    world_id: worldId,
-    target: styleKey === "letter" && effectiveTarget ? effectiveTarget : null,
-  }), [agentId, worldId, styleKey, effectiveTarget]);
+  const buildRequest = useCallback((): NarrativeGenRequest => {
+    let reqTarget: string | null = null;
+    if (styleKey === "letter") {
+      // letter: 收信人 + 时间跨度组合，让 LLM 生成不同内容
+      const recipient = target.trim() || DEFAULT_LETTER_TARGET;
+      reqTarget = `${timeSpan}后的${recipient}`;
+    } else if (styleKey === "podcast") {
+      // podcast: 主题 + 嘉宾名字
+      const topic = target.trim() || DEFAULT_PODCAST_TARGET;
+      const guestNames = guestAgentIds
+        .map((id) => agents.find((a) => a.id === id)?.name)
+        .filter(Boolean);
+      reqTarget = guestNames.length > 0
+        ? `${topic}（嘉宾：${guestNames.join("、")}）`
+        : topic || null;
+    } else if (styleKey === "parallel") {
+      // parallel: 对话对象名字
+      const guestName = guestAgentIds[0]
+        ? agents.find((a) => a.id === guestAgentIds[0])?.name
+        : target.trim();
+      reqTarget = guestName || null;
+    }
+    return { agent_id: agentId, world_id: worldId, target: reqTarget };
+  }, [agentId, worldId, styleKey, target, timeSpan, guestAgentIds, agents]);
 
   const handleGenerate = useCallback(async () => {
     if (!canGenerate || !selectedStyle) return;
@@ -77,7 +131,8 @@ export default function NarrativeFactory() {
       if (styleKey === "story") apiResult = await generateStory.mutateAsync(req);
       else if (styleKey === "diary") apiResult = await generateDiary.mutateAsync(req);
       else if (styleKey === "letter") apiResult = await generateLetter.mutateAsync(req);
-      else apiResult = await generatePodcast.mutateAsync(req);
+      else if (styleKey === "podcast") apiResult = await generatePodcast.mutateAsync(req);
+      else apiResult = await generateParallel.mutateAsync(req);
 
       setResult({
         title: apiResult.title,
@@ -94,7 +149,7 @@ export default function NarrativeFactory() {
       setPhase("setup");
     }
   }, [canGenerate, selectedStyle, styleKey, agentId, buildRequest,
-      generateStory, generateDiary, generateLetter, generatePodcast]);
+      generateStory, generateDiary, generateLetter, generatePodcast, generateParallel]);
 
   const handleReset = useCallback(() => {
     setResult(null);
@@ -201,11 +256,11 @@ export default function NarrativeFactory() {
             </div>
           </div>
 
-          {/* 正文——保留换行 */}
-          <div className="prose prose-invert max-w-none">
-            <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-text-primary bg-transparent border-0 p-0 m-0">
+          {/* 正文——纯文本保留换行，不使用 prose 避免特殊字符渲染 */}
+          <div className="max-w-none">
+            <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-text-primary">
               {result.content}
-            </pre>
+            </div>
           </div>
         </Card>
 
@@ -399,11 +454,11 @@ export default function NarrativeFactory() {
         )}
       </div>
 
-      {/* 附加参数（letter/podcast） */}
+      {/* 附加参数（letter/podcast/parallel） */}
       {selectedStyle?.needsTarget && (
         <div className="mb-6 animate-fade-in">
           <h2 className="text-sm font-mono text-text-primary mb-3">
-            ✉️ {selectedStyle.targetLabel}
+            {styleKey === "letter" ? "✉️ 收信人" : styleKey === "podcast" ? "🎙️ 播客主题" : "💬 对话对象"}
           </h2>
           <Card>
             <input
@@ -415,9 +470,141 @@ export default function NarrativeFactory() {
             />
             <p className="text-xs text-text-secondary/60 font-mono mt-2">
               💡 留空则使用默认值：
-              {styleKey === "letter" ? DEFAULT_LETTER_TARGET : DEFAULT_PODCAST_TARGET}
+              {styleKey === "letter" ? DEFAULT_LETTER_TARGET : styleKey === "podcast" ? DEFAULT_PODCAST_TARGET : "未指定"}
             </p>
           </Card>
+        </div>
+      )}
+
+      {/* letter 时间跨度 */}
+      {styleKey === "letter" && (
+        <div className="mb-6 animate-fade-in">
+          <h2 className="text-sm font-mono text-text-primary mb-3">
+            ⏳ 时间跨度
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            {TIME_SPAN_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setTimeSpan(opt.value)}
+                className={`
+                  px-3 py-1.5 rounded-lg text-sm font-mono border transition-colors
+                  ${timeSpan === opt.value
+                    ? "border-accent-green/60 bg-accent-green/5 text-accent-green"
+                    : "border-border bg-bg-card text-text-secondary hover:border-text-secondary/40"
+                  }
+                `.trim()}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-text-secondary/60 font-mono mt-2">
+            💡 信件将写给 {timeSpan}的{effectiveTarget || DEFAULT_LETTER_TARGET}
+          </p>
+        </div>
+      )}
+
+      {/* podcast 嘉宾选择（多选） */}
+      {styleKey === "podcast" && agents.length > 0 && (
+        <div className="mb-6 animate-fade-in">
+          <h2 className="text-sm font-mono text-text-primary mb-3">
+            🎤 邀请嘉宾（可多选，可选）
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+            <button
+              type="button"
+              onClick={() => setGuestAgentIds([])}
+              className={`
+                text-left p-2 rounded-lg border transition-colors text-sm font-mono
+                ${guestAgentIds.length === 0
+                  ? "border-accent-green/60 bg-accent-green/5 text-accent-green"
+                  : "border-border bg-bg-card text-text-secondary hover:border-text-secondary/40"
+                }
+              `.trim()}
+            >
+              无嘉宾（单人播客）
+            </button>
+            {agents
+              .filter((a) => a.id !== agentId)
+              .map((agent) => {
+                const isSelected = guestAgentIds.includes(agent.id);
+                return (
+                  <button
+                    key={agent.id}
+                    type="button"
+                    onClick={() => {
+                      setGuestAgentIds((prev) =>
+                        isSelected ? prev.filter((id) => id !== agent.id) : [...prev, agent.id]
+                      );
+                    }}
+                    className={`
+                      text-left p-2 rounded-lg border transition-colors text-sm font-mono
+                      ${isSelected
+                        ? "border-accent-green/60 bg-accent-green/5 text-accent-green"
+                        : "border-border bg-bg-card text-text-secondary hover:border-text-secondary/40"
+                      }
+                    `.trim()}
+                  >
+                    {agent.name}
+                    {isSelected && <span className="ml-1 text-xs">✓</span>}
+                  </button>
+                );
+              })}
+          </div>
+        </div>
+      )}
+
+      {/* parallel 对话对象选择 */}
+      {styleKey === "parallel" && agents.length > 0 && (
+        <div className="mb-6 animate-fade-in">
+          <h2 className="text-sm font-mono text-text-primary mb-3">
+            💬 选择对话对象
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+            {agents
+              .filter((a) => a.id !== agentId)
+              .map((agent) => {
+                const isSelected = guestAgentIds.includes(agent.id);
+                return (
+                  <button
+                    key={agent.id}
+                    type="button"
+                    onClick={() => {
+                      if (isSelected) {
+                        // 取消选择
+                        setGuestAgentIds([]);
+                        setTarget("");
+                      } else {
+                        // 单选替换
+                        setGuestAgentIds([agent.id]);
+                        setTarget(agent.name);
+                      }
+                    }}
+                    className={`
+                      text-left p-3 rounded-lg border transition-colors
+                      ${isSelected
+                        ? "border-accent-green/60 bg-accent-green/5 ring-1 ring-accent-green/20"
+                        : "border-border bg-bg-card hover:border-text-secondary/40"
+                      }
+                    `.trim()}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-full bg-accent-purple/10 border border-accent-purple/30 flex items-center justify-center text-xs select-none">
+                        {agent.name.charAt(0)}
+                      </div>
+                      <span className="font-mono text-sm text-text-primary">
+                        {agent.name}
+                      </span>
+                      {isSelected && (
+                        <span className="text-xs text-accent-green font-mono ml-auto">✓</span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+          </div>
         </div>
       )}
 
@@ -494,6 +681,7 @@ function styleLabel(style: NarrativeStyle): string {
     diary: "日记",
     letter: "信件",
     podcast: "播客",
+    parallel: "平行对话",
   };
   return map[style] ?? style;
 }

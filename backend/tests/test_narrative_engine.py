@@ -121,6 +121,19 @@ class TestNarrativeEngine:
         assert result.style == NarrativeStyle.PODCAST
         assert result.title == "小镇青年的编程之路"
 
+    @pytest.mark.asyncio
+    async def test_generate_parallel(self):
+        engine = NarrativeEngine(MockLLM("标题：图书馆的对话\n\n小明：你好，小红。\n小红：你好，小明。"))
+        req = NarrativeRequest(
+            style=NarrativeStyle.PARALLEL,
+            agent_id="a1", events=make_events(), persona=make_persona(),
+            target="小红",
+        )
+        result = await engine.generate(req)
+        assert result.style == NarrativeStyle.PARALLEL
+        assert result.title == "图书馆的对话"
+        assert "小明" in result.content
+
 
 # =============================================================================
 # 边界情况

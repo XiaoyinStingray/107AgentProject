@@ -62,6 +62,10 @@ vi.mock("../../api/narratives", () => ({
     mutateAsync: () => Promise.resolve(narrativeMockResult),
     isPending: false,
   }),
+  useGenerateParallel: () => ({
+    mutateAsync: () => Promise.resolve(narrativeMockResult),
+    isPending: false,
+  }),
 }));
 
 const testQueryClient = new QueryClient({
@@ -205,16 +209,17 @@ describe("Step 23 — narrative mocks utilities", () => {
     expect(countWords("  \n\t ")).toBe(0);
   });
 
-  it("NARRATIVE_STYLES has 4 available + 3 placeholder entries", () => {
+  it("NARRATIVE_STYLES has 5 available + 3 placeholder entries", () => {
     const available = NARRATIVE_STYLES.filter((s) => s.available);
     const placeholders = NARRATIVE_STYLES.filter((s) => !s.available);
-    expect(available).toHaveLength(4);
+    expect(available).toHaveLength(5);
     expect(placeholders).toHaveLength(3);
     expect(available.map((s) => s.key)).toEqual([
       "story",
       "diary",
       "letter",
       "podcast",
+      "parallel",
     ]);
   });
 

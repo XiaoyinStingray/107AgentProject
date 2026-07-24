@@ -70,3 +70,15 @@ export function useGeneratePodcast() {
     },
   });
 }
+
+/** 生成平行对话 */
+export function useGenerateParallel() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (req: NarrativeGenRequest) =>
+      client.post<NarrativeResponse>("/narratives/parallel", req),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: narrativeKeys.all });
+    },
+  });
+}

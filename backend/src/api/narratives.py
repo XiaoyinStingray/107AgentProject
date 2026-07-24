@@ -2,9 +2,11 @@
 叙事 API 路由 — NarrativeEngine 的 REST 端点。
 
 路由:
-    POST /api/narratives/story   生成第一人称短篇小说
-    POST /api/narratives/diary   生成 Agent 日记
-    POST /api/narratives/letter  生成未来的信
+    POST /api/narratives/story    生成第一人称短篇小说
+    POST /api/narratives/diary    生成 Agent 日记
+    POST /api/narratives/letter   生成未来的信
+    POST /api/narratives/podcast  生成播客脚本
+    POST /api/narratives/parallel 生成平行对话
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -169,6 +171,21 @@ async def generate_podcast(
     """生成播客脚本。"""
     try:
         return await _generate_narrative(NarrativeStyle.PODCAST, req, db, engine)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"叙事生成失败: {str(e)}")
+
+
+@router.post("/parallel", response_model=NarrativeGenResponse)
+async def generate_parallel(
+    req: NarrativeGenRequest,
+    db: AsyncSession = Depends(get_db),
+    engine: NarrativeEngine = Depends(get_narrative_engine),
+):
+    """生成平行对话——两个角色之间的剧本式对话。"""
+    try:
+        return await _generate_narrative(NarrativeStyle.PARALLEL, req, db, engine)
     except HTTPException:
         raise
     except Exception as e:

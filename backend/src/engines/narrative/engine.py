@@ -17,6 +17,7 @@ from models.event import SimEvent
 from engines.narrative.templates import (
     DIARY_PROMPT,
     LETTER_PROMPT,
+    PARALLEL_PROMPT,
     PODCAST_PROMPT,
     STORY_PROMPT,
 )
@@ -32,6 +33,7 @@ class NarrativeStyle(StrEnum):
     DIARY = "diary"
     LETTER = "letter"
     PODCAST = "podcast"
+    PARALLEL = "parallel"
 
 
 class NarrativeRequest:
@@ -80,6 +82,7 @@ _TEMPLATES: dict[NarrativeStyle, str] = {
     NarrativeStyle.DIARY: DIARY_PROMPT,
     NarrativeStyle.LETTER: LETTER_PROMPT,
     NarrativeStyle.PODCAST: PODCAST_PROMPT,
+    NarrativeStyle.PARALLEL: PARALLEL_PROMPT,
 }
 
 
