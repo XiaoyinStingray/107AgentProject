@@ -80,6 +80,7 @@ describe("Step 33 GroupSandbox", () => {
 
     await waitFor(() => expect(create).toHaveBeenCalledWith({
       name: "群体沙盒 - 期末周",
+      world_type: "group",
       scenario: { name: "期末周" },
       agent_ids: MOCK_AGENTS.map((agent) => agent.id),
     }));

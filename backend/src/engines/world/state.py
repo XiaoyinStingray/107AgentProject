@@ -65,7 +65,34 @@ class WorldStateMixin:
         recent = self._recent_events_text(3)
         if recent:
             context += f"📋 最近事件:\n{recent}"
+        # 目标完成提示——Agent 会看到自己的成就并被鼓励设定新目标
+        goal_hints = self._build_goal_context()
+        if goal_hints:
+            context += goal_hints
         return context
+
+    def _build_goal_context(self) -> str:
+        """Build goal status hints for each agent with recently achieved goals."""
+        hints = ""
+        for agent in self.agents.values():
+            if not hasattr(agent, "goals"):
+                continue
+            achieved = [g for g in agent.goals if g.status == "achieved"]
+            active = [g for g in agent.goals if g.status in ("active", "in_progress")]
+            if achieved:
+                name = agent.persona.name or agent.id
+                hints += f"\n🎉 {name} 最近达成的目标:\n"
+                for g in achieved[-2:]:  # 最多展示最近 2 个
+                    hints += f"  ✅ {g.description}\n"
+                hints += "💡 考虑设定一个新目标来替代已完成的目标。\n"
+            if active:
+                name = agent.persona.name or agent.id
+                in_progress = [g for g in active if g.status == "in_progress"]
+                if in_progress:
+                    hints += f"\n🎯 {name} 进行中的目标:\n"
+                    for g in in_progress:
+                        hints += f"  ▶ {g.description} ({g.progress:.0%})\n"
+        return hints
 
     def _recent_events_text(self, count: int = 3) -> str:
         """Return a compact summary of the most recent World events."""
@@ -103,21 +130,31 @@ class WorldStateMixin:
         return [message]
 
     def _handle_set_goal(self, event: SimEvent) -> list[SimEvent]:
-        """Append a new active goal to the source Agent."""
+        """Set or update an active goal for the source Agent."""
         from models.agent import Goal
 
         agent = self.agents.get(event.source_agent_id or "")
         if not agent:
             return []
+        desc = event.data.get("description", event.description)
+        # 同名目标 → 更新（防止重复）
+        for g in agent.goals:
+            if g.description == desc:
+                g.status = "active"
+                g.progress = 0.0
+                logger.info(f"WorldEngine._handle_set_goal: agent={agent.id} re-set goal='{desc}'")
+                return []
+        # 新目标
         agent.goals.append(
             Goal(
                 id=f"g{len(agent.goals) + 1}",
-                description=event.data.get("description", event.description),
+                description=desc,
                 priority=event.data.get("priority", 1),
                 status="active",
+                progress=0.0,
             )
         )
-        logger.info(f"WorldEngine._apply_action: agent={agent.id} set goal")
+        logger.info(f"WorldEngine._handle_set_goal: agent={agent.id} new goal='{desc}'")
         return []
 
     def _handle_observe(self, event: SimEvent) -> list[SimEvent]:

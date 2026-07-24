@@ -44,7 +44,8 @@ export default function GroupSandbox() {
   const [startGen, setStartGen] = useState(0); // 递增以重置节流器（仅新启动时）
   const { activeWorldId, setActiveWorld } = useSandboxStore();
   const queryClient = useQueryClient();
-  const { data: worlds = [] } = useWorlds();
+  const { data: allWorlds = [] } = useWorlds();
+  const worlds = useMemo(() => allWorlds.filter((w) => w.world_type !== "solo"), [allWorlds]);
   const createWorld = useCreateWorld();
   const startWorld = useStartWorld();
   const pauseWorld = usePauseWorld();
@@ -98,11 +99,20 @@ export default function GroupSandbox() {
   }, [hydrateRelationships, relationshipQuery.data]);
 
   // 仅在恢复后首次收到 paused/boundary 时同步 isPaused，之后由按钮控制
+  // BUG-011: connected 事件携带 status，用于重连时校准暂停状态
   const pauseSyncedRef = useRef(false);
   useEffect(() => {
     const streamError = [...events].reverse().find((event) => event.type === "error");
     if (streamError) {
       setError(streamError.message ?? streamError.content ?? "SSE 连接发生错误");
+    }
+
+    // 收到 connected 事件 → 重置同步标记，按后端真实状态校准
+    const connectedEvent = [...events].reverse().find((event) => event.type === "connected");
+    if (connectedEvent?.status) {
+      pauseSyncedRef.current = false;
+      setIsPaused(connectedEvent.status === "paused");
+      return;
     }
 
     if (pauseSyncedRef.current) return;
@@ -150,6 +160,7 @@ export default function GroupSandbox() {
     try {
       const world = await createWorld.mutateAsync({
         name: `群体沙盒 - ${selectedScenario}`,
+        world_type: "group",
         scenario: { name: selectedScenario },
         agent_ids: selectedAgentIds,
       });
@@ -181,9 +192,12 @@ export default function GroupSandbox() {
     }
   };
 
-  /** 返回列表——保留 World 当前状态，不重置；刷新 World 列表缓存 */
+  /** 返回列表——保留 World 当前状态，不重置；刷新 World 列表缓存。
+   *  设置 worldId 为 null 确保 useSSE 正确断开，恢复时从头拉取历史。 */
   const handleBack = useCallback(() => {
     disconnect();
+    setWorldId(null);         // ← BUG-012: 确保 useSSE effect 在恢复时重连
+    pauseSyncedRef.current = false;  // ← BUG-011: 重置允许恢复后重新同步
     queryClient.invalidateQueries({ queryKey: ["worlds"] });
     setPhase("setup");
   }, [disconnect, queryClient]);
@@ -212,9 +226,14 @@ export default function GroupSandbox() {
     setWorldId(id);
     setActiveWorld(id);
     setSelectedTick(null);
-    setIsPaused(false);
+    const world = allWorlds.find((w) => w.id === id);
+    setIsPaused(world?.status === "paused");
+    // 启用 restoring 模式——历史事件直接展示，不走节流器
+    setRestoring(true);
+    if (restoreTimerRef.current) clearTimeout(restoreTimerRef.current);
+    restoreTimerRef.current = setTimeout(() => setRestoring(false), 2000);
     setPhase("running");
-  }, [clear, setActiveWorld]);
+  }, [clear, setActiveWorld, allWorlds]);
 
   /** 从 World 列表删除实验 */
   const handleDeleteWorld = useCallback(async (id: string) => {

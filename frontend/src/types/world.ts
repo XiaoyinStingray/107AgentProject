@@ -12,6 +12,7 @@ export interface Scenario {
 
 export interface WorldCreate {
   name: string;
+  world_type?: "solo" | "group";
   scenario?: Scenario;
   agent_ids?: string[];
 }
@@ -19,6 +20,7 @@ export interface WorldCreate {
 export interface WorldResponse {
   id: string;
   name: string;
+  world_type: "solo" | "group";
   scenario: Scenario;
   agent_ids: string[];
   current_tick: number;

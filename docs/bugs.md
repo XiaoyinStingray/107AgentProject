@@ -170,3 +170,90 @@
   - `frontend/src/pages/Archive.tsx` — ExportPanel 组件 handleApiExport（行 265-290）
   - `frontend/src/api/export.ts` — useExportReport hook
 - **修复方向**：Step 45 中顺手改
+
+---
+
+## BUG-010：单人剧场暂停后恢复，事件不加载
+
+- **状态**：待处理
+- **优先级**：P0（核心交互断裂）
+- **发现日期**：2026-07-24
+- **环境**：SoloTheater 暂停 → 返回列表 → 继续
+- **复现步骤**：
+  1. SoloTheater 投放 Agent，运行几 tick
+  2. 点「← 列表」返回
+  3. 点该 World 的「继续」
+- **实际结果**：进入运行态后事件流为空，之前的思考/消息不显示
+- **尝试修复**：
+  - 删除了 `handleBack` 中的 `clear()`（保留事件）
+  - 修改了 `replayMissedEvents`（重连时拉取历史事件）
+  - 修复了 `engine.world.status` 同步（暂停生效）
+- **当前状态**：暂停 API 调用已生效（`engine.world.status` 同步），但重回运行态时历史事件仍不显示
+- **关联位置**：
+  - `frontend/src/pages/SoloTheater.tsx` — handleBack, handleResumeWorld
+  - `frontend/src/hooks/useSSE.ts` — replayMissedEvents, clear 逻辑
+  - `backend/src/api/worlds.py` — pause_world, start_world
+  - `backend/src/api/sse.py` — _world_event_generator（SSE 不重放历史事件）
+
+---
+
+## BUG-011：群体沙盒暂停后偶尔自动恢复
+
+- **状态**：✅ 已修复 (2026-07-24)
+- **优先级**：P1
+- **发现日期**：2026-07-24
+- **修复内容**：
+  1. 后端 `sse.py`：新连接到达时通过 `_active_connection_ids` 驱逐旧 generator，防止多个 SSE generator 并发
+  2. `connected` 事件新增 `status` 字段，前端重连时据此校准 `isPaused`
+  3. `GroupSandbox.handleBack` 重置 `pauseSyncedRef`，确保恢复时能正确同步暂停状态
+- **关联位置**：
+  - `backend/src/api/sse.py` — `_active_connection_ids` + conn_id 驱逐机制
+  - `frontend/src/hooks/useSSE.ts` — connected 事件 status 字段
+  - `frontend/src/pages/GroupSandbox.tsx` — pauseSyncedRef 重置 + connected 事件处理
+
+---
+
+## BUG-012：群体沙盒返回后再进入，历史消息为空
+
+- **状态**：✅ 已修复 (2026-07-24)
+- **优先级**：P0
+- **发现日期**：2026-07-24
+- **根因**：`handleBack` 未设 `worldId = null`，导致 `useSSE` effect 不重连；`replayMissedEvents` 只在事件非空时拉取近 5 tick
+- **修复内容**：
+  1. `GroupSandbox.handleBack` 新增 `setWorldId(null)`——使 useSSE effect 在恢复时正确重连
+  2. `useSSE.replayMissedEvents` 新增判断：事件列表为空时从 tick 0 拉取全部历史
+  3. `handleResumeWorld` 开启 `restoring` 模式——历史事件直接展示，不走节流器
+- **关联位置**：
+  - `frontend/src/pages/GroupSandbox.tsx` — handleBack, handleResumeWorld
+  - `frontend/src/hooks/useSSE.ts` — replayMissedEvents
+
+---
+
+## BUG-013：Goal 检测不工作（LLM 判定）
+
+- **状态**：✅ 已修复 (2026-07-24)
+- **优先级**：P1
+- **发现日期**：2026-07-24
+- **根因**：`_llm_check_goals` 未启用 `json_output=True`，LLM 返回的 JSON 不可靠；所有异常静默吞掉，无法排查
+- **修复内容**：
+  1. 改用 `UserMessage(content=prompt, source="goal_checker")` 保持与项目其他 LLM 调用一致
+  2. 添加 `json_output=True` 参数强制 JSON 输出
+  3. 改进 JSON 解析：校验返回类型为 list、逐项安全提取、索引边界检查
+  4. 异常时通过 `logger.warning` 记录具体错误，便于调试
+- **关联位置**：
+  - `backend/src/engines/world/engine.py` — `_llm_check_goals`
+
+---
+
+## BUG-014：world_type 隔离不完整
+
+- **状态**：✅ 已修复 (2026-07-24)
+- **优先级**：P2
+- **发现日期**：2026-07-24
+- **根因**：`world_type` 列通过 `ALTER TABLE ... DEFAULT 'group'` 添加，迁移前创建的 solo World 被错误标记为 group
+- **修复内容**：
+  1. `db.py` 增量迁移：扫描 `world_type='group'` 的 World，若 `agent_ids` 只有 1 人则修正为 `'solo'`
+  2. `SoloTheater.tsx` 新增 `world_type !== "group"` 过滤，与 GroupSandbox 的 `!== "solo"` 过滤对称
+- **关联位置**：
+  - `backend/src/db.py` — BUG-014 增量迁移逻辑
+  - `frontend/src/pages/SoloTheater.tsx` — worlds 过滤

@@ -72,14 +72,48 @@ async def get_db():
 
 # === 初始化 ===
 async def init_db():
-    """创建所有未存在的表（启动时调用一次）"""
+    """创建所有未存在的表 + 增量迁移（启动时调用一次）"""
     import models.memory   # noqa: F401 — 注册 Memory ORM → memories 表
     import models.event    # noqa: F401 — 注册 Event ORM → events 表
     import models.agent_orm  # noqa: F401 — 注册 Agent ORM → agents 表
     import models.world_orm  # noqa: F401 — 注册 World ORM → worlds 表
+    import models.scenario_orm  # noqa: F401 — 注册 Scenario ORM → custom_scenarios 表
 
     async with _get_engine().begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # ── 增量迁移：为已有表添加缺失列 ──
+    from sqlalchemy import text as _text
+    async with _get_engine().connect() as conn:
+        # 2026-07-24: worlds 表加 world_type 列
+        try:
+            await conn.execute(_text("ALTER TABLE worlds ADD COLUMN world_type VARCHAR DEFAULT 'group'"))
+        except Exception:
+            pass  # 列已存在，忽略
+        await conn.commit()
+
+        # BUG-014: 修正历史 World——单 Agent → solo
+        import json as _json
+        result = await conn.execute(
+            _text("SELECT id, agent_ids_json FROM worlds WHERE world_type = 'group'")
+        )
+        rows = result.fetchall()
+        fixed = 0
+        for row in rows:
+            try:
+                agent_ids = _json.loads(row[1])
+                if len(agent_ids) == 1:
+                    await conn.execute(
+                        _text("UPDATE worlds SET world_type = 'solo' WHERE id = :id"),
+                        {"id": row[0]},
+                    )
+                    fixed += 1
+            except Exception:
+                pass
+        if fixed:
+            await conn.commit()
+            logger.info(f"BUG-014: fixed {fixed} old worlds (world_type group→solo)")
+
     logger.info("Database tables ensured (SQLite)")
 
 

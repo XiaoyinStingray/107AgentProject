@@ -22,6 +22,7 @@ class WorldRow(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, default="")
+    world_type: Mapped[str] = mapped_column(String, default="group")  # solo | group
     scenario_json: Mapped[str] = mapped_column(String, default="{}")
     agent_ids_json: Mapped[str] = mapped_column(String, default="[]")
     current_tick: Mapped[int] = mapped_column(Integer, default=0)
@@ -37,6 +38,7 @@ class WorldRow(Base):
         return {
             "id": self.id,
             "name": self.name,
+            "world_type": self.world_type,
             "scenario": json.loads(self.scenario_json),
             "agent_ids": json.loads(self.agent_ids_json),
             "current_tick": self.current_tick,
@@ -50,6 +52,7 @@ class WorldRow(Base):
         return cls(
             id=data["id"],
             name=data.get("name", ""),
+            world_type=data.get("world_type", "group"),
             scenario_json=json.dumps(data.get("scenario", {}), ensure_ascii=False),
             agent_ids_json=json.dumps(data.get("agent_ids", []), ensure_ascii=False),
             current_tick=data.get("current_tick", 0),

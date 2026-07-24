@@ -40,16 +40,25 @@ export function useSSE(worldId: string | null) {
     [appendEvent],
   );
 
-  /** 断线重连补偿：拉取 lastTick 之后的事件 */
+  /** 重连补偿：从 API 拉取最近事件，弥补 SSE 不重放历史事件的缺陷。
+   * 若事件列表为空（页面导航后恢复），拉取全部历史事件。 */
   const replayMissedEvents = useCallback(async () => {
-    if (!worldId || lastTickRef.current <= 0) return;
+    if (!worldId) return;
     try {
+      const storeEvents = useSSEStore.getState().events;
+      // 事件为空 → 刚导航回来，拉取全部历史
+      const from = storeEvents.length === 0 ? 0 : Math.max(0, lastTickRef.current - 5);
       const missed = await client.get<SSEEvent[]>(
-        `/worlds/${worldId}/events?tick_from=${lastTickRef.current}`,
+        `/worlds/${worldId}/events?tick_from=${from}`,
       );
-      missed.forEach((e) => appendUnique(e));
+      for (const e of missed) {
+        appendUnique(e);
+        if (e.tick > lastTickRef.current) {
+          lastTickRef.current = e.tick;
+        }
+      }
     } catch {
-      // 补偿失败不影响主流程，静默跳过
+      // 补偿失败不影响主流程
     }
   }, [worldId, appendUnique]);
 

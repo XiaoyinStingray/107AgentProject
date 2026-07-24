@@ -97,6 +97,39 @@ async def _sync_world_to_db(world: WorldResponse) -> None:
             await session.commit()
 
 
+async def _sync_agent_goals_to_db(world_id: str) -> None:
+    """将 WorldEngine 中 Agent 的 goal 状态回写到 agents 表。"""
+    from api.sse import get_world_engine
+    from models.agent_orm import AgentRow
+
+    try:
+        engine = get_world_engine(world_id)
+    except Exception:
+        return  # 引擎不存在或已销毁，无需同步
+
+    async with async_session() as session:
+        for aid, agent in engine.agents.items():
+            result = await session.execute(
+                select(AgentRow).where(AgentRow.id == aid)
+            )
+            row = result.scalar_one_or_none()
+            if not row:
+                continue
+            goals = []
+            if hasattr(agent, "goals"):
+                for g in agent.goals:
+                    goals.append({
+                        "id": g.id,
+                        "description": g.description,
+                        "priority": g.priority,
+                        "deadline": g.deadline,
+                        "status": g.status,
+                        "progress": g.progress,
+                    })
+            row.goals_json = json.dumps(goals, ensure_ascii=False)
+        await session.commit()
+
+
 # =============================================================================
 # 路由
 # =============================================================================
@@ -122,6 +155,7 @@ async def create_world(
     world = WorldResponse(
         id=str(uuid.uuid4()),
         name=req.name,
+        world_type=req.world_type,
         scenario=scenario,
         agent_ids=req.agent_ids,
         current_tick=0,
@@ -177,6 +211,9 @@ async def start_world(
     if world.status == "paused":
         world.status = "running"
         await _sync_world_to_db(world)
+        engine = _active_worlds.get(world_id)
+        if engine:
+            engine.world.status = "running"
         return {"status": "resumed", "world_id": world_id}
 
     engine = await _build_world_engine(world)
@@ -205,6 +242,10 @@ async def pause_world(
     world = WorldResponse(**row.to_dict())
     world.status = "paused"
     await _sync_world_to_db(world)
+    # 同步更新引擎内存中的状态——SSE 循环检查这个
+    engine = _active_worlds.get(world_id)
+    if engine:
+        engine.world.status = "paused"
     return {"status": "paused", "world_id": world_id}
 
 
@@ -275,7 +316,8 @@ async def reset_world_endpoint(
     if engine and engine.simulation_id:
         finish_simulation(engine.simulation_id, engine.current_tick)
 
-    # 取消注册引擎 + 标记 idle
+    # 先同步 goal 状态（引擎还在），再注销引擎
+    await _sync_agent_goals_to_db(world_id)
     sse_reset(world_id)
     world.status = "idle"
     world.current_tick = 0

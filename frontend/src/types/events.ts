@@ -7,6 +7,7 @@ export type SSEEventType =
   | "agent_action"
   | "world_event"
   | "relationship_change"
+  | "goal_update"
   | "tick_boundary"
   | "connected"
   | "paused"
@@ -55,4 +56,5 @@ export interface SSEEvent {
   description?: string;
   tick: number;
   data?: Record<string, unknown>;
+  status?: string;  // "running" | "paused" — connected/paused 事件携带
 }

@@ -31,12 +31,15 @@ export interface Background {
   key_events: string[];
 }
 
+export type GoalStatus = "active" | "in_progress" | "achieved" | "abandoned";
+
 export interface Goal {
   id: string;
   description: string;
   priority: number;
   deadline?: string;
-  status: "active" | "achieved" | "abandoned";
+  status: GoalStatus;
+  progress: number; // 0.0–1.0
 }
 
 export interface EmotionalState {

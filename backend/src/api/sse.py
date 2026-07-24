@@ -28,6 +28,7 @@ sse_router = APIRouter(prefix="/api/worlds", tags=["sse"])
 # =============================================================================
 
 _active_worlds: dict[str, WorldEngine] = {}
+_active_connection_ids: dict[str, str] = {}  # 跟踪最新 SSE 连接 ID，防重复 generator
 
 
 def register_world(world_id: str, engine: WorldEngine):
@@ -70,10 +71,17 @@ async def stream_world(world_id: str):
 
     每轮 Agent 发言作为一个 SSE 事件推送。tick 结束时发送 tick_boundary。
     连接断开后 EventSource 自动重连。
+    新连接到达时旧 generator 检测到 conn_id 不匹配后自动退出。
     """
+    import uuid as _uuid
+
     engine = get_world_engine(world_id)
+    conn_id = str(_uuid.uuid4())
+    _active_connection_ids[world_id] = conn_id
+    logger.info(f"SSE: new connection {conn_id[:8]} for world {world_id}")
+
     return StreamingResponse(
-        _world_event_generator(world_id, engine),
+        _world_event_generator(world_id, engine, conn_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -86,14 +94,29 @@ async def stream_world(world_id: str):
 async def _world_event_generator(
     world_id: str,
     engine: WorldEngine,
+    conn_id: str = "",
 ) -> AsyncGenerator[str, None]:
-    """Yield a continuous SSE stream until the World becomes idle or finished."""
+    """Yield a continuous SSE stream until the World becomes idle or finished.
+
+    每次循环前检查 conn_id 是否仍为活跃连接——若不是则退出，
+    防止 EventSource 重连后多个 generator 同时运行。
+    connected 事件中包含 world.status，前端可用于校准暂停状态。
+    """
     name_map = {agent_id: agent.persona.name for agent_id, agent in engine.agents.items()}
-    yield _sse_event({"type": "connected", "world_id": world_id, "tick": engine.current_tick})
+    yield _sse_event({
+        "type": "connected",
+        "world_id": world_id,
+        "tick": engine.current_tick,
+        "status": engine.world.status,  # 前端重连时校验 isPaused
+    })
     max_ticks = 8 if len(engine.agents) == 1 else 0
     tick_count = 0
     try:
         while engine.world.status not in ("finished", "idle"):
+            # 新连接到达 → 本 generator 退出
+            if _active_connection_ids.get(world_id) != conn_id:
+                logger.info(f"SSE: generator {conn_id[:8]} superseded for world {world_id}")
+                break
             if max_ticks and tick_count >= max_ticks:
                 engine.world.status = "finished"
                 _finish_engine_simulation(engine)
@@ -121,6 +144,10 @@ async def _world_event_generator(
             "message": str(error),
             "tick": engine.current_tick,
         })
+    finally:
+        # 仅当本连接仍为活跃连接时才清理
+        if _active_connection_ids.get(world_id) == conn_id:
+            _active_connection_ids.pop(world_id, None)
 
 
 # =============================================================================

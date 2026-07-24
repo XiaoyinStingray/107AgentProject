@@ -1,11 +1,20 @@
 import { useState, useMemo } from "react";
 import { useAgents } from "../api/agents";
-import { useCreateWorld, useStartWorld, usePauseWorld, useResetWorld } from "../api/worlds";
+import type { GoalStatus } from "../types/agent";
+import {
+  useCreateWorld,
+  useStartWorld,
+  usePauseWorld,
+  useResetWorld,
+  useDeleteWorld,
+  useWorlds,
+} from "../api/worlds";
 import { useScenarios } from "../api/scenarios";
 import ScenarioEditor from "../components/world/ScenarioEditor";
 import { useSSE } from "../hooks/useSSE";
 import AgentStatusPanel from "../components/world/AgentStatusPanel";
 import ThoughtStream from "../components/agent/ThoughtStream";
+import GoalPanel from "../components/agent/GoalPanel";
 import Card from "../components/shared/Card";
 import StatusDot from "../components/shared/StatusDot";
 
@@ -37,6 +46,10 @@ export default function SoloTheater() {
   const startWorld = useStartWorld();
   const pauseWorld = usePauseWorld();
   const resetWorld = useResetWorld();
+  const deleteWorld = useDeleteWorld();
+  const { data: allWorlds = [] } = useWorlds();
+  // BUG-014: SoloTheater 只展示 solo 类型的 World
+  const worlds = useMemo(() => allWorlds.filter((w) => w.world_type !== "group"), [allWorlds]);
 
   // 真 SSE 推流——worldId 变化时自动连接/断开
   const { events, connected, disconnect, clear } = useSSE(worldId);
@@ -45,6 +58,35 @@ export default function SoloTheater() {
     () => agents.find((a) => a.id === selectedAgentId),
     [agents, selectedAgentId],
   );
+
+  // 从 SSE goal_update 事件中提取动态 goal 状态
+  const goalOverrides = useMemo(() => {
+    const map = new Map<string, { status: GoalStatus; progress: number }>();
+    for (const e of events) {
+      if (e.type === "goal_update" && e.data?.goal_id) {
+        const s = e.data.status as string;
+        const valid: GoalStatus[] = ["active", "in_progress", "achieved", "abandoned"];
+        map.set(e.data.goal_id as string, {
+          status: valid.includes(s as GoalStatus) ? (s as GoalStatus) : "active",
+          progress: (e.data.progress as number) ?? 0,
+        });
+      }
+    }
+    return map;
+  }, [events]);
+
+  // 合并静态 Agent goals + SSE 动态覆盖
+  const enrichedAgent = useMemo(() => {
+    if (!selectedAgent) return selectedAgent;
+    if (goalOverrides.size === 0) return selectedAgent;
+    return {
+      ...selectedAgent,
+      goals: selectedAgent.goals.map((g) => {
+        const override = goalOverrides.get(g.id);
+        return override ? { ...g, ...override } : g;
+      }),
+    };
+  }, [selectedAgent, goalOverrides]);
 
   // 统计
   const currentTick = events.length > 0 ? events[events.length - 1].tick : 0;
@@ -66,6 +108,7 @@ export default function SoloTheater() {
       // 1. 创建 World
       const world = await createWorld.mutateAsync({
         name: `单人剧场 - ${selectedAgent.name}`,
+        world_type: "solo",
         scenario: { name: selectedScenario },
         agent_ids: [selectedAgent.id],
       });
@@ -82,18 +125,66 @@ export default function SoloTheater() {
     }
   };
 
-  /** 暂停——只改后端状态，SSE 保持连接等待恢复 */
+  /** 暂停 */
   const handlePause = async () => {
     if (!worldId) return;
-    await pauseWorld.mutateAsync(worldId);
-    setIsPaused(true);
+    try {
+      await pauseWorld.mutateAsync(worldId);
+      setIsPaused(true);
+    } catch (e) {
+      console.error("暂停失败:", e);
+    }
   };
 
-  /** 继续——调后端 start（paused→running），SSE 连接自动恢复 */
+  /** 继续（paused→running） */
   const handleResume = async () => {
     if (!worldId || startWorld.isPending) return;
-    await startWorld.mutateAsync(worldId);
+    try {
+      await startWorld.mutateAsync(worldId);
+      setIsPaused(false);
+    } catch (e) {
+      console.error("继续失败:", e);
+    }
+  };
+
+  /** 从 World 列表恢复——paused 状态读实际 world.status */
+  const handleResumeWorld = (wid: string) => {
+    const world = worlds.find((w) => w.id === wid);
+    if (!world) return;
+    setWorldId(wid);
+    setSelectedScenario(world.scenario.name ?? "期末周");
+    if (world.agent_ids.length > 0) {
+      setSelectedAgentId(world.agent_ids[0]!);
+    }
+    setIsRunning(true);
+    setIsPaused(world.status === "paused");
+  };
+
+  /** 删除 World */
+  const handleDeleteWorld = async (wid: string) => {
+    if (!confirm("确定删除此实验？")) return;
+    try {
+      await deleteWorld.mutateAsync(wid);
+    } catch (e) {
+      console.error("删除失败:", e);
+    }
+  };
+
+  /** 返回列表——先暂停后端，再切前端。保留已有事件以便回来时看到 */
+  const handleBack = async () => {
+    const wid = worldId;
+    if (wid) {
+      try {
+        await pauseWorld.mutateAsync(worldId);
+      } catch (e) {
+        console.error("返回暂停失败:", e);
+      }
+      disconnect();
+    }
+    setIsRunning(false);
     setIsPaused(false);
+    setWorldId(null);
+    // 不 clear —— 用户返回时可以看到之前的对话
   };
 
   /** 重置：调后端 reset → 断开 SSE → 清空前端状态 */
@@ -124,6 +215,66 @@ export default function SoloTheater() {
             选一个 Agent 投放到场景中，观察它的独白与决策
           </p>
         </div>
+
+        {/* 已有 World 列表 */}
+        {worlds.length > 0 && (
+          <Card className="mb-6">
+            <h3 className="text-sm font-mono text-text-secondary mb-3">
+              🌍 已有实验 · {worlds.length} 个
+            </h3>
+            <div className="space-y-1.5">
+              {worlds.map((world) => {
+                const statusIcon =
+                  world.status === "running" ? "🟢" :
+                  world.status === "paused" ? "⏸️" : "⏹️";
+                const canResume = world.status === "running" || world.status === "paused";
+                return (
+                  <div
+                    key={world.id}
+                    className="flex items-center gap-2 px-3 py-2 rounded border border-border bg-bg-secondary/60 text-sm"
+                  >
+                    <span className="text-xs">{statusIcon}</span>
+                    <span className="font-mono text-text-primary flex-1 truncate">
+                      {world.name}
+                    </span>
+                    <span className="text-xs font-mono text-text-secondary/60">
+                      T{world.current_tick}
+                    </span>
+                    <span className={`text-xs font-mono ${
+                      world.status === "running" ? "text-accent-green" :
+                      world.status === "paused" ? "text-accent-orange" :
+                      "text-text-secondary/50"
+                    }`}>
+                      {world.status === "running" ? "运行中" :
+                       world.status === "paused" ? "已暂停" : "已完成"}
+                    </span>
+                    {canResume && (
+                      <button
+                        onClick={() => handleResumeWorld(world.id)}
+                        className="text-xs font-mono px-2 py-0.5 rounded bg-accent-green/10 border border-accent-green/30 text-accent-green hover:bg-accent-green/20 transition-colors"
+                      >
+                        继续
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleDeleteWorld(world.id)}
+                      disabled={world.status === "running" || deleteWorld.isPending}
+                      className="text-xs font-mono text-text-secondary/40 hover:text-accent-red disabled:opacity-20 disabled:cursor-not-allowed transition-colors ml-1"
+                      title={world.status === "running" ? "运行中无法删除" : "删除"}
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        )}
+
+        {/* 新建投放 */}
+        <h2 className="text-sm font-mono text-text-secondary uppercase tracking-wider mb-3">
+          ✨ 新建投放
+        </h2>
 
         {/* Agent 选择 */}
         <Card className="mb-4">
@@ -239,6 +390,8 @@ export default function SoloTheater() {
         >
           {createWorld.isPending || startWorld.isPending ? "启动中..." : "🎬 开始投放"}
         </button>
+
+        {showEditor && <ScenarioEditor onClose={() => setShowEditor(false)} />}
       </div>
     );
   }
@@ -260,22 +413,14 @@ export default function SoloTheater() {
           </p>
         </div>
         <StatusDot status={connected ? "active" : "idle"} />
+        <button
+          onClick={handleBack}
+          className="px-2 py-1 text-xs font-mono rounded bg-bg-card border border-border text-text-secondary hover:text-text-primary transition-colors"
+        >
+          ← 列表
+        </button>
         <div className="flex gap-2">
-          {connected && !isPaused ? (
-            <button
-              onClick={handlePause}
-              disabled={pauseWorld.isPending}
-              className="
-                px-3 py-1 text-sm font-mono rounded
-                bg-accent-orange/10 border border-accent-orange/30
-                text-accent-orange hover:bg-accent-orange/20
-                transition-colors
-                disabled:opacity-50
-              "
-            >
-              ⏸ 暂停
-            </button>
-          ) : events.length > 0 ? (
+          {isPaused || (events.length > 0 && !connected) ? (
             <button
               onClick={handleResume}
               disabled={startWorld.isPending}
@@ -289,7 +434,21 @@ export default function SoloTheater() {
             >
               {startWorld.isPending ? "⏳" : "▶"} 继续
             </button>
-          ) : null}
+          ) : (
+            <button
+              onClick={handlePause}
+              disabled={pauseWorld.isPending}
+              className="
+                px-3 py-1 text-sm font-mono rounded
+                bg-accent-orange/10 border border-accent-orange/30
+                text-accent-orange hover:bg-accent-orange/20
+                transition-colors
+                disabled:opacity-50
+              "
+            >
+              ⏸ 暂停
+            </button>
+          )}
           <button
             onClick={handleReset}
             className="
@@ -306,10 +465,18 @@ export default function SoloTheater() {
 
       {/* 三栏主体 */}
       <div className="flex-1 flex overflow-hidden">
-        {/* 左栏：Agent 状态面板 */}
-        <div className="w-[260px] shrink-0 border-r border-border overflow-y-auto p-3">
-          {selectedAgent && (
-            <AgentStatusPanel agent={selectedAgent} events={events} />
+        {/* 左栏：Agent 状态面板 + 目标 */}
+        <div className="w-[260px] shrink-0 border-r border-border overflow-y-auto p-3 space-y-3">
+          {enrichedAgent && (
+            <>
+              <AgentStatusPanel agent={enrichedAgent} events={events} />
+              <Card>
+                <h3 className="text-sm font-mono text-text-secondary mb-2">
+                  🎯 目标
+                </h3>
+                <GoalPanel agent={enrichedAgent} />
+              </Card>
+            </>
           )}
         </div>
 

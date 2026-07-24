@@ -189,6 +189,7 @@ const EVENT_VISUALS: Record<
   paused: { label: "", border: "", text: "" },
   error: { label: "", border: "", text: "" },
   session_end: { label: "", border: "", text: "" },
+  goal_update: { label: "", border: "", text: "" },
 };
 
 const INFRASTRUCTURE_EVENTS = new Set<SSEEventType>([
@@ -196,4 +197,5 @@ const INFRASTRUCTURE_EVENTS = new Set<SSEEventType>([
   "paused",
   "error",
   "session_end",
+  "goal_update",
 ]);

@@ -1530,12 +1530,49 @@ interface LoadingSpinnerProps {
 
 ---
 
-### Step 40 — 目标系统 + 动态计划 (#10, #11)
+### Step 40 — 目标追逐 (#10)
+
+> **#10 (P1) 目标追逐：** Goal 生命周期 + progress 追踪 + SoloTheater 目标面板。
+
+#### 现有基础
+
+- `Goal` 模型已有：`{id, description, priority, deadline, status: active|achieved|abandoned}`
+- `set_goal` tool 已有：Agent 可在模拟中调用
+- `_handle_set_goal` 已有：WorldEngine 处理 tool call
+
+#### 缺失
+
+- Goal 缺少 `progress: float` 字段和 `in_progress` 状态
+- tick 结束时无目标进展检测——Agent 设了 goal 永远 active
+- SoloTheater 无目标面板——只显示标签
+
+#### 实现
+
+| 层 | 改动 | 说明 |
+|----|------|------|
+| `models/agent.py` | Goal 加 `progress: float = 0.0` + 新增 `in_progress` 状态 | |
+| `engines/world/state.py` | `_handle_set_goal` 支持更新已有 goal | |
+| `engines/world/engine.py` | tick 结束时 `_tick_goal_progress`：分析 Agent 思维/消息，提及 goal → 推进 progress，≥1.0 → achieved；goal 被提到多次 → in_progress | |
+| `pages/SoloTheater.tsx` | 目标面板组件：进度条 + 状态徽章 + 完成动画 | |
+| `components/agent/GoalPanel.tsx` | **新建**：可复用的目标展示组件 | |
+
+#### 验收标准
+
+- [ ] Agent 在模拟中调用 set_goal → goal 出现在目标列表
+- [ ] tick 中 Agent 提及目标 → progress 推进 → 进度条变化
+- [ ] progress ≥ 1.0 → achieved → 绿色完成动画
+- [ ] SoloTheater 目标面板显示所有 goal 及其状态/进度
+- [ ] 后端测试全量通过
+
+---
+
+### Step 40-S — 动态计划调整 (#11, 可选)
+
+> **跳过原因：** Plan 模型/引擎/API/前端全部从零开始，且 #11 的用户故事（"计划视图 + 变更高亮"）对演示的加分不如目标面板直观。**Phase 12 完成后如时间充裕再回来做。**
 
 | # | 功能 | 后端 | 前端 |
 |---|------|------|------|
-| 10 | 目标追逐 | `Goal` 加 lifecycle 状态机（active→in_progress→achieved/abandoned），tick 结束时检测目标完成条件 | SoloTheater 目标面板：进度条、完成状态变化动画 |
-| 11 | 动态计划调整 | `Plan` 模型：`{id, steps: [{description, status, depends_on}], created_tick, last_updated_tick}`。世界事件触发 `plan_updated` 时重新评估 | 计划视图：步骤列表 + 变更高亮（"原计划: X → 调整为: Y"） |
+| 11 | 动态计划调整 | `Plan` 模型：`{id, steps: [{description, status, depends_on}], created_tick, last_updated_tick}`。世界事件触发 `plan_updated` 时重新评估 | 计划视图：步骤列表 + 变更高亮 |
 
 ---
 

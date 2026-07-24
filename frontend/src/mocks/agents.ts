@@ -35,12 +35,14 @@ export const MOCK_AGENT_RESPONSE: AgentResponse = {
       description: "保研清华",
       priority: 1,
       status: "active",
+      progress: 0,
     },
     {
       id: "g2",
       description: "找到志同道合的队友",
       priority: 2,
       status: "active",
+      progress: 0,
     },
   ],
   emotional_state: {
@@ -92,6 +94,7 @@ export const MOCK_AGENTS: AgentResponse[] = [
         description: "拿到大厂产品经理 offer",
         priority: 1,
         status: "active",
+        progress: 0,
       },
     ],
     emotional_state: {
@@ -139,12 +142,14 @@ export const MOCK_AGENTS: AgentResponse[] = [
         description: "进入 Top 3 咨询公司",
         priority: 1,
         status: "active",
+        progress: 0,
       },
       {
         id: "g2",
         description: "维持专业第一",
         priority: 1,
         status: "active",
+        progress: 0,
       },
     ],
     emotional_state: {

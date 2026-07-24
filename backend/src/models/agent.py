@@ -50,7 +50,8 @@ class Goal(HasId):
     description: str
     priority: int = Field(default=1, description="1=最高")
     deadline: Optional[str] = Field(default=None, description="ISO datetime")
-    status: str = Field(default="active", description="active | achieved | abandoned")
+    status: str = Field(default="active", description="active | in_progress | achieved | abandoned")
+    progress: float = Field(default=0.0, ge=0.0, le=1.0, description="0=未开始, 1=已完成")
 
 
 # ========== 情绪状态 ==========

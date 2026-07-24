@@ -75,6 +75,7 @@ export function useStartWorld() {
       client.post<{ status: string; world_id: string }>(`/worlds/${worldId}/start`),
     onSuccess: (_, worldId) => {
       qc.invalidateQueries({ queryKey: worldKeys.detail(worldId) });
+      qc.invalidateQueries({ queryKey: worldKeys.all });
     },
   });
 }
@@ -87,6 +88,7 @@ export function usePauseWorld() {
       client.post<{ status: string }>(`/worlds/${worldId}/pause`),
     onSuccess: (_, worldId) => {
       qc.invalidateQueries({ queryKey: worldKeys.detail(worldId) });
+      qc.invalidateQueries({ queryKey: worldKeys.all });
     },
   });
 }

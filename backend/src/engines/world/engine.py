@@ -63,7 +63,7 @@ class WorldEngine(WorldStreamingMixin, WorldMessageMixin, WorldStateMixin):
         """Advance one complete tick and return all generated events."""
         await self._inject_world_context()
         tick_events = await self._run_agent_tick()
-        tick_events.extend(self._post_process_tick(tick_events))
+        tick_events.extend(await self._post_process_tick(tick_events))
         await self._finish_tick(tick_events)
         logger.info(
             f"WorldEngine.tick {self.current_tick}: "
@@ -98,7 +98,7 @@ class WorldEngine(WorldStreamingMixin, WorldMessageMixin, WorldStateMixin):
         async for event in self._stream_agent_tick():
             tick_events.append(event)
             yield event
-        derived_events = self._post_process_tick(tick_events)
+        derived_events = await self._post_process_tick(tick_events)
         tick_events.extend(derived_events)
         for event in derived_events:
             yield event
@@ -153,14 +153,122 @@ class WorldEngine(WorldStreamingMixin, WorldMessageMixin, WorldStateMixin):
         async for event in stream:
             yield event
 
-    def _post_process_tick(self, tick_events: list[SimEvent]) -> list[SimEvent]:
-        """Apply actions and analyze relationships after Agent output."""
+    async def _post_process_tick(self, tick_events: list[SimEvent]) -> list[SimEvent]:
+        """Apply actions, analyze relationships, and update goal progress."""
         derived: list[SimEvent] = []
         for event in tick_events:
             if event.type == "agent_action":
                 derived.extend(self._apply_action(event))
+        goal_events = await self._update_goal_progress(tick_events)
         relationship_events = self._update_relationships([*tick_events, *derived])
-        return [*derived, *relationship_events]
+        return [*derived, *goal_events, *relationship_events]
+
+    async def _update_goal_progress(self, tick_events: list[SimEvent]) -> list[SimEvent]:
+        """用 LLM 判断 Agent 是否在推进目标。每 2 tick 检测一次。
+        返回 goal_update 事件供 SSE 推送。"""
+        if self.current_tick % 2 != 0:
+            return []  # 隔 tick 检测，省 LLM 调用
+        goal_events: list[SimEvent] = []
+        for agent in self.agents.values():
+            if not hasattr(agent, "goals") or not agent.goals:
+                continue
+            active_goals = [g for g in agent.goals if g.status in ("active", "in_progress")]
+            if not active_goals:
+                continue
+            # 收集该 Agent 近 2 tick 的输出
+            texts: list[str] = []
+            for e in tick_events:
+                if e.source_agent_id != agent.id:
+                    continue
+                if e.type in ("thought_stream", "agent_message"):
+                    content = e.data.get("content", e.description) if e.data else e.description
+                    texts.append(str(content))
+            if not texts:
+                continue
+            combined = " ".join(texts)[:800]
+            # LLM 批量检测
+            scores = await self._llm_check_goals(agent.persona.name or agent.id, active_goals, combined)
+            for goal in active_goals:
+                score = scores.get(goal.description, 0.0)
+                if score <= 0.3:
+                    continue  # 无关，不推进
+                old_progress = goal.progress
+                goal.progress = min(1.0, goal.progress + score)
+                goal.status = "achieved" if goal.progress >= 1.0 else "in_progress"
+                display_name = agent.persona.name or agent.id
+                desc_text = (
+                    f"🎉 {display_name} 达成目标「{goal.description}」！"
+                    if goal.status == "achieved"
+                    else f"🎯 {display_name} 推进目标「{goal.description}」({goal.progress:.0%})"
+                )
+                if goal.status != "in_progress" or old_progress == 0:
+                    logger.info(
+                        f"Goal progress: agent={agent.id} "
+                        f"goal='{goal.description}' status={goal.status} "
+                        f"progress={goal.progress:.2f} score={score:.2f}"
+                    )
+                    import uuid as _uuid
+                    from datetime import datetime as _dt, timezone as _tz
+                    goal_events.append(SimEvent(
+                        id=str(_uuid.uuid4()),
+                        world_id=self.world.id,
+                        tick=self.current_tick,
+                        type="goal_update",
+                        timestamp=_dt.now(_tz.utc).isoformat(),
+                        source_agent_id=agent.id,
+                        target_agent_ids=[],
+                        description=desc_text,
+                        data={
+                            "goal_id": goal.id,
+                            "description": goal.description,
+                            "status": goal.status,
+                            "progress": goal.progress,
+                        },
+                        created_at=_dt.now(_tz.utc).isoformat(),
+                    ))
+        return goal_events
+
+    async def _llm_check_goals(self, name: str, goals: list, text: str) -> dict[str, float]:
+        """LLM 批量判断多个目标的进展。返回 {goal_description: 0.0-1.0}。"""
+        if not goals or not text:
+            return {}
+        goal_list = "\n".join(f"{i+1}. {g.description}" for i, g in enumerate(goals))
+        prompt = (
+            f"Agent「{name}」有以下目标：\n{goal_list}\n\n"
+            f"Agent 最近的发言/思考：\n{text}\n\n"
+            f"对每个目标，判断 Agent 是否在推进它。返回 JSON 数组：\n"
+            f'[{{"index":1,"score":0.0}}, ...]\n'
+            f"score: 0=完全无关, 0.3=间接提及, 0.5=在努力推进, 0.8=接近完成, 1.0=已经达成。\n"
+            f"保守打分——只有明确证据才给高分。只返回 JSON 数组，不要其他文字。"
+        )
+        try:
+            from llm.client import create_model_client
+            from autogen_core.models import UserMessage
+            client = create_model_client()
+            import json as _json
+            result = await client.create(
+                messages=[UserMessage(content=prompt, source="goal_checker")],
+                json_output=True,
+            )
+            raw = str(result.content).strip()
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+            items = _json.loads(raw)
+            if not isinstance(items, list):
+                logger.warning(f"_llm_check_goals: expected list, got {type(items).__name__}: {raw[:120]}")
+                return {}
+            scores: dict[str, float] = {}
+            for it in items:
+                if not isinstance(it, dict) or "index" not in it:
+                    continue
+                idx = int(it["index"]) - 1
+                if 0 <= idx < len(goals):
+                    scores[goals[idx].description] = float(it.get("score", 0.0))
+            return scores
+        except Exception as exc:
+            logger.warning(f"_llm_check_goals failed for agent={name}: {exc}")
+            return {}
+
 
     async def _finish_tick(self, tick_events: list[SimEvent]) -> None:
         """Persist and archive a completed tick, then advance the clock."""
