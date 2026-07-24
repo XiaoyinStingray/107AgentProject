@@ -190,8 +190,8 @@ class WorldEngine(WorldStreamingMixin, WorldMessageMixin, WorldStateMixin):
             scores = await self._llm_check_goals(agent.persona.name or agent.id, active_goals, combined)
             for goal in active_goals:
                 score = scores.get(goal.description, 0.0)
-                if score <= 0.3:
-                    continue  # 无关，不推进
+                if score <= 0.5:
+                    continue  # 无关或仅间接提及，不推进
                 old_progress = goal.progress
                 goal.progress = min(1.0, goal.progress + score)
                 goal.status = "achieved" if goal.progress >= 1.0 else "in_progress"
@@ -238,8 +238,9 @@ class WorldEngine(WorldStreamingMixin, WorldMessageMixin, WorldStateMixin):
             f"Agent 最近的发言/思考：\n{text}\n\n"
             f"对每个目标，判断 Agent 是否在推进它。返回 JSON 数组：\n"
             f'[{{"index":1,"score":0.0}}, ...]\n'
-            f"score: 0=完全无关, 0.3=间接提及, 0.5=在努力推进, 0.8=接近完成, 1.0=已经达成。\n"
-            f"保守打分——只有明确证据才给高分。只返回 JSON 数组，不要其他文字。"
+            f"score: 0=完全无关, 0.3=间接提及, 0.5=明确在推进, 0.8=接近完成, 1.0=已经达成。\n"
+            f"严格保守打分——Agent 必须正在采取实际行动推进目标才能≥0.5，仅口头提及不算。\n"
+            f"只返回 JSON 数组，不要其他文字。"
         )
         try:
             from llm.client import create_model_client

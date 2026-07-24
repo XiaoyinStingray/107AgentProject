@@ -2,29 +2,34 @@ import { useEffect, useState } from "react";
 import type { SSEEvent } from "../types/events";
 import type { SandboxSpeed } from "../types/sandbox";
 
-/** Reveal queued SSE events at the selected presentation speed.
-
-When restoring a previous session (events already in store),
-shows all events immediately. Lazy initial state means: if events
-are already populated on mount → restore scenario → start at max.
-Otherwise start at 0 → new tick → throttle one-by-one.
-*/
+/**
+ * 事件节流展示。
+ * - paused=true 或 events 被清空再填充 → 全量展示
+ * - 正常运行 → 逐个节流展示
+ */
 export function useThrottledEvents(
   events: SSEEvent[],
   speed: SandboxSpeed,
   paused: boolean,
   resetKey: string | null,
 ): SSEEvent[] {
-  const [visibleCount, setVisibleCount] = useState(
-    () => (events.length > 3 ? events.length : 0),
-  );
+  const [visibleCount, setVisibleCount] = useState(0);
 
   useEffect(() => setVisibleCount(0), [resetKey]);
 
   useEffect(() => {
-    if (paused || visibleCount >= events.length) return;
+    if (events.length === 0) {
+      setVisibleCount(0);
+      return;
+    }
+    // 暂停状态 / 需要追赶 → 全量展示
+    if (paused || visibleCount > events.length) {
+      setVisibleCount(events.length);
+      return;
+    }
+    if (visibleCount >= events.length) return;
     const timer = window.setTimeout(
-      () => setVisibleCount((count) => Math.min(count + 1, events.length)),
+      () => setVisibleCount((c) => Math.min(c + 1, events.length)),
       800 / speed,
     );
     return () => window.clearTimeout(timer);

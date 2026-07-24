@@ -63,22 +63,8 @@ export default function GroupSandbox() {
   } = useSSE(worldId);
   const displayedEvents = useThrottledEvents(events, speed, isPaused, String(startGen));
 
-  // 挂载时恢复活跃 World——存量事件直接全量展示，绕过节流器
   const [restoring, setRestoring] = useState(false);
   const restoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (activeWorldId && phase === "setup" && !worldId) {
-      setWorldId(activeWorldId);
-      setPhase("running");
-      if (events.length > 3) {
-        setRestoring(true);
-        restoreTimerRef.current = setTimeout(() => setRestoring(false), 2000);
-      }
-    }
-    return () => {
-      if (restoreTimerRef.current) clearTimeout(restoreTimerRef.current);
-    };
-  }, [activeWorldId, phase, worldId, events.length]);
 
   // 模拟自然结束时清理活跃 World
   useEffect(() => {
@@ -98,36 +84,32 @@ export default function GroupSandbox() {
     if (relationshipQuery.data) hydrateRelationships(relationshipQuery.data);
   }, [hydrateRelationships, relationshipQuery.data]);
 
-  // 仅在恢复后首次收到 paused/boundary 时同步 isPaused，之后由按钮控制
-  // BUG-011: connected 事件携带 status，用于重连时校准暂停状态
-  const pauseSyncedRef = useRef(false);
+  // 暂停状态只由按钮和首次 connected 事件控制，tick_boundary/paused 不干预
+  const didSyncRef = useRef(false);
+  const [pauseCooldown, setPauseCooldown] = useState(false);
   useEffect(() => {
     const streamError = [...events].reverse().find((event) => event.type === "error");
     if (streamError) {
       setError(streamError.message ?? streamError.content ?? "SSE 连接发生错误");
     }
-
-    // 收到 connected 事件 → 重置同步标记，按后端真实状态校准
-    const connectedEvent = [...events].reverse().find((event) => event.type === "connected");
-    if (connectedEvent?.status) {
-      pauseSyncedRef.current = false;
-      setIsPaused(connectedEvent.status === "paused");
-      return;
+    // 仅首次 connected 事件同步 isPaused
+    if (!didSyncRef.current) {
+      const ce = [...events].reverse().find((event) => event.type === "connected");
+      if (ce?.status) {
+        didSyncRef.current = true;
+        setIsPaused(ce.status === "paused");
+      }
     }
-
-    if (pauseSyncedRef.current) return;
-    const lastPauseOrBoundary = [...events]
-      .reverse()
-      .find((event) => event.type === "paused" || event.type === "tick_boundary");
-    if (lastPauseOrBoundary) {
-      setIsPaused(lastPauseOrBoundary.type === "paused");
-      pauseSyncedRef.current = true;
+    // 暂停冷却：收到 paused 事件 → 冷却结束，按钮可点
+    if (pauseCooldown) {
+      const pe = [...events].reverse().find((event) => event.type === "paused");
+      if (pe) setPauseCooldown(false);
     }
-  }, [events]);
+  }, [events, pauseCooldown]);
 
-  // 新 World 启动时重置同步标记
+  // 新 World 启动或 resume 时允许重新同步
   useEffect(() => {
-    pauseSyncedRef.current = false;
+    didSyncRef.current = false;
   }, [startGen]);
 
   const selectedAgents = useMemo(
@@ -135,11 +117,17 @@ export default function GroupSandbox() {
     [agents, selectedAgentIds],
   );
   const visibleEvents = useMemo(() => {
-    const source = restoring ? events : displayedEvents;
-    return source.filter((event) =>
-      !INFRASTRUCTURE_EVENT_TYPES.has(event.type)
-      && (!event.agent_id || selectedAgentIds.includes(event.agent_id)));
-  }, [restoring, events, displayedEvents, selectedAgentIds]);
+    // 暂停或恢复中 → 直接展示全部事件，绕过节流器
+    const source = (restoring || isPaused) ? events : displayedEvents;
+    return source.filter((event) => {
+      if (INFRASTRUCTURE_EVENT_TYPES.has(event.type)) return false;
+      // 恢复模式：不过滤 Agent（selectedAgentIds 可能尚未同步到 World 的 agents）
+      if (restoring) return true;
+      // 正常运行 / 暂停：只显示选中 Agent 的事件
+      return !event.agent_id || selectedAgentIds.includes(event.agent_id);
+    });
+  }, [restoring, isPaused, events, displayedEvents, selectedAgentIds]);
+
   const relationshipValues = useMemo(
     () => Object.values(relationships),
     [relationships],
@@ -176,8 +164,10 @@ export default function GroupSandbox() {
     }
   };
 
+  const togglingRef = useRef(false);
   const handleToggleRunning = async () => {
-    if (!worldId || pending) return;
+    if (!worldId || pending || togglingRef.current) return;
+    togglingRef.current = true;
     setError(null);
     try {
       if (isPaused) {
@@ -186,21 +176,34 @@ export default function GroupSandbox() {
       } else {
         await pauseWorld.mutateAsync(worldId);
         setIsPaused(true);
+        setPauseCooldown(true); // 冷却——等 paused 事件确认后才允许继续
       }
     } catch (cause) {
       setError(getErrorMessage(cause, "模拟状态切换失败"));
+    } finally {
+      togglingRef.current = false;
     }
   };
 
-  /** 返回列表——保留 World 当前状态，不重置；刷新 World 列表缓存。
-   *  设置 worldId 为 null 确保 useSSE 正确断开，恢复时从头拉取历史。 */
-  const handleBack = useCallback(() => {
+  /** 返回列表——先暂停后端，等当前 tick 完成（事件落库），再断开 SSE。 */
+  const handleBack = useCallback(async () => {
+    setActiveWorld(null);
+    const wid = worldId;
+    if (wid) {
+      try {
+        await pauseWorld.mutateAsync(wid);
+        // 等 2 秒让 SSE generator 完成当前 tick 并 persist 事件
+        await new Promise(r => setTimeout(r, 2000));
+      } catch (e) {
+        console.error("返回暂停失败:", e);
+      }
+    }
     disconnect();
-    setWorldId(null);         // ← BUG-012: 确保 useSSE effect 在恢复时重连
-    pauseSyncedRef.current = false;  // ← BUG-011: 重置允许恢复后重新同步
+    setWorldId(null);
+    didSyncRef.current = false;
     queryClient.invalidateQueries({ queryKey: ["worlds"] });
     setPhase("setup");
-  }, [disconnect, queryClient]);
+  }, [worldId, disconnect, pauseWorld, queryClient, setActiveWorld]);
 
   const handleReset = async () => {
     if (!worldId || pending) return;
@@ -219,7 +222,7 @@ export default function GroupSandbox() {
     }
   };
 
-  /** 从 World 列表恢复已有实验 */
+  /** 从 World 列表恢复已有实验。 */
   const handleResumeWorld = useCallback((id: string) => {
     setError(null);
     clear();
@@ -227,13 +230,17 @@ export default function GroupSandbox() {
     setActiveWorld(id);
     setSelectedTick(null);
     const world = allWorlds.find((w) => w.id === id);
-    setIsPaused(world?.status === "paused");
-    // 启用 restoring 模式——历史事件直接展示，不走节流器
+    if (world) {
+      setIsPaused(world.status === "paused");
+      setSelectedScenario(world.scenario?.name ?? selectedScenario);
+      setSelectedAgentIds(world.agent_ids ?? []);
+    }
+    didSyncRef.current = false; // 允许下次 connected 同步
     setRestoring(true);
     if (restoreTimerRef.current) clearTimeout(restoreTimerRef.current);
     restoreTimerRef.current = setTimeout(() => setRestoring(false), 2000);
     setPhase("running");
-  }, [clear, setActiveWorld, allWorlds]);
+  }, [clear, setActiveWorld, allWorlds, selectedScenario]);
 
   /** 从 World 列表删除实验 */
   const handleDeleteWorld = useCallback(async (id: string) => {
@@ -272,6 +279,7 @@ export default function GroupSandbox() {
         connected={connected}
         isPaused={isPaused}
         isPending={pending}
+        pauseCooldown={pauseCooldown}
         speed={speed}
         onToggleSpeed={() => setSpeed((value) => value === 1 ? 2 : 1)}
         onToggleRunning={handleToggleRunning}

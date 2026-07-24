@@ -19,6 +19,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from loguru import logger
 from sqlalchemy import func, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -205,15 +206,28 @@ async def start_world(
     world = WorldResponse(**row.to_dict())
 
     if world.status == "running":
-        raise HTTPException(status_code=409, detail="World is already running")
+        if world_id not in _active_worlds:
+            engine = await _build_world_engine(world)
+            engine.world.status = "running"
+            engine.current_tick = world.current_tick
+            sse_register(world_id, engine)
+            logger.info(f"World {world_id} engine rebuilt (was running in DB, tick={world.current_tick})")
+        # 已经在跑——确认即可，不报错
+        return {"status": "running", "world_id": world_id}
 
     # paused → running（恢复）
     if world.status == "paused":
-        world.status = "running"
-        await _sync_world_to_db(world)
         engine = _active_worlds.get(world_id)
         if engine:
             engine.world.status = "running"
+        else:
+            engine = await _build_world_engine(world)
+            engine.world.status = "running"
+            engine.current_tick = world.current_tick
+            sse_register(world_id, engine)
+            logger.info(f"World {world_id} engine rebuilt after restart (was paused, tick={world.current_tick})")
+        world.status = "running"
+        await _sync_world_to_db(world)
         return {"status": "resumed", "world_id": world_id}
 
     engine = await _build_world_engine(world)
@@ -242,7 +256,6 @@ async def pause_world(
     world = WorldResponse(**row.to_dict())
     world.status = "paused"
     await _sync_world_to_db(world)
-    # 同步更新引擎内存中的状态——SSE 循环检查这个
     engine = _active_worlds.get(world_id)
     if engine:
         engine.world.status = "paused"
@@ -263,12 +276,29 @@ async def inject_event(
     if not row:
         raise HTTPException(status_code=404, detail=f"World {world_id!r} not found")
 
+    world = WorldResponse(**row.to_dict())
+
     try:
         engine = get_world_engine(world_id)
     except HTTPException:
+        # 服务重启后 _active_worlds 为空——若 DB 状态为 paused/running 则重建
+        if world.status in ("running", "paused"):
+            engine = await _build_world_engine(world)
+            engine.world.status = world.status
+            engine.current_tick = world.current_tick
+            sse_register(world_id, engine)
+            logger.info(f"Inject: engine rebuilt after restart for world {world_id}")
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"World {world_id!r} is {world.status}. Start it first.",
+            )
+
+    if engine.world.status not in ("running", "paused"):
         raise HTTPException(
             status_code=400,
-            detail=f"World {world_id!r} is not running. Start it first.",
+            detail=f"World {world_id!r} is {engine.world.status}. "
+                   f"只能在运行中或暂停的 World 中注入事件。",
         )
 
     engine.inject_event(event.get("description", str(event)))

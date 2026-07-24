@@ -72,10 +72,37 @@ async def stream_world(world_id: str):
     每轮 Agent 发言作为一个 SSE 事件推送。tick 结束时发送 tick_boundary。
     连接断开后 EventSource 自动重连。
     新连接到达时旧 generator 检测到 conn_id 不匹配后自动退出。
+    服务重启后自动从 DB 重建 engine。
     """
     import uuid as _uuid
 
-    engine = get_world_engine(world_id)
+    try:
+        engine = get_world_engine(world_id)
+    except HTTPException:
+        # 服务重启后 _active_worlds 为空——从 DB 自动重建 engine
+        from api.worlds import _build_world_engine  # lazy import 防循环依赖
+        from db import async_session as _async_session
+        from models.world_orm import WorldRow
+        from models.world import WorldResponse
+        from sqlalchemy import select as _select
+
+        async with _async_session() as session:
+            result = await session.execute(
+                _select(WorldRow).where(WorldRow.id == world_id)
+            )
+            row = result.scalar_one_or_none()
+            if not row:
+                raise
+            world_data = WorldResponse(**row.to_dict())
+
+        engine = await _build_world_engine(world_data)
+        engine.current_tick = world_data.current_tick
+        register_world(world_id, engine)
+        logger.info(
+            f"SSE: engine auto-rebuilt for world {world_id} "
+            f"(status={world_data.status}, tick={world_data.current_tick})"
+        )
+
     conn_id = str(_uuid.uuid4())
     _active_connection_ids[world_id] = conn_id
     logger.info(f"SSE: new connection {conn_id[:8]} for world {world_id}")
@@ -113,7 +140,6 @@ async def _world_event_generator(
     tick_count = 0
     try:
         while engine.world.status not in ("finished", "idle"):
-            # 新连接到达 → 本 generator 退出
             if _active_connection_ids.get(world_id) != conn_id:
                 logger.info(f"SSE: generator {conn_id[:8]} superseded for world {world_id}")
                 break
@@ -128,6 +154,9 @@ async def _world_event_generator(
                 break
             if engine.world.status == "running":
                 async for event in engine.tick_stream():
+                    # 若中途被暂停，不再向前端推送事件（tick 在后台静默完成）
+                    if engine.world.status != "running":
+                        continue
                     yield _sse_event(_event_to_dict(event, name_map))
                 tick_count += 1
             elif engine.world.status == "paused":

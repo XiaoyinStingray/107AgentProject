@@ -7,6 +7,7 @@ interface SandboxHeaderProps {
   connected: boolean;
   isPaused: boolean;
   isPending: boolean;
+  pauseCooldown?: boolean;
   speed: SandboxSpeed;
   onToggleSpeed: () => void;
   onToggleRunning: () => void;
@@ -21,13 +22,15 @@ export default function SandboxHeader({
   connected,
   isPaused,
   isPending,
+  pauseCooldown,
   speed,
   onToggleSpeed,
   onToggleRunning,
   onBack,
   onReset,
 }: SandboxHeaderProps) {
-  const statusLabel = isPaused ? "PAUSED" : connected ? "RUNNING" : "CONNECTING";
+  const statusLabel = pauseCooldown ? "⏳ 暂停中…" : isPaused ? "⏸ 已暂停" : connected ? "🟢 运行中" : "⏳ 连接中";
+  const statusColor = isPaused ? "text-accent-orange" : connected ? "text-accent-green" : "text-text-secondary";
 
   return (
     <header className="shrink-0 border-b border-border bg-bg-secondary px-4 py-3 flex items-center gap-4">
@@ -38,17 +41,21 @@ export default function SandboxHeader({
       <span className="text-xs text-text-secondary font-mono">
         Tick #{currentTick}
       </span>
-      <span className="ml-auto flex items-center gap-2 text-xs font-mono text-text-secondary">
+      <span className={`ml-auto flex items-center gap-2 text-xs font-mono ${statusColor}`}>
         <StatusDot status={connected && !isPaused ? "active" : "idle"} label="" />
         {statusLabel}
       </span>
       <button
         type="button"
         onClick={onToggleRunning}
-        disabled={isPending}
-        className="text-xs font-mono text-accent-green hover:text-accent-green/80 transition-colors"
+        disabled={isPending || pauseCooldown}
+        className={`text-xs font-mono transition-colors ${
+          pauseCooldown ? "text-text-secondary/60" :
+          isPaused ? "text-accent-green hover:text-accent-green/80" :
+          "text-accent-orange hover:text-accent-orange/80"
+        }`}
       >
-        {isPaused ? "▶ 继续" : "⏸ 暂停"}
+        {pauseCooldown ? "⏳ 暂停中…" : isPaused ? "▶ 继续" : "⏸ 暂停"}
       </button>
       <button
         type="button"

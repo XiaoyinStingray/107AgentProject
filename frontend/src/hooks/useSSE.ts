@@ -26,12 +26,18 @@ export function useSSE(worldId: string | null) {
     hydrateRelationships,
   } = useSSEStore();
 
-  /** 去重追加事件 */
+  /** 去重追加事件。
+   *  有 id → 按 id 去重（防 SSE 重连 + API 补发重复）。
+   *  无 id → 同 type + 同 tick 的连续事件跳过（防 paused 每秒一条撑爆数组）。 */
   const appendUnique = useCallback(
     (event: SSEEvent) => {
       const existing = useSSEStore.getState().events;
-      // 按 id 去重；无 id 的事件（如 connected/error）直接追加
       if (event.id && existing.some((e) => e.id === event.id)) return;
+      // 无 id 的基础设施事件（paused/connected/tick_boundary 等）——防重复堆积
+      if (!event.id) {
+        const last = existing[existing.length - 1];
+        if (last && last.type === event.type && last.tick === event.tick) return;
+      }
       appendEvent(event);
       if (event.tick > lastTickRef.current) {
         lastTickRef.current = event.tick;
@@ -46,7 +52,6 @@ export function useSSE(worldId: string | null) {
     if (!worldId) return;
     try {
       const storeEvents = useSSEStore.getState().events;
-      // 事件为空 → 刚导航回来，拉取全部历史
       const from = storeEvents.length === 0 ? 0 : Math.max(0, lastTickRef.current - 5);
       const missed = await client.get<SSEEvent[]>(
         `/worlds/${worldId}/events?tick_from=${from}`,
@@ -57,8 +62,8 @@ export function useSSE(worldId: string | null) {
           lastTickRef.current = e.tick;
         }
       }
-    } catch {
-      // 补偿失败不影响主流程
+    } catch (err) {
+      console.warn("replayMissedEvents failed:", err);
     }
   }, [worldId, appendUnique]);
 
@@ -70,8 +75,7 @@ export function useSSE(worldId: string | null) {
 
     es.onopen = () => {
       setConnected(true);
-      // 重连后补发断线期间的事件
-      replayMissedEvents();
+      replayMissedEvents(); // SSE 断线重连时补发
     };
     es.onerror = () => setConnected(false);
     es.onmessage = (e) => {
@@ -92,7 +96,7 @@ export function useSSE(worldId: string | null) {
     setConnected(false);
   }, [setConnected]);
 
-  // worldId 变化时重连；仅切换到不同 World 时才清空事件
+  // worldId 变化时：清空旧数据、连接 SSE、拉取历史事件（与 SSE 成败无关）
   useEffect(() => {
     const prevId = prevWorldIdRef.current;
     prevWorldIdRef.current = worldId;
@@ -107,11 +111,13 @@ export function useSSE(worldId: string | null) {
       if (!eventSourceRef.current) {
         connect();
       }
+      // 历史事件从 REST API 拉取，不依赖 SSE 连接状态（重启后 SSE 可能 404）
+      replayMissedEvents();
     } else {
       disconnect();
     }
     return () => disconnect();
-  }, [worldId, connect, disconnect, clear]);
+  }, [worldId, connect, disconnect, clear, replayMissedEvents]);
 
   return {
     events,

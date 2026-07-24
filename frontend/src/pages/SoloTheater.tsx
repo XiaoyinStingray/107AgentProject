@@ -104,6 +104,9 @@ export default function SoloTheater() {
   const handleStart = async () => {
     if (!selectedAgent) return;
 
+    // BUG-010: 新建前清空上次残留事件
+    clear();
+
     try {
       // 1. 创建 World
       const world = await createWorld.mutateAsync({
@@ -170,12 +173,13 @@ export default function SoloTheater() {
     }
   };
 
-  /** 返回列表——先暂停后端，再切前端。保留已有事件以便回来时看到 */
+  /** 返回列表——先暂停后端，等 tick 完成，再切前端。 */
   const handleBack = async () => {
     const wid = worldId;
     if (wid) {
       try {
         await pauseWorld.mutateAsync(worldId);
+        await new Promise(r => setTimeout(r, 2000));
       } catch (e) {
         console.error("返回暂停失败:", e);
       }
@@ -184,7 +188,6 @@ export default function SoloTheater() {
     setIsRunning(false);
     setIsPaused(false);
     setWorldId(null);
-    // 不 clear —— 用户返回时可以看到之前的对话
   };
 
   /** 重置：调后端 reset → 断开 SSE → 清空前端状态 */

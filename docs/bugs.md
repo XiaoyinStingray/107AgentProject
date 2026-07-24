@@ -4,6 +4,30 @@
 
 ---
 
+## 2026-07-24: BUG-010 ~ BUG-014 修复
+
+### BUG-010 单人剧场暂停后恢复事件不加载 ✅
+- **根因**: `replayMissedEvents` 只在 SSE `onopen` 调用，且数据库里事件未落库（`handleBack` disconnect 过早）
+- **修复**: replay 移入 useEffect（不依赖 SSE）；`handleBack` 等 2 秒再断连
+
+### BUG-011 暂停后自动恢复 / 关系变化弹出 ✅
+- **根因**: (1) `tick_boundary` 在 `paused` 事件前到达，覆盖用户手动暂停的 `isPaused`；(2) 暂停后 tick 继续推事件到前端
+- **修复**: `isPaused` 只由按钮 + 首次 connected 事件控制；SSE generator 暂停后跳过 yield（tick 后台静默完成）
+
+### BUG-012 群体沙盒返回后历史为空 ✅
+- **根因**: `handleBack` 未设 `worldId=null` 导致 useSSE 不重连；`replayMissedEvents` 只在事件非空时取近 5 tick
+- **修复**: handleBack 设 worldId=null；replay 事件为空时从 tick 0 拉全部
+
+### BUG-013 Goal 检测不工作 ✅
+- **根因**: `_llm_check_goals` 未启用 JSON 输出，异常静默吞掉
+- **修复**: `json_output=True`；阈值从 0.3 提到 0.5
+
+### BUG-014 world_type 隔离不完整 ✅
+- **根因**: 迁移前旧 World 默认 world_type='group'
+- **修复**: DB 迁移修正单 Agent World → solo；SoloTheater 加 world_type 过滤
+
+---
+
 ## BUG-001：React Router 加载页面时产生 Future Flag 控制台警告
 
 - **状态**：待处理
@@ -175,25 +199,16 @@
 
 ## BUG-010：单人剧场暂停后恢复，事件不加载
 
-- **状态**：待处理
+- **状态**：✅ 已修复 (2026-07-24)
 - **优先级**：P0（核心交互断裂）
 - **发现日期**：2026-07-24
-- **环境**：SoloTheater 暂停 → 返回列表 → 继续
-- **复现步骤**：
-  1. SoloTheater 投放 Agent，运行几 tick
-  2. 点「← 列表」返回
-  3. 点该 World 的「继续」
-- **实际结果**：进入运行态后事件流为空，之前的思考/消息不显示
-- **尝试修复**：
-  - 删除了 `handleBack` 中的 `clear()`（保留事件）
-  - 修改了 `replayMissedEvents`（重连时拉取历史事件）
-  - 修复了 `engine.world.status` 同步（暂停生效）
-- **当前状态**：暂停 API 调用已生效（`engine.world.status` 同步），但重回运行态时历史事件仍不显示
+- **根因**：`handleBack` 设 `worldId=null` → useSSE 清空事件 + `lastTickRef=0`；但 `replayMissedEvents` 只在事件非空时拉取近 5 tick——恢复时事件为空导致漏拉全部历史
+- **修复内容**（见 BUG-012 修复）：
+  1. `useSSE.replayMissedEvents` 新增判断：`events` 为空时从 tick 0 拉取全部历史事件
+  2. `SoloTheater.handleStart` 新增 `clear()`——防止上次残留事件混入新会话
 - **关联位置**：
-  - `frontend/src/pages/SoloTheater.tsx` — handleBack, handleResumeWorld
-  - `frontend/src/hooks/useSSE.ts` — replayMissedEvents, clear 逻辑
-  - `backend/src/api/worlds.py` — pause_world, start_world
-  - `backend/src/api/sse.py` — _world_event_generator（SSE 不重放历史事件）
+  - `frontend/src/hooks/useSSE.ts` — replayMissedEvents（当 `storeEvents.length === 0` → from=0）
+  - `frontend/src/pages/SoloTheater.tsx` — handleStart 加 clear()
 
 ---
 
@@ -202,14 +217,13 @@
 - **状态**：✅ 已修复 (2026-07-24)
 - **优先级**：P1
 - **发现日期**：2026-07-24
+- **根因**：`handleBack` 中 `await pauseWorld` 是异步的——在等 API 返回期间 `activeWorldId` 仍存在。等 `setWorldId(null)` + `setPhase("setup")` 执行后，auto-restore useEffect 检测到 `activeWorldId && phase==="setup" && !worldId` 三条全满足，立即把页面拉回运行态，形成「返回→自动恢复→再返回」死循环，导致 SSE 连接风暴（3 秒 11 次重连）和"暂停后自动继续"的错觉
 - **修复内容**：
-  1. 后端 `sse.py`：新连接到达时通过 `_active_connection_ids` 驱逐旧 generator，防止多个 SSE generator 并发
-  2. `connected` 事件新增 `status` 字段，前端重连时据此校准 `isPaused`
-  3. `GroupSandbox.handleBack` 重置 `pauseSyncedRef`，确保恢复时能正确同步暂停状态
+  1. `GroupSandbox.handleBack` 第一步先 `setActiveWorld(null)`——在 async 调用前清除，阻断 auto-restore 条件
+  2. `SandboxHeader` 状态标签从英文 `"PAUSED"` 改为中文 `⏸ 已暂停`，头栏加颜色区分
 - **关联位置**：
-  - `backend/src/api/sse.py` — `_active_connection_ids` + conn_id 驱逐机制
-  - `frontend/src/hooks/useSSE.ts` — connected 事件 status 字段
-  - `frontend/src/pages/GroupSandbox.tsx` — pauseSyncedRef 重置 + connected 事件处理
+  - `frontend/src/pages/GroupSandbox.tsx` — handleBack (先 clear activeWorldId) + auto-restore useEffect
+  - `frontend/src/components/world/SandboxHeader.tsx` — 状态标签中文化
 
 ---
 
