@@ -38,3 +38,7 @@ export const simulationKeys = {
 export const achievementKeys = {
   all: ["achievements"] as const,
 };
+
+export const agentTemplateKeys = {
+  all: ["agent-templates"] as const,
+};

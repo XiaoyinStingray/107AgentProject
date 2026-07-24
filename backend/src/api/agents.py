@@ -9,7 +9,6 @@ Agent 路由 — CRUD API for LifeAgent（SQLite 持久化版）。
 """
 
 import uuid
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select, delete
@@ -18,8 +17,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import settings
 from db import get_db
 from engines.agent_factory.factory import AgentFactory, LifeAgent
+from engines.persona.remixer import (
+    PersonaRemixer,
+    RemixGenerationError,
+    RemixNoChangesError,
+)
 from models.agent import AgentCreate, AgentResponse, Persona, Background, Goal, EmotionalState
 from models.agent_orm import AgentRow
+from models.remix import RemixDraft, RemixRequest, RemixResponse
 from models.world_orm import WorldRow
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
@@ -30,6 +35,7 @@ router = APIRouter(prefix="/api/agents", tags=["agents"])
 # =============================================================================
 
 _agent_factory: AgentFactory | None = None
+_persona_remixer: PersonaRemixer | None = None
 
 
 def get_agent_factory() -> AgentFactory:
@@ -39,6 +45,14 @@ def get_agent_factory() -> AgentFactory:
         from llm.client import create_model_client
         _agent_factory = AgentFactory(create_model_client())
     return _agent_factory
+
+
+def get_persona_remixer() -> PersonaRemixer:
+    """复用 AgentFactory 的模型客户端创建 Remix 引擎。"""
+    global _persona_remixer
+    if _persona_remixer is None:
+        _persona_remixer = PersonaRemixer(get_agent_factory().model_client)
+    return _persona_remixer
 
 
 # =============================================================================
@@ -64,6 +78,27 @@ async def _rebuild_agent_from_row(row: AgentRow) -> LifeAgent:
     return agent
 
 
+def _draft_from_row(row: AgentRow) -> RemixDraft:
+    """从持久化快照提取 Remix 所需的静态设定。"""
+    data = row.to_dict()
+    return RemixDraft(
+        persona=Persona(**data["persona"]),
+        background=Background(**data["background"]),
+        goals=[Goal(**goal) for goal in data["goals"]],
+    )
+
+
+async def _ensure_agent_capacity(db: AsyncSession) -> None:
+    """所有会创建 Agent 的入口共用数量上限检查。"""
+    count_result = await db.execute(select(func.count()).select_from(AgentRow))
+    existing = count_result.scalar()
+    if existing >= settings.max_agents:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Agent 数量已达上限 ({existing}/{settings.max_agents})",
+        )
+
+
 # =============================================================================
 # 路由
 # =============================================================================
@@ -76,14 +111,7 @@ async def create_agent(
     db: AsyncSession = Depends(get_db),
 ):
     """自然语言描述 → 完整 Agent，持久化到 SQLite。"""
-    # 数量上限检查
-    count_result = await db.execute(select(func.count()).select_from(AgentRow))
-    existing = count_result.scalar()
-    if existing >= settings.max_agents:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Agent 数量已达上限 ({existing}/{settings.max_agents})",
-        )
+    await _ensure_agent_capacity(db)
 
     try:
         agent = await factory.create_from_description(req.description)
@@ -96,6 +124,63 @@ async def create_agent(
     await db.commit()
 
     return agent.to_response()
+
+
+@router.post("/{agent_id}/remix", response_model=RemixResponse)
+async def remix_agent(
+    agent_id: str,
+    req: RemixRequest,
+    factory: AgentFactory = Depends(get_agent_factory),
+    remixer: PersonaRemixer = Depends(get_persona_remixer),
+    db: AsyncSession = Depends(get_db),
+):
+    """预览 Remix，或将已确认的草稿保存为全新 Agent。"""
+    result = await db.execute(select(AgentRow).where(AgentRow.id == agent_id))
+    source_row = result.scalar_one_or_none()
+    if not source_row:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id!r} not found")
+
+    source = _draft_from_row(source_row)
+    if req.action == "preview":
+        try:
+            draft, changes, summary = await remixer.preview(source, req.spec)
+        except RemixNoChangesError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        except RemixGenerationError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
+        return RemixResponse(
+            status="preview",
+            source_agent_id=agent_id,
+            spec=req.spec,
+            draft=draft,
+            changes=changes,
+            summary=summary,
+        )
+
+    await _ensure_agent_capacity(db)
+    try:
+        draft, changes = remixer.finalize(source, req.draft, req.spec)
+    except RemixNoChangesError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    agent = factory.create_from_persona(
+        agent_id=str(uuid.uuid4()),
+        persona=draft.persona,
+        background=draft.background,
+        goals=draft.goals,
+    )
+    response = agent.to_response()
+    db.add(AgentRow.from_response(response.model_dump()))
+    await db.commit()
+    return RemixResponse(
+        status="created",
+        source_agent_id=agent_id,
+        spec=req.spec,
+        draft=draft,
+        changes=changes,
+        summary="已按预览内容创建 Remix Agent",
+        agent=response,
+    )
 
 
 @router.get("", response_model=list[AgentResponse])

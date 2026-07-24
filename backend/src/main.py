@@ -17,6 +17,7 @@ from api.narratives import router as narratives_router
 from api.simulations import router as simulations_router
 from api.sse import sse_router
 from api.scenarios import router as scenarios_router
+from api.templates import router as templates_router
 from api.worlds import router as worlds_router
 
 
@@ -49,6 +50,7 @@ app.add_middleware(
 app.include_router(agents_router)
 app.include_router(worlds_router)
 app.include_router(scenarios_router)
+app.include_router(templates_router)
 app.include_router(narratives_router)
 app.include_router(arenas_router)
 app.include_router(simulations_router)

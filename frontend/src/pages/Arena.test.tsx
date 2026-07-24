@@ -16,6 +16,12 @@ vi.mock("../api/agents", () => ({
   useAgent: () => ({ data: null }),
   useCreateAgent: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDeleteAgent: () => ({ mutateAsync: vi.fn() }),
+  useRemixAgent: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+    error: null,
+    reset: vi.fn(),
+  }),
 }));
 
 // Step 34b: Mock useRunDebate — real API path, returns mock data

@@ -6,7 +6,20 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { client } from "./client";
 import { agentKeys } from "./queryKeys";
+import { isMockApi } from "./mockMode";
+import {
+  createMockAgent,
+  deleteMockAgent,
+  listMockAgents,
+  remixMockAgent,
+} from "../mocks/agentApi";
 import type { AgentResponse } from "../types/agent";
+import type { RemixRequest, RemixResponse } from "../types/remix";
+
+export interface RemixMutationInput {
+  agentId: string;
+  request: RemixRequest;
+}
 
 // ===== Queries =====
 
@@ -14,7 +27,9 @@ import type { AgentResponse } from "../types/agent";
 export function useAgents() {
   return useQuery({
     queryKey: agentKeys.all,
-    queryFn: () => client.get<AgentResponse[]>("/agents"),
+    queryFn: () => isMockApi
+      ? listMockAgents()
+      : client.get<AgentResponse[]>("/agents"),
     staleTime: 30_000, // 30s 内不重复请求
   });
 }
@@ -23,7 +38,15 @@ export function useAgents() {
 export function useAgent(id: string | null) {
   return useQuery({
     queryKey: agentKeys.detail(id ?? ""),
-    queryFn: () => client.get<AgentResponse>(`/agents/${id}`),
+    queryFn: async () => {
+      if (isMockApi) {
+        const agents = await listMockAgents();
+        const agent = agents.find((item) => item.id === id);
+        if (!agent) throw new Error(`Agent ${id} not found`);
+        return agent;
+      }
+      return client.get<AgentResponse>(`/agents/${id}`);
+    },
     enabled: !!id,
   });
 }
@@ -34,8 +57,9 @@ export function useAgent(id: string | null) {
 export function useCreateAgent() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (description: string) =>
-      client.post<AgentResponse>("/agents", { description }),
+    mutationFn: (description: string) => isMockApi
+      ? createMockAgent(description)
+      : client.post<AgentResponse>("/agents", { description }),
     onSuccess: () => {
       // invalidate(['agents']) → 所有模块的 useAgents() 自动刷新
       qc.invalidateQueries({ queryKey: agentKeys.all });
@@ -47,9 +71,26 @@ export function useCreateAgent() {
 export function useDeleteAgent() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => client.delete(`/agents/${id}`),
+    mutationFn: (id: string) => isMockApi
+      ? deleteMockAgent(id)
+      : client.delete(`/agents/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: agentKeys.all });
+    },
+  });
+}
+
+/** 预览或确认创建 Agent Remix。 */
+export function useRemixAgent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ agentId, request }: RemixMutationInput) => isMockApi
+      ? remixMockAgent(agentId, request)
+      : client.post<RemixResponse>(`/agents/${agentId}/remix`, request),
+    onSuccess: (result) => {
+      if (result.status === "created") {
+        qc.invalidateQueries({ queryKey: agentKeys.all });
+      }
     },
   });
 }

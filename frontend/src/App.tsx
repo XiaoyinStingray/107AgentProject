@@ -8,7 +8,7 @@ import LoadingSpinner from "./components/shared/LoadingSpinner";
 import { findItemById } from "./data/menuData";
 
 // --- 懒加载：8 个模块页面按需加载 ---
-const AgentFoundry = lazy(() => import("./pages/AgentFoundry"));
+const AgentModule = lazy(() => import("./pages/AgentModule"));
 const SoloTheater = lazy(() => import("./pages/SoloTheater"));
 const GroupSandbox = lazy(() => import("./pages/GroupSandbox"));
 const Arena = lazy(() => import("./pages/Arena"));
@@ -77,7 +77,7 @@ export default function App() {
             path="agents"
             element={
               <Suspense fallback={<PageFallback />}>
-                <AgentFoundry />
+                <AgentModule />
               </Suspense>
             }
           />

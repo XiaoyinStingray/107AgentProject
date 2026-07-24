@@ -10,8 +10,12 @@ import LoadingSpinner from "../components/shared/LoadingSpinner";
 import { DECISION_LABELS, DECISION_VALUE_LABELS } from "../constants/labels";
 
 /** Step 29 — Agent 创建链路打通，切到真实 POST /api/agents */
-export default function AgentFoundry() {
-  const [input, setInput] = useState("");
+interface AgentFoundryProps {
+  initialDescription?: string;
+}
+
+export default function AgentFoundry({ initialDescription = "" }: AgentFoundryProps) {
+  const [input, setInput] = useState(initialDescription);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // React Query：服务端数据缓存，全模块共享
