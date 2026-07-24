@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from loguru import logger
 
@@ -30,7 +31,20 @@ def _resolve_agent_id(
 
 
 class WorldStateMixin:
-    """Provide context, action effects, relationships, and persistence."""
+    """Provide context, action effects, relationships, and persistence.
+
+    This is a Mixin — the following attributes are provided by
+    the host class (WorldEngine) at runtime.
+    """
+
+    # Mixin host-class attribute stubs (satisfied by WorldEngine at runtime)
+    world: Any
+    agents: dict[str, Any]
+    current_tick: int
+    events: list[SimEvent]
+    relationships: dict[tuple[str, str], float]
+    _name_to_id: dict[str, str]
+    _db: Any  # sqlalchemy.ext.asyncio.AsyncSession
 
     def _build_world_context(self) -> str:
         """Build the current tick context injected into every Agent."""

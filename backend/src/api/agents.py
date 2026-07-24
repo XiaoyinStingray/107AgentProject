@@ -91,7 +91,7 @@ def _draft_from_row(row: AgentRow) -> RemixDraft:
 async def _ensure_agent_capacity(db: AsyncSession) -> None:
     """所有会创建 Agent 的入口共用数量上限检查。"""
     count_result = await db.execute(select(func.count()).select_from(AgentRow))
-    existing = count_result.scalar()
+    existing = count_result.scalar() or 0
     if existing >= settings.max_agents:
         raise HTTPException(
             status_code=400,
@@ -158,6 +158,8 @@ async def remix_agent(
         )
 
     await _ensure_agent_capacity(db)
+    if req.draft is None:
+        raise HTTPException(status_code=400, detail="finalize 操作需要提供 draft")
     try:
         draft, changes = remixer.finalize(source, req.draft, req.spec)
     except RemixNoChangesError as error:

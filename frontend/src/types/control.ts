@@ -1,5 +1,5 @@
 import type { AgentResponse } from "./agent";
-import type { SSEEvent } from "./events";
+import type { SSEEvent, SimEvent } from "./events";
 
 /* ================================================================
    Step 24 — M6 控制台类型定义
@@ -71,4 +71,20 @@ export interface AgentSearchProps {
 export interface DecisionPatternsProps {
   agents: AgentResponse[];
   className?: string;
+}
+
+/**
+ * 将后端 SimEvent[] 转为子组件消费的 SSEEvent[]。
+ * 字段映射：source_agent_id → agent_id，其余字段直接透传。
+ */
+export function convertSimEventsToSSE(events: SimEvent[]): SSEEvent[] {
+  return events.map((e) => ({
+    id: e.id,
+    type: e.type,
+    agent_id: e.source_agent_id,
+    description: e.description,
+    content: e.description,
+    tick: e.tick,
+    data: e.data,
+  }));
 }

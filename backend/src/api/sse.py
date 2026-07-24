@@ -143,7 +143,7 @@ def _sse_event(data: dict) -> str:
     return f"data: {payload}\n\n"
 
 
-def _event_to_dict(event: SimEvent, name_map: dict = None) -> dict:
+def _event_to_dict(event: SimEvent, name_map: dict | None = None) -> dict:
     """将 SimEvent 序列化为前端 SSEEvent 格式。
 
     字段映射（后端 → 前端）:

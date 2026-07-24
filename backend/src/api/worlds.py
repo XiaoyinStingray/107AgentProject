@@ -110,7 +110,7 @@ async def create_world(
     """创建 World，持久化到 SQLite。"""
     # 数量上限检查
     count_result = await db.execute(select(func.count()).select_from(WorldRow))
-    existing = count_result.scalar()
+    existing = count_result.scalar() or 0
     if existing >= settings.max_worlds:
         raise HTTPException(
             status_code=400,

@@ -35,5 +35,5 @@ def create_model_client():
         base_url=settings.llm_base_url,
         temperature=settings.llm_temperature_think,
         max_tokens=settings.llm_max_tokens,
-        model_info=model_info,
+        model_info=model_info,  # type: ignore[arg-type]
     )

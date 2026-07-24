@@ -62,7 +62,8 @@ async def create_scenario(req: ScenarioCreate):
         # 标记为自定义（内置场景无此字段）
         id=str(uuid.uuid4()),
     )
-    _custom_scenarios[scenario.id] = scenario
+    scenario_id = scenario.id or ""
+    _custom_scenarios[scenario_id] = scenario
     return scenario
 
 

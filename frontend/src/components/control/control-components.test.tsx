@@ -22,7 +22,7 @@ import {
 import { MOCK_AGENTS } from "../../mocks/agents";
 import { MOCK_SANDBOX_EVENTS } from "../../mocks/sandbox";
 import type { AgentResponse } from "../../types/agent";
-import type { SSEEvent } from "../../types/events";
+import type { SSEEvent, SimEvent } from "../../types/events";
 
 // --- Mock useAgents：所有控制台测试共享 ---
 vi.mock("../../api/agents", () => ({
@@ -30,6 +30,48 @@ vi.mock("../../api/agents", () => ({
   useAgent: () => ({ data: null }),
   useCreateAgent: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDeleteAgent: () => ({ mutateAsync: vi.fn() }),
+}));
+
+// --- Mock useWorlds / useWorldEvents：Step 43 控制台切真实事件数据 ---
+const MOCK_WORLD_ID = "test-world-1";
+const MOCK_WORLD = {
+  id: MOCK_WORLD_ID,
+  name: "测试世界",
+  scenario: { name: "新生报到", description: "", time_range: "1-10" },
+  agent_ids: MOCK_AGENTS.map((a) => a.id),
+  current_tick: 5,
+  status: "finished",
+  created_at: "2026-01-01T00:00:00Z",
+};
+
+/** 将 SSEEvent[] 反向转为 SimEvent[] 供 useWorldEvents mock 返回。 */
+function sseToSimEvent(e: SSEEvent, idx: number): SimEvent {
+  return {
+    id: e.id ?? `sim-${idx}`,
+    world_id: MOCK_WORLD_ID,
+    tick: e.tick,
+    type: e.type,
+    source_agent_id: e.agent_id,
+    target_agent_ids: [],
+    description: e.description ?? e.content ?? "",
+    data: e.data ?? {},
+    created_at: "2026-01-01T00:00:00Z",
+  };
+}
+
+const MOCK_SIM_EVENTS: SimEvent[] = MOCK_SANDBOX_EVENTS.map(sseToSimEvent);
+
+vi.mock("../../api/worlds", () => ({
+  useWorlds: () => ({ data: [MOCK_WORLD] }),
+  useWorldEvents: () => ({ data: MOCK_SIM_EVENTS }),
+  useWorld: () => ({ data: MOCK_WORLD }),
+  useCreateWorld: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useStartWorld: () => ({ mutateAsync: vi.fn() }),
+  usePauseWorld: () => ({ mutateAsync: vi.fn() }),
+  useResetWorld: () => ({ mutateAsync: vi.fn() }),
+  useDeleteWorld: () => ({ mutateAsync: vi.fn() }),
+  useInjectEvent: () => ({ mutateAsync: vi.fn() }),
+  useWorldRelationships: () => ({ data: { nodes: [], edges: [] } }),
 }));
 
 const testQueryClient = new QueryClient({

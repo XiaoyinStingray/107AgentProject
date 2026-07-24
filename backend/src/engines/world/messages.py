@@ -3,12 +3,37 @@
 import json
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from loguru import logger
 
 from models.event import SimEvent
 
 END_TICK_TOKEN = "[END_TICK]"
+
+
+def _build_action_description(tool_name: str, arguments: dict) -> str:
+    """Build a human-readable description for a tool-call action event."""
+    if tool_name == "think_aloud":
+        thought = arguments.get("thought", "")
+        return thought if thought else ""
+    if tool_name == "set_goal":
+        desc = arguments.get("description", "")
+        return f"设定目标: {desc}" if desc else ""
+    if tool_name == "observe":
+        target = arguments.get("target", "")
+        return f"观察: {target}" if target else ""
+    if tool_name == "send_message":
+        target = arguments.get("target", arguments.get("target_name", ""))
+        msg = arguments.get("content", "")
+        if target and msg:
+            return f"对{target}说: {msg}"
+        if msg:
+            return msg
+        return ""
+    # Unknown tool – produce a clean label instead of raw dict
+    return f"执行了 {tool_name}" if tool_name else ""
+
 
 SELECTOR_PROMPT = """你负责为多人角色扮演选择下一位最自然的发言者。
 候选角色及说明：
@@ -24,7 +49,17 @@ SELECTOR_PROMPT = """你负责为多人角色扮演选择下一位最自然的�
 
 
 class WorldMessageMixin:
-    """Provide GroupChat construction and AutoGen message conversion."""
+    """Provide GroupChat construction and AutoGen message conversion.
+
+    This is a Mixin — the following attributes are provided by
+    the host class (WorldEngine) at runtime.
+    """
+
+    # Mixin host-class attribute stubs (satisfied by WorldEngine at runtime)
+    world: Any
+    agents: dict[str, Any]
+    current_tick: int
+    _name_to_id: dict[str, str]
 
     def build_group_chat(self):
         """Create a target-aware AutoGen SelectorGroupChat for World Agents."""
@@ -91,8 +126,15 @@ class WorldMessageMixin:
 
     @staticmethod
     def _clean_group_content(content: str) -> str:
-        """Remove internal team-control markers from user-visible dialogue."""
-        return content.replace(END_TICK_TOKEN, "").strip()
+        """Remove internal team-control markers and tool-call leaks from user-visible dialogue."""
+        import re
+
+        content = content.replace(END_TICK_TOKEN, "").strip()
+        # Strip residual tool-call patterns that the LLM may embed in text
+        content = re.sub(
+            r"调用工具:\s*\w+\(.*?\)", "", content, flags=re.DOTALL
+        ).strip()
+        return content
 
     def _build_group_task(self) -> str:
         """Build one shared task with explicit multiplayer identity rules."""
@@ -182,13 +224,16 @@ class WorldMessageMixin:
         source = getattr(message, "source", "")
         source_id = self._name_to_id.get(source, source)
         tool_name = getattr(function_call, "name", "")
+        description = _build_action_description(tool_name, arguments)
+        if not description:
+            return None
         return SimEvent(
             id=str(uuid.uuid4()),
             world_id=self.world.id,
             tick=self.current_tick,
             type="agent_action",
             source_agent_id=source_id,
-            description=f"调用工具: {tool_name}({arguments})",
+            description=description[:500],
             data={"action": tool_name, **arguments},
             created_at=datetime.now(timezone.utc).isoformat(),
         )

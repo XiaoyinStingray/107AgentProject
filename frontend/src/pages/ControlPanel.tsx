@@ -1,9 +1,9 @@
-import { useState } from "react";
-import type { SSEEvent } from "../types/events";
+import { useMemo, useState } from "react";
 import type { ControlTab } from "../types/control";
-import { MOCK_SANDBOX_EVENTS } from "../mocks/sandbox";
+import { convertSimEventsToSSE } from "../types/control";
 import { CONTROL_TABS } from "../mocks/control";
 import { useAgents } from "../api/agents";
+import { useWorlds, useWorldEvents } from "../api/worlds";
 import Badge from "../components/shared/Badge";
 import EmptyState from "../components/shared/EmptyState";
 import AgentDashboard from "../components/control/AgentDashboard";
@@ -12,16 +12,27 @@ import AgentSearch from "../components/control/AgentSearch";
 import DecisionPatterns from "../components/control/DecisionPatterns";
 
 /* ================================================================
-   Step 24 → 36 — M6 控制台
+   Step 24 → 36 → 43 — M6 控制台
    多 Agent 仪表盘 + 事件热力图 + Agent 搜索 + 决策模式识别。
    Agent 数据源：useAgents()（React Query 真实 API）。
-   Events 数据源：MOCK_SANDBOX_EVENTS（Step 43 切真实数据）。
+   Events 数据源：useWorldEvents()（Step 43 切真实数据）。
    ================================================================ */
 
 export default function ControlPanel() {
   const { data: agents = [] } = useAgents();
-  const events: SSEEvent[] = MOCK_SANDBOX_EVENTS;
+  const { data: worlds = [] } = useWorlds();
   const [activeTab, setActiveTab] = useState<ControlTab>("dashboard");
+  const [selectedWorldId, setSelectedWorldId] = useState<string | null>(
+    worlds[0]?.id ?? null,
+  );
+
+  // 选中 World 变化时同步 selectedWorldId
+  const effectiveWorldId = selectedWorldId ?? worlds[0]?.id ?? null;
+  const { data: simEvents = [] } = useWorldEvents(effectiveWorldId);
+  const events = useMemo(() => convertSimEventsToSSE(simEvents), [simEvents]);
+
+  // World 列表变化时自动选中第一个
+  const worldIdForSelect = effectiveWorldId ?? "";
 
   const activeMeta = CONTROL_TABS.find((t) => t.key === activeTab);
 
@@ -33,7 +44,23 @@ export default function ControlPanel() {
         多 Agent 仪表盘 · 事件热力图 · Agent 搜索 · 决策模式识别
       </p>
 
-      {/* Tab 栏 */}
+      {/* World 选择器 + Tab 栏 */}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <label className="text-xs font-mono text-text-secondary">World:</label>
+        <select
+          value={worldIdForSelect}
+          onChange={(e) => setSelectedWorldId(e.target.value || null)}
+          className="bg-bg-secondary border border-border rounded px-2 py-1 text-xs font-mono text-text-primary focus:outline-none focus:border-accent-green"
+        >
+          {worlds.length === 0 && <option value="">暂无 World</option>}
+          {worlds.map((w) => (
+            <option key={w.id} value={w.id}>
+              {w.name} ({w.status} · tick {w.current_tick})
+            </option>
+          ))}
+        </select>
+      </div>
+
       <div className="flex flex-wrap gap-2 mb-6">
         {CONTROL_TABS.map((tab) => {
           const isActive = tab.available && tab.key === activeTab;

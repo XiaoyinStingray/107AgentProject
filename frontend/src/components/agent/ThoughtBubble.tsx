@@ -71,7 +71,12 @@ export default function ThoughtBubble({ event, compact = false }: ThoughtBubbleP
   // 普通消息气泡
   const config = BUBBLE_CONFIG[event.type] ?? BUBBLE_CONFIG.fallback;
   const agentName = event.agent_name ?? event.agent_id ?? "Unknown";
-  const bodyText = event.content ?? event.message ?? event.description ?? "";
+  const bodyText = resolveBodyText(event);
+
+  // 无内容的事件不渲染空泡
+  if (!bodyText) {
+    return null;
+  }
 
   return (
     <div className={`${compact ? "mt-0.5" : "mt-3"} animate-slide-in`}>
@@ -102,7 +107,7 @@ export default function ThoughtBubble({ event, compact = false }: ThoughtBubbleP
           <span className="text-accent-green/70 mr-1">
             → {event.action ?? ""}
             {event.target ? `(${event.target})` : ""}
-            {event.message ? `: ` : ""}
+            {bodyText ? `: ` : ""}
           </span>
         )}
         {bodyText}
@@ -146,3 +151,32 @@ const BUBBLE_CONFIG: Record<
     dotColor: "#8888aa",
   },
 };
+
+/**
+ * 从 SSEEvent 中提取可展示正文。
+ * - agent_action：优先从 data 取有意义字段，避免显示原始函数调用
+ * - 其他类型：content → message → description
+ * - 清除残留的工具调用语法（乱码防护）
+ */
+function resolveBodyText(event: SSEEvent): string {
+  if (event.type === "agent_action") {
+    const d = event.data ?? {};
+    // 优先从 data 中取有意义的字段
+    const thought = typeof d.thought === "string" ? d.thought : "";
+    const goalDesc = typeof d.description === "string" ? d.description : "";
+    const msg = typeof d.content === "string" ? d.content : "";
+    const target = typeof d.target === "string" ? d.target : "";
+    if (thought) return stripToolCallSyntax(thought);
+    if (goalDesc) return stripToolCallSyntax(goalDesc);
+    if (msg) return stripToolCallSyntax(msg);
+    if (target) return target;
+    return "";
+  }
+  const raw = event.content ?? event.message ?? event.description ?? "";
+  return stripToolCallSyntax(raw);
+}
+
+/** 清除残留的 "调用工具: xxx({...})" 语法 */
+function stripToolCallSyntax(text: string): string {
+  return text.replace(/^调用工具:\s*\w+\(.*\)\s*$/s, "").trim();
+}
