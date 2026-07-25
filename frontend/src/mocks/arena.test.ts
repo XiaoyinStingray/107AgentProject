@@ -5,7 +5,7 @@ import {
   buildMockArenaResult,
   MOCK_ARENA_ROUNDS,
 } from "./arena";
-import type { ArenaConfig, ArenaMode } from "../types/arena";
+import type { ArenaConfig, DuelArenaMode } from "../types/arena";
 
 const agentA = MOCK_AGENTS[0]!;
 const agentB = MOCK_AGENTS[1]!;
@@ -22,12 +22,15 @@ function createConfig(overrides: Partial<ArenaConfig> = {}): ArenaConfig {
 }
 
 describe("Step 22 buildMockArenaResult", () => {
-  it.each<ArenaMode>(["debate", "interview", "pitch"])(
+  it.each<DuelArenaMode>(["debate", "interview", "pitch"])(
     "builds a complete deterministic %s result",
     (mode) => {
       const result = buildMockArenaResult(createConfig({ mode }), agentA, agentB);
 
       expect([agentA.id, agentB.id]).toContain(result.winner_id);
+      expect(result.mode).toBe(mode);
+      expect(result.participant_ids).toEqual([agentA.id, agentB.id]);
+      expect(result.participant_names[agentA.id]).toBe(agentA.name);
       expect(Object.keys(result.scores).sort()).toEqual(
         [agentA.id, agentB.id].sort(),
       );
@@ -70,7 +73,7 @@ describe("Step 22 buildMockArenaResult", () => {
     },
   );
 
-  it.each<ArenaMode>(["debate", "interview", "pitch"])(
+  it.each<DuelArenaMode>(["debate", "interview", "pitch"])(
     "provides editable topic presets for %s",
     (mode) => {
       expect(ARENA_TOPICS[mode]).toHaveLength(3);

@@ -1,131 +1,152 @@
 /**
- * Arena API hooks — React Query 封装。
- * 对应后端 POST /api/arenas/debate, GET /api/arenas/{id}, GET /api/arenas。
+ * Arena API hooks — 页面不感知真实后端或独立 Mock 数据源。
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { client } from "./client";
+import { isMockApi } from "./mockMode";
 import { arenaKeys } from "./queryKeys";
-import type { ArenaPresentationResult, ArenaTranscriptEntry } from "../types/arena";
+import {
+  getMockArena,
+  getMockArenaReport,
+  listMockArenas,
+  runMockBattleRoyale,
+  runMockDuel,
+} from "../mocks/arenaApi";
+import type {
+  ArenaApiResult,
+  ArenaConfig,
+  ArenaPresentationResult,
+  ArenaReportResponse,
+  ArenaScoreBreakdown,
+  BattleRoyaleConfig,
+  DuelArenaMode,
+} from "../types/arena";
 
-/** 后端 ArenaResultResponse 的原始 transcript 条目 */
-interface RawTranscriptEntry {
-  turn: number;
-  speaker: string;
-  content: string;
-}
 
-/** 后端 ArenaResultResponse 的完整形状 */
-interface ArenaApiResponse {
-  id: string;
-  mode: string;
-  winner_id: string;
-  scores: Record<string, number>;
-  judge_reasoning: string;
-  transcript: RawTranscriptEntry[];
-  topic: string;
-  rounds: number;
-  created_at: string;
-}
-
-/** 辩论请求体 */
-export interface ArenaDebateRequest {
-  mode: string;
-  agent_a_id: string;
-  agent_b_id: string;
-  topic: string;
-  rounds: number;
-}
-
-/**
- * 将后端原始 transcript 映射为前端展示格式。
- * 利用调用方已知的 Agent 信息填充 speaker_id / speaker_name。
- */
-function adaptTranscript(
-  raw: RawTranscriptEntry[],
-  agentAMap: { id: string; name: string },
-  agentBMap: { id: string; name: string },
-): ArenaTranscriptEntry[] {
-  return raw.map((entry, index) => {
-    // AutoGen speaker name → agent id + display name
-    const agent =
-      entry.speaker === agentAMap.name || entry.speaker.includes(agentAMap.id.slice(0, 8))
-        ? agentAMap
-        : agentBMap;
-    return {
-      id: `t-${index}`,
-      round: Math.floor(entry.turn / 2) + 1,
-      speaker_id: agent.id,
-      speaker_name: agent.name,
-      content: entry.content,
-    };
-  });
-}
-
-/**
- * 将后端 API 响应适配为前端 ArenaPresentationResult。
- * score_breakdowns 在后端仅返回总分时用均分填充。
- */
+/** 将后端竞技结果转换为现有展示组件使用的结构。 */
 export function adaptArenaResult(
-  api: ArenaApiResponse,
-  agentA: { id: string; name: string },
-  agentB: { id: string; name: string },
+  api: ArenaApiResult,
 ): ArenaPresentationResult {
-  const transcript = adaptTranscript(api.transcript, agentA, agentB);
-  const quarter = (score: number) => Math.round(score / 4);
   return {
+    id: api.id,
+    mode: api.mode,
     winner_id: api.winner_id,
     scores: api.scores,
     judge_reasoning: api.judge_reasoning,
-    transcript,
-    score_breakdowns: {
-      [agentA.id]: {
-        argument_quality: quarter(api.scores[agentA.id] ?? 20),
-        expression: quarter(api.scores[agentA.id] ?? 20),
-        adaptability: quarter(api.scores[agentA.id] ?? 20),
-        character_consistency: quarter(api.scores[agentA.id] ?? 20),
-        total: api.scores[agentA.id] ?? 20,
-      },
-      [agentB.id]: {
-        argument_quality: quarter(api.scores[agentB.id] ?? 20),
-        expression: quarter(api.scores[agentB.id] ?? 20),
-        adaptability: quarter(api.scores[agentB.id] ?? 20),
-        character_consistency: quarter(api.scores[agentB.id] ?? 20),
-        total: api.scores[agentB.id] ?? 20,
-      },
-    },
+    transcript: api.transcript.map((entry, index) => ({
+      id: `${api.id}-${entry.turn}-${index}`,
+      round: entry.round,
+      speaker_id: entry.speaker_id,
+      speaker_name: entry.speaker,
+      content: entry.content,
+      stage_score: entry.stage_score,
+      stage_rank: entry.stage_rank,
+      advanced: entry.advanced,
+    })),
+    topic: api.topic,
+    rounds: api.rounds,
+    participant_ids: api.participant_ids,
+    participant_names: api.participant_names,
+    score_breakdowns: Object.fromEntries(
+      api.participant_ids.map((agentId) => [
+        agentId,
+        normalizeBreakdown(api, agentId),
+      ]),
+    ),
+    created_at: api.created_at,
   };
 }
 
-// ===== Queries =====
-
-/** 按 ID 获取竞技结果 */
+/** 按 ID 获取竞技结果。 */
 export function useArenaResult(id: string | null) {
   return useQuery({
     queryKey: arenaKeys.detail(id ?? ""),
-    queryFn: () => client.get<ArenaApiResponse>(`/arenas/${id}`),
+    queryFn: () => isMockApi
+      ? getMockArena(id!)
+      : client.get<ArenaApiResult>(`/arenas/${id}`),
     enabled: !!id,
   });
 }
 
-/** 列出所有竞技记录 */
-export function useArenas() {
+/** 列出竞技历史，可按参赛 Agent 过滤。 */
+export function useArenas(agentId?: string) {
+  const query = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : "";
   return useQuery({
-    queryKey: arenaKeys.all,
-    queryFn: () => client.get<ArenaApiResponse[]>("/arenas"),
+    queryKey: arenaKeys.list(agentId),
+    queryFn: () => isMockApi
+      ? listMockArenas(agentId)
+      : client.get<ArenaApiResult[]>(`/arenas${query}`),
   });
 }
 
-// ===== Mutations =====
+/** 获取一场竞技的结构化 Markdown 战报。 */
+export function useArenaReport(id: string | null) {
+  return useQuery({
+    queryKey: arenaKeys.report(id ?? ""),
+    queryFn: () => isMockApi
+      ? getMockArenaReport(id!)
+      : client.get<ArenaReportResponse>(`/arenas/${id}/report`),
+    enabled: !!id,
+  });
+}
 
-/** 运行一场 1v1 辩论 */
-export function useRunDebate() {
-  const qc = useQueryClient();
+/** 运行指定模式的 1v1 竞技。 */
+export function useRunDuel(mode: DuelArenaMode) {
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (req: ArenaDebateRequest) =>
-      client.post<ArenaApiResponse>("/arenas/debate", req),
+    mutationFn: (request: ArenaConfig) => {
+      const payload = { ...request, mode };
+      return isMockApi
+        ? runMockDuel(payload)
+        : client.post<ArenaApiResult>(`/arenas/${mode}`, payload);
+    },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: arenaKeys.all });
+      queryClient.invalidateQueries({ queryKey: arenaKeys.all });
     },
   });
+}
+
+/** 兼容既有调用的辩论 mutation。 */
+export function useRunDebate() {
+  return useRunDuel("debate");
+}
+
+/** 运行真实或 Mock 面试竞争。 */
+export function useRunInterview() {
+  return useRunDuel("interview");
+}
+
+/** 运行真实或 Mock 创业路演。 */
+export function useRunPitch() {
+  return useRunDuel("pitch");
+}
+
+/** 运行真实或 Mock 多人自由淘汰赛。 */
+export function useRunBattleRoyale() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: BattleRoyaleConfig) => isMockApi
+      ? runMockBattleRoyale(request)
+      : client.post<ArenaApiResult>("/arenas/battle_royale", request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: arenaKeys.all });
+    },
+  });
+}
+
+function normalizeBreakdown(
+  api: ArenaApiResult,
+  agentId: string,
+): ArenaScoreBreakdown {
+  const total = api.scores[agentId] ?? 20;
+  const quarter = Math.round(total / 4);
+  const raw = api.score_breakdown[agentId] ?? {};
+  return {
+    argument_quality: raw.argument_quality ?? quarter,
+    expression: raw.expression ?? quarter,
+    adaptability: raw.adaptability ?? quarter,
+    character_consistency: raw.character_consistency ?? quarter,
+    total,
+  };
 }

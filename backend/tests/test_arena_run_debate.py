@@ -71,14 +71,14 @@ class TestRunDebate:
         ]
         assert group_chat_config["max_turns"] == 4
         assert len(result.transcript) == 2
-        assert all(item["speaker"] != "judge" for item in result.transcript)
+        assert all(item.speaker != "judge" for item in result.transcript)
         assert client.call_count == 1
         assert result.mode.value == "debate"
 
     @pytest.mark.asyncio
-    async def test_run_debate_error_returns_graceful_result(self):
-        """GroupChat 崩溃时返回错误结果而非异常穿透。"""
-        from engines.arena.engine import ArenaEngine, ArenaResult
+    async def test_run_debate_error_propagates_without_fake_result(self):
+        """GroupChat 崩溃时上抛，交给 API 返回错误且不保存结果。"""
+        from engines.arena.engine import ArenaEngine
         import autogen_agentchat.teams as teams_mod
 
         class FakeGroupChat:
@@ -94,9 +94,5 @@ class TestRunDebate:
 
         with pytest.MonkeyPatch.context() as patch:
             patch.setattr(teams_mod, "RoundRobinGroupChat", FakeGroupChat)
-            result = await engine.run_debate(agent_a, agent_b, topic="测试话题")
-
-        assert isinstance(result, ArenaResult)
-        assert result.winner_id == ""
-        assert result.scores["id-a"] == 0
-        assert "出错" in result.judge_reasoning
+            with pytest.raises(RuntimeError, match="AutoGen 内部错误"):
+                await engine.run_debate(agent_a, agent_b, topic="测试话题")

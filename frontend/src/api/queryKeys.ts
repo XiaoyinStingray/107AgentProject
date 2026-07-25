@@ -27,7 +27,10 @@ export const scenarioKeys = {
 
 export const arenaKeys = {
   all: ["arenas"] as const,
+  list: (agentId?: string) =>
+    ["arenas", "list", agentId ?? "all"] as const,
   detail: (id: string) => ["arenas", id] as const,
+  report: (id: string) => ["arenas", id, "report"] as const,
 };
 
 export const simulationKeys = {

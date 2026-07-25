@@ -13,7 +13,7 @@ interface ArenaMatchProps {
   isJudging: boolean;
 }
 
-/** Mock 竞技运行阶段的对阵信息与逐轮发言骨架。 */
+/** 收到完整结果后，逐条呈现比赛记录和裁判汇总。 */
 export default function ArenaMatch({
   config,
   agentA,
@@ -26,14 +26,17 @@ export default function ArenaMatch({
     <div className="min-h-full max-w-5xl mx-auto p-6 space-y-4 animate-fade-in motion-reduce:animate-none">
       <header className="flex flex-wrap items-center gap-3">
         <div>
-          <p className="text-xs font-mono text-accent-orange">M4 / LIVE MATCH</p>
+          <p className="text-xs font-mono text-accent-orange">M4 / MATCH REPLAY</p>
           <h1 className="text-xl font-mono text-text-primary mt-1">{config.topic}</h1>
+          <p className="text-xs text-text-secondary mt-2">
+            比赛已在后台完成，正在逐条呈现记录；此处不是实时生成。
+          </p>
         </div>
         <div className="ml-auto flex items-center gap-3">
           <Badge label={`ROUND ${currentRound}/${config.rounds}`} variant="P1" />
           <StatusDot
             status="thinking"
-            label={isJudging ? "裁判评分中" : "比赛进行中"}
+            label={isJudging ? "正在呈现裁判汇总" : "正在呈现比赛记录"}
           />
         </div>
       </header>
@@ -56,7 +59,7 @@ export default function ArenaMatch({
 
         {visibleTranscript.length === 0 ? (
           <p className="py-8 text-center text-sm font-mono text-text-secondary">
-            裁判正在确认比赛规则…
+            正在准备比赛记录…
           </p>
         ) : (
           <ol className="space-y-3" aria-label="竞技发言记录">
@@ -95,7 +98,7 @@ export default function ArenaMatch({
             🧐
           </p>
           <p className="text-sm font-mono text-text-secondary mt-2">
-            裁判正在汇总四项评分…
+            正在呈现裁判四项评分汇总…
           </p>
         </Card>
       )}

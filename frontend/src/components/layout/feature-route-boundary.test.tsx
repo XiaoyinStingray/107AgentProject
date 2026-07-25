@@ -15,7 +15,7 @@ function BoundaryLayout() {
   return (
     <>
       <Link to="/arena#item-22">打开 1v1</Link>
-      <Link to="/arena#item-23">打开大乱斗</Link>
+      <Link to="/arena#item-25">打开盲测</Link>
       <FeatureRouteBoundary />
     </>
   );
@@ -74,9 +74,16 @@ describe("Step 28 FeatureRouteBoundary", () => {
     expect(screen.getByText("P0")).toBeInTheDocument();
   });
 
-  it("shows a unified placeholder for a P3 feature", () => {
+  it("treats the implemented battle royale entry as P2 content", () => {
     renderBoundary("/arena#item-23");
-    expect(screen.getByText("🏟️ 大乱斗")).toBeInTheDocument();
+    expect(screen.getByText("竞技场正文")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("当前功能：大乱斗");
+    expect(screen.getByText("P2")).toBeInTheDocument();
+  });
+
+  it("shows a unified placeholder for a P3 feature", () => {
+    renderBoundary("/arena#item-25");
+    expect(screen.getByText("🎯 盲测模式")).toBeInTheDocument();
     expect(
       screen.getByText("该功能已保留菜单入口，将在后续版本继续开发。"),
     ).toBeInTheDocument();
@@ -95,8 +102,8 @@ describe("Step 28 FeatureRouteBoundary", () => {
     expect(screen.getByText("竞技场正文")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("当前功能：1v1 对抗");
 
-    fireEvent.click(screen.getByRole("link", { name: "打开大乱斗" }));
-    expect(screen.getByText("🏟️ 大乱斗")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "打开盲测" }));
+    expect(screen.getByText("🎯 盲测模式")).toBeInTheDocument();
     expect(screen.queryByText("竞技场正文")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("link", { name: "打开 1v1" }));

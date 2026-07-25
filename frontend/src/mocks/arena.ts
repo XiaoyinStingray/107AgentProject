@@ -1,12 +1,18 @@
 import type { AgentResponse } from "../types/agent";
 import type {
   ArenaConfig,
-  ArenaMode,
-  ArenaModeOption,
+  DuelArenaMode,
   ArenaPresentationResult,
   ArenaScoreBreakdown,
   ArenaTranscriptEntry,
 } from "../types/arena";
+import {
+  ARENA_MODE_OPTIONS,
+  ARENA_TOPICS,
+  DUEL_ARENA_ROUNDS,
+} from "../constants/arena";
+
+export { ARENA_MODE_OPTIONS, ARENA_TOPICS };
 
 type ArenaSide = "agent_a" | "agent_b";
 
@@ -39,56 +45,15 @@ function scoreBreakdown(
   };
 }
 
-/** Step 26 默认轮数；Step 22 Mock 固定按三轮展示。 */
-export const MOCK_ARENA_ROUNDS = 3;
-
-/** 蓝图明确规定的三种 1v1 竞技模式。 */
-export const ARENA_MODE_OPTIONS: ArenaModeOption[] = [
-  {
-    value: "debate",
-    label: "辩论赛",
-    description: "围绕同一主题交锋，比较论点、表达与应变能力。",
-    default_topic: "大学生应优先追求稳定，还是主动承担风险？",
-  },
-  {
-    value: "interview",
-    label: "面试竞争",
-    description: "竞争同一岗位，比较经历、能力与岗位匹配度。",
-    default_topic: "校园 AI 产品经理实习岗位",
-  },
-  {
-    value: "pitch",
-    label: "创业路演",
-    description: "陈述同一创业方向，比较洞察、方案与落地能力。",
-    default_topic: "面向大学生的 AI 学习伙伴",
-  },
-];
-
-/** 各竞技模式的可编辑预设主题，保留自定义输入能力。 */
-export const ARENA_TOPICS: Record<ArenaMode, string[]> = {
-  debate: [
-    "大学生应优先追求稳定，还是主动承担风险？",
-    "大学教育应该更注重理论还是实践？",
-    "AI 会取代人类的创造力吗？",
-  ],
-  interview: [
-    "校园 AI 产品经理实习岗位",
-    "学生创新实验室项目负责人",
-    "AI 教育产品用户研究实习生",
-  ],
-  pitch: [
-    "面向大学生的 AI 学习伙伴",
-    "帮助新生适应校园生活的智能服务",
-    "低成本校园心理支持平台",
-  ],
-};
+/** 兼容 Step 22 已有导入；真实来源已移至 constants/arena.ts。 */
+export const MOCK_ARENA_ROUNDS = DUEL_ARENA_ROUNDS;
 
 /**
  * Step 22 的确定性 Mock 脚本。
  *
  * 分数使用 development-plan.md 的四项 1-10 分标准，总分 0-40。
  */
-export const MOCK_ARENA_SCRIPTS: Record<ArenaMode, MockArenaScript> = {
+export const MOCK_ARENA_SCRIPTS: Record<DuelArenaMode, MockArenaScript> = {
   debate: {
     transcript: [
       {
@@ -251,6 +216,8 @@ export function buildMockArenaResult(
   );
 
   return {
+    id: `mock-${config.mode}-${agentA.id}-${agentB.id}`,
+    mode: config.mode,
     winner_id: script.winner === "agent_a" ? agentA.id : agentB.id,
     scores: {
       [agentA.id]: script.scores.agent_a,
@@ -267,6 +234,14 @@ export function buildMockArenaResult(
       agentB,
     ),
     transcript,
+    topic: config.topic.trim(),
+    rounds: config.rounds,
+    participant_ids: [agentA.id, agentB.id],
+    participant_names: {
+      [agentA.id]: agentA.name,
+      [agentB.id]: agentB.name,
+    },
+    created_at: "2026-07-19T00:00:00.000Z",
   };
 }
 

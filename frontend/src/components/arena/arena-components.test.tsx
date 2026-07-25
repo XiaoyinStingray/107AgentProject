@@ -7,10 +7,14 @@ import {
   buildMockArenaResult,
   MOCK_ARENA_ROUNDS,
 } from "../../mocks/arena";
-import type { ArenaConfig } from "../../types/arena";
+import type {
+  ArenaConfig,
+  ArenaPresentationResult,
+} from "../../types/arena";
 import ArenaMatch from "./ArenaMatch";
 import ArenaResultPanel from "./ArenaResultPanel";
 import ArenaSetup from "./ArenaSetup";
+import BattleRoyaleResult from "./BattleRoyaleResult";
 
 const agentA = MOCK_AGENTS[0]!;
 const agentB = MOCK_AGENTS[1]!;
@@ -116,7 +120,10 @@ describe("Step 22 ArenaMatch", () => {
       />,
     );
 
-    expect(screen.getByText("裁判正在确认比赛规则…")).toBeInTheDocument();
+    expect(screen.getByText("正在准备比赛记录…")).toBeInTheDocument();
+    expect(
+      screen.getByText("比赛已在后台完成，正在逐条呈现记录；此处不是实时生成。"),
+    ).toBeInTheDocument();
     expect(screen.getByText(agentA.name)).toBeInTheDocument();
     expect(screen.getByText(agentB.name)).toBeInTheDocument();
 
@@ -135,7 +142,7 @@ describe("Step 22 ArenaMatch", () => {
     expect(screen.getByRole("list", { name: "竞技发言记录" })).toBeInTheDocument();
     expect(screen.getAllByText(result.transcript[0]!.content)).toHaveLength(1);
     expect(screen.getAllByText(result.transcript[1]!.content)).toHaveLength(1);
-    expect(screen.getByText("裁判正在汇总四项评分…")).toBeInTheDocument();
+    expect(screen.getByText("正在呈现裁判四项评分汇总…")).toBeInTheDocument();
   });
 });
 
@@ -156,7 +163,7 @@ describe("Step 22 ArenaResultPanel", () => {
     expect(screen.getByText(result.judge_reasoning)).toBeInTheDocument();
     expect(screen.getByText("6 条发言")).toBeInTheDocument();
     expect(screen.getAllByText("/ 40")).toHaveLength(2);
-    expect(screen.getAllByText("论点质量")).toHaveLength(2);
+    expect(screen.getAllByText("内容质量")).toHaveLength(2);
     expect(screen.getAllByText("表达能力")).toHaveLength(2);
     expect(screen.getAllByText("应变能力")).toHaveLength(2);
     expect(screen.getAllByText("人设一致")).toHaveLength(2);
@@ -175,5 +182,98 @@ describe("Step 22 ArenaResultPanel", () => {
       />,
     );
     expect(screen.getAllByText("0")).toHaveLength(2);
+  });
+});
+
+describe("Step 46 BattleRoyaleResult", () => {
+  it("renders per-stage scores and the elimination path", () => {
+    const battleResult: ArenaPresentationResult = {
+      ...result,
+      id: "battle-ranking",
+      mode: "battle_royale",
+      winner_id: agentB.id,
+      scores: {
+        [agentA.id]: 24,
+        [agentB.id]: 28,
+        [agentC.id]: 20,
+      },
+      participant_ids: [agentA.id, agentB.id, agentC.id],
+      participant_names: {
+        [agentA.id]: agentA.name,
+        [agentB.id]: agentB.name,
+        [agentC.id]: agentC.name,
+      },
+      transcript: [
+        {
+          id: "stage-1-a",
+          round: 1,
+          speaker_id: agentA.id,
+          speaker_name: agentA.name,
+          content: "A 第一阶段发言",
+          stage_score: 30,
+          stage_rank: 2,
+          advanced: true,
+        },
+        {
+          id: "stage-1-b",
+          round: 1,
+          speaker_id: agentB.id,
+          speaker_name: agentB.name,
+          content: "B 第一阶段发言",
+          stage_score: 32,
+          stage_rank: 1,
+          advanced: true,
+        },
+        {
+          id: "stage-1-b-follow-up",
+          round: 1,
+          speaker_id: agentB.id,
+          speaker_name: agentB.name,
+          content: "B 第一阶段补充发言",
+          stage_score: 32,
+          stage_rank: 1,
+          advanced: true,
+        },
+        {
+          id: "stage-1-c",
+          round: 1,
+          speaker_id: agentC.id,
+          speaker_name: agentC.name,
+          content: "C 第一阶段发言",
+          stage_score: 20,
+          stage_rank: 3,
+          advanced: false,
+        },
+        {
+          id: "stage-2-a",
+          round: 2,
+          speaker_id: agentA.id,
+          speaker_name: agentA.name,
+          content: "A 决赛发言",
+          stage_score: 24,
+          stage_rank: 2,
+          advanced: false,
+        },
+        {
+          id: "stage-2-b",
+          round: 2,
+          speaker_id: agentB.id,
+          speaker_name: agentB.name,
+          content: "B 决赛发言",
+          stage_score: 28,
+          stage_rank: 1,
+          advanced: true,
+        },
+      ],
+    };
+    render(<BattleRoyaleResult result={battleResult} onReset={vi.fn()} />);
+
+    const pathCard = screen.getByText("淘汰路径").parentElement!;
+    expect(within(pathCard).getByText("第 1 阶段 · 3 → 2")).toBeInTheDocument();
+    expect(within(pathCard).getByText("第 2 阶段 · 2 → 1")).toBeInTheDocument();
+    expect(within(pathCard).getByText("本轮 32 / 40")).toBeInTheDocument();
+    expect(within(pathCard).getByText("本轮 28 / 40")).toBeInTheDocument();
+    const champion = within(pathCard).getByText("冠军").closest("li");
+    expect(champion).toHaveTextContent(agentB.name);
   });
 });

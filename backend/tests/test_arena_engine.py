@@ -75,6 +75,7 @@ class TestArenaTypes:
         assert ArenaMode.DEBATE == "debate"
         assert ArenaMode.INTERVIEW == "interview"
         assert ArenaMode.PITCH == "pitch"
+        assert ArenaMode.BATTLE_ROYALE == "battle_royale"
 
     def test_arena_result_defaults(self):
         from engines.arena.engine import ArenaResult
@@ -96,7 +97,13 @@ class TestArenaTypes:
             winner_id="a1",
             scores={"a1": 35, "b1": 25},
             judge_reasoning="正方论点更充分",
-            transcript=[{"turn": 0, "speaker": "A", "content": "我认为..."}],
+            transcript=[{
+                "turn": 0,
+                "round": 1,
+                "speaker_id": "a1",
+                "speaker": "A",
+                "content": "我认为...",
+            }],
             mode=ArenaMode.DEBATE,
             topic="AI 会取代人类吗",
             rounds=5,
@@ -104,6 +111,7 @@ class TestArenaTypes:
         assert result.mode == ArenaMode.DEBATE
         assert result.topic == "AI 会取代人类吗"
         assert len(result.transcript) == 1
+        assert result.transcript[0].speaker_id == "a1"
 
 
 # =============================================================================

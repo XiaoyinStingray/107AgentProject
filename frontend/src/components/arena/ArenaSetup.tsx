@@ -1,5 +1,5 @@
 import type { AgentResponse } from "../../types/agent";
-import type { ArenaMode, ArenaModeOption } from "../../types/arena";
+import type { ArenaModeOption, DuelArenaMode } from "../../types/arena";
 import Badge from "../shared/Badge";
 import Card from "../shared/Card";
 import ArenaTopicPicker from "./ArenaTopicPicker";
@@ -8,14 +8,14 @@ interface ArenaSetupProps {
   agents: AgentResponse[];
   selectedAgentAId: string;
   selectedAgentBId: string;
-  selectedMode: ArenaMode;
+  selectedMode: DuelArenaMode;
   topic: string;
   modeOptions: ArenaModeOption[];
   topicPresets: string[];
   canStart: boolean;
   onSelectAgentA: (agentId: string) => void;
   onSelectAgentB: (agentId: string) => void;
-  onSelectMode: (mode: ArenaMode) => void;
+  onSelectMode: (mode: DuelArenaMode) => void;
   onChangeTopic: (topic: string) => void;
   onStart: () => void;
 }

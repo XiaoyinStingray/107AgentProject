@@ -1,4 +1,5 @@
 import type { ArenaScoreBreakdown as ScoreBreakdown } from "../../types/arena";
+import { ARENA_SCORE_LABELS } from "../../constants/arena";
 
 interface ArenaScoreBreakdownProps {
   score: ScoreBreakdown;
@@ -9,10 +10,10 @@ const SCORE_ROWS: Array<{
   label: string;
   color: string;
 }> = [
-  { key: "argument_quality", label: "论点质量", color: "bg-accent-blue" },
-  { key: "expression", label: "表达能力", color: "bg-accent-purple" },
-  { key: "adaptability", label: "应变能力", color: "bg-accent-orange" },
-  { key: "character_consistency", label: "人设一致", color: "bg-accent-green" },
+  { key: "argument_quality", label: ARENA_SCORE_LABELS.argument_quality, color: "bg-accent-blue" },
+  { key: "expression", label: ARENA_SCORE_LABELS.expression, color: "bg-accent-purple" },
+  { key: "adaptability", label: ARENA_SCORE_LABELS.adaptability, color: "bg-accent-orange" },
+  { key: "character_consistency", label: ARENA_SCORE_LABELS.character_consistency, color: "bg-accent-green" },
 ];
 
 /** 四项 0-10 分的竞技评分条。 */

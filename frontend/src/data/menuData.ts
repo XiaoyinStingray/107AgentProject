@@ -61,7 +61,7 @@ export const MENU_SECTIONS: MenuSection[] = [
     route: "/arena",
     items: [
       { id: 22, emoji: "🥊", label: "1v1 对抗", priority: "P1" },
-      { id: 23, emoji: "🏟️", label: "大乱斗", priority: "P3" },
+      { id: 23, emoji: "🏟️", label: "大乱斗", priority: "P2" },
       { id: 24, emoji: "📋", label: "战报生成", priority: "P2" },
       { id: 25, emoji: "🎯", label: "盲测模式", priority: "P3" },
       { id: 26, emoji: "🔄", label: "复盘对比", priority: "P2" },
