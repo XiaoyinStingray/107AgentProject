@@ -271,3 +271,53 @@
 - **关联位置**：
   - `backend/src/db.py` — BUG-014 增量迁移逻辑
   - `frontend/src/pages/SoloTheater.tsx` — worlds 过滤
+
+---
+
+## BUG-015：M8 研究报告导出 MD 报错、JSON 为空
+
+- **状态**：待处理
+- **优先级**：P2（功能可用但数据源错误——只读内存不读 DB）
+- **发现日期**：2026-07-24
+- **环境**：Archive → 研究报告导出
+- **复现步骤**：
+  1. 创建一个 World，模拟几 tick，暂停
+  2. 进入 `/archive` → 研究报告导出 Tab
+  3. 点「导出 Markdown」
+  4. 点「导出 JSON」
+- **实际结果**：
+  - MD：`404 No events found. Start a simulation first.`
+  - JSON：200 OK 但下载文件内容为空（`"total_events": 0`）
+- **根因**：`backend/src/api/export.py:163-168` `_collect_events()` 只从 `_active_worlds` 内存取事件，不查 SQLite。服务器重启、World 结束/重置后 engine 不在内存 → 返回空列表
+- **对比**：`GET /api/worlds/{id}/events` 查询 SQLite `events` 表——正常工作
+- **修复方向**：`_collect_events()` 应增加 DB fallback，与 events API 一致的查询逻辑
+- **关联位置**：
+  - `backend/src/api/export.py` — `_collect_events()` (line 163-168) + `export_report_markdown()` (line 206-209) 空检查 + `export_report_json()` (line 245) 缺空检查
+
+---
+
+## BUG-017：Agent 日记入口在 M1 但实现在 M5
+
+- **状态**：待处理
+- **优先级**：P2（功能可用但入口放错模块）
+- **发现日期**：2026-07-24
+- **环境**：M1 铸造厂 / M5 叙事工厂
+- **实际结果**：M1 Agent 详情中有「生成日记」按钮，点击后跳转到 M5 叙事工厂——功能本身在 M5 实现，但入口放在了 M1。用户困惑日记是 M1 的功能还是 M5 的
+- **修复方向**：要么把入口移到 M5（叙事工厂 Agent 选择后直接生成），要么在 M1 保持入口但跳转时自动选中该 Agent 并切换到日记风格
+
+---
+
+## BUG-016：M5 叙事工厂侧边栏选取无效
+
+- **状态**：待处理
+- **优先级**：P1（侧边栏 Agent 列表点击后主界面功能框不切换）
+- **发现日期**：2026-07-24
+- **环境**：前端 NarrativeFactory 页面
+- **复现步骤**：
+  1. 打开 `/narratives`
+  2. 左侧 Agent 列表中点击某个 Agent
+  3. 观察右侧主界面的叙事风格选择 / 生成按钮
+- **实际结果**：右侧功能框不跟随侧边栏选择变化——始终停留在初始状态
+- **期望结果**：选中 Agent 后，主界面叙事风格选择区和生成按钮应关联到该 Agent
+- **关联位置**：
+  - `frontend/src/pages/NarrativeFactory.tsx` — Agent 选择 → 叙事生成的状态绑定
