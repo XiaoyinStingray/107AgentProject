@@ -271,3 +271,20 @@
 - **关联位置**：
   - `backend/src/db.py` — BUG-014 增量迁移逻辑
   - `frontend/src/pages/SoloTheater.tsx` — worlds 过滤
+
+---
+
+## BUG-015：M5 叙事工厂侧边栏选取无效
+
+- **状态**：待处理
+- **优先级**：P1（侧边栏 Agent 列表点击后主界面功能框不切换）
+- **发现日期**：2026-07-24
+- **环境**：前端 NarrativeFactory 页面
+- **复现步骤**：
+  1. 打开 `/narratives`
+  2. 左侧 Agent 列表中点击某个 Agent
+  3. 观察右侧主界面的叙事风格选择 / 生成按钮
+- **实际结果**：右侧功能框不跟随侧边栏选择变化——始终停留在初始状态
+- **期望结果**：选中 Agent 后，主界面叙事风格选择区和生成按钮应关联到该 Agent
+- **关联位置**：
+  - `frontend/src/pages/NarrativeFactory.tsx` — Agent 选择 → 叙事生成的状态绑定
