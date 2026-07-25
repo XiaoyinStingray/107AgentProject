@@ -223,7 +223,7 @@ function ScenarioSelection({
           const name = scenario.name ?? "未命名场景";
           const isCustom = !!scenario.id;
           return (
-            <div key={name} className="relative">
+            <div key={scenario.id ?? name} className="relative">
               <button
                 type="button"
                 onClick={() => onSelectScenario(name)}

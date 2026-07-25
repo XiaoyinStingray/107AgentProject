@@ -98,6 +98,25 @@ async def _sync_world_to_db(world: WorldResponse) -> None:
             await session.commit()
 
 
+async def _restore_simulation_id(
+    engine, world_id: str, db: AsyncSession
+) -> None:
+    """引擎重建后从 DB 找回活跃的 simulation_id，使 finish 能正确写记录。"""
+    if engine.simulation_id:
+        return
+    from models.simulation_orm import SimulationRow
+    result = await db.execute(
+        select(SimulationRow)
+        .where(SimulationRow.world_id == world_id)
+        .where(SimulationRow.status == "running")
+        .order_by(SimulationRow.started_at.desc())
+        .limit(1)
+    )
+    row = result.scalar_one_or_none()
+    if row:
+        engine.simulation_id = row.id
+
+
 async def _sync_agent_goals_to_db(world_id: str) -> None:
     """将 WorldEngine 中 Agent 的 goal 状态回写到 agents 表。"""
     from api.sse import get_world_engine
@@ -210,6 +229,7 @@ async def start_world(
             engine = await _build_world_engine(world)
             engine.world.status = "running"
             engine.current_tick = world.current_tick
+            await _restore_simulation_id(engine, world_id, db)
             sse_register(world_id, engine)
             logger.info(f"World {world_id} engine rebuilt (was running in DB, tick={world.current_tick})")
         # 已经在跑——确认即可，不报错
@@ -224,6 +244,7 @@ async def start_world(
             engine = await _build_world_engine(world)
             engine.world.status = "running"
             engine.current_tick = world.current_tick
+            await _restore_simulation_id(engine, world_id, db)
             sse_register(world_id, engine)
             logger.info(f"World {world_id} engine rebuilt after restart (was paused, tick={world.current_tick})")
         world.status = "running"
@@ -231,7 +252,7 @@ async def start_world(
         return {"status": "resumed", "world_id": world_id}
 
     engine = await _build_world_engine(world)
-    simulation = create_simulation(world_id)
+    simulation = await create_simulation(world_id)
     engine.simulation_id = simulation.id
     world.status = "running"
     await _sync_world_to_db(world)
@@ -259,7 +280,40 @@ async def pause_world(
     engine = _active_worlds.get(world_id)
     if engine:
         engine.world.status = "paused"
+        # 取消群组 LLM token 使暂停即时生效（不等 LLM 跑完）
+        token = getattr(engine, "_group_cancel_token", None)
+        if token:
+            token.cancel()
     return {"status": "paused", "world_id": world_id}
+
+
+@router.post("/{world_id}/finish", response_model=WorldControlResponse)
+async def finish_world(
+    world_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """结束模拟——停止引擎、标记 finished、结束 simulation 记录。
+    与 reset 的区别：保留 tick 和事件数据，不清零。"""
+    result = await db.execute(select(WorldRow).where(WorldRow.id == world_id))
+    row = result.scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"World {world_id!r} not found")
+
+    world = WorldResponse(**row.to_dict())
+    engine = _active_worlds.get(world_id)
+
+    if engine and engine.simulation_id:
+        await finish_simulation(engine.simulation_id, engine.current_tick)
+
+    # 同步 goal 状态
+    await _sync_agent_goals_to_db(world_id)
+
+    # 停止 SSE 引擎
+    sse_reset(world_id)
+
+    world.status = "finished"
+    await _sync_world_to_db(world)
+    return {"status": "finished", "world_id": world_id}
 
 
 @router.post("/{world_id}/inject")
@@ -320,7 +374,7 @@ async def delete_world(
     engine = _active_worlds.get(world_id)
     if engine:
         if engine.simulation_id:
-            finish_simulation(engine.simulation_id, engine.current_tick)
+            await finish_simulation(engine.simulation_id, engine.current_tick)
         sse_reset(world_id)
 
     # 从 SQLite 移除
@@ -343,8 +397,10 @@ async def reset_world_endpoint(
     world = WorldResponse(**row.to_dict())
 
     engine = _active_worlds.get(world_id)
+    if engine:
+        await _restore_simulation_id(engine, world_id, db)
     if engine and engine.simulation_id:
-        finish_simulation(engine.simulation_id, engine.current_tick)
+        await finish_simulation(engine.simulation_id, engine.current_tick)
 
     # 先同步 goal 状态（引擎还在），再注销引擎
     await _sync_agent_goals_to_db(world_id)
@@ -367,7 +423,7 @@ async def get_world_events(
     tick_to: int | None = None,
     type: str | None = None,
 ):
-    """查询指定世界的历史事件（从 SQLite events 表）。"""
+    """查询指定世界的历史事件（从 SQLite events 表）。每个事件附带 agent_name。"""
     stmt = (
         select(Event)
         .where(Event.world_id == world_id)
@@ -383,7 +439,28 @@ async def get_world_events(
         result = await session.execute(stmt)
         orm_events = result.scalars().all()
 
-    return [e.to_response() for e in orm_events]
+    # 批量查询 Agent 名称映射
+    agent_names: dict[str, str] = {}
+    unique_agent_ids = {e.source_agent_id for e in orm_events if e.source_agent_id}
+    if unique_agent_ids:
+        from models.agent_orm import AgentRow
+        async with async_session() as session:
+            for aid in unique_agent_ids:
+                result = await session.execute(select(AgentRow).where(AgentRow.id == aid))
+                row = result.scalar_one_or_none()
+                if row:
+                    try:
+                        persona = json.loads(row.persona_json)
+                        agent_names[aid] = persona.get("name", "") or row.name or aid[:8]
+                    except Exception:
+                        agent_names[aid] = row.name or aid[:8]
+
+    events = [e.to_response() for e in orm_events]
+    # 注入 agent_name 到 data 中（不破坏 SimEvent 结构）
+    for e in events:
+        if e.source_agent_id and e.source_agent_id in agent_names:
+            e.data["agent_name"] = agent_names[e.source_agent_id]
+    return events
 
 
 @router.get(

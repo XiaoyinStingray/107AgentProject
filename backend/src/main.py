@@ -19,6 +19,7 @@ from api.sse import sse_router
 from api.scenarios import router as scenarios_router
 from api.templates import router as templates_router
 from api.worlds import router as worlds_router
+from api.achievements import router as achievements_router
 
 
 @asynccontextmanager
@@ -56,6 +57,7 @@ app.include_router(arenas_router)
 app.include_router(simulations_router)
 app.include_router(sse_router)
 app.include_router(export_router)
+app.include_router(achievements_router)
 
 
 @app.get("/health")

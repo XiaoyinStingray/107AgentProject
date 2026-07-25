@@ -97,6 +97,22 @@ async def stream_world(world_id: str):
 
         engine = await _build_world_engine(world_data)
         engine.current_tick = world_data.current_tick
+        # 恢复 simulation_id——服务器重启后引擎重建，需从 DB 找回活跃的 simulation 记录
+        try:
+            from models.simulation_orm import SimulationRow
+            async with _async_session() as s:
+                sim_result = await s.execute(
+                    _select(SimulationRow)
+                    .where(SimulationRow.world_id == world_id)
+                    .where(SimulationRow.status == "running")
+                    .order_by(SimulationRow.started_at.desc())
+                    .limit(1)
+                )
+                sim_row = sim_result.scalar_one_or_none()
+                if sim_row:
+                    engine.simulation_id = sim_row.id
+        except Exception:
+            pass  # 没有找到也不阻塞 SSE 连接
         register_world(world_id, engine)
         logger.info(
             f"SSE: engine auto-rebuilt for world {world_id} "
@@ -145,7 +161,7 @@ async def _world_event_generator(
                 break
             if max_ticks and tick_count >= max_ticks:
                 engine.world.status = "finished"
-                _finish_engine_simulation(engine)
+                await _finish_engine_simulation(engine)
                 yield _sse_event({
                     "type": "session_end",
                     "world_id": world_id,
@@ -233,11 +249,11 @@ def _event_to_dict(event: SimEvent, name_map: dict | None = None) -> dict:
     return base
 
 
-def _finish_engine_simulation(engine: WorldEngine) -> None:
+async def _finish_engine_simulation(engine: WorldEngine) -> None:
     """Finish the simulation record associated with an exhausted stream."""
     if not engine.simulation_id:
         return
     from api.simulations import finish_simulation
 
-    finish_simulation(engine.simulation_id, engine.current_tick)
+    await finish_simulation(engine.simulation_id, engine.current_tick)
     engine.simulation_id = None

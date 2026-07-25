@@ -63,23 +63,10 @@
 
 ---
 
-## BUG-004：档案馆成就系统使用静态 Mock 数据，不追踪实际行为
+## BUG-004：档案馆成就系统使用静态 Mock 数据，不追踪实际行为 ✅
 
-- **状态**：待处理
-- **优先级**：P2（演示时可展示静态数据，但无实际追踪价值）
-- **发现日期**：2026-07-19
-- **环境**：前端 Archive 页面
-- **复现步骤**：
-  1. 在铸造厂创建 5 个 Agent。
-  2. 在沙盒运行 3 次模拟。
-  3. 在叙事工厂生成 2 篇叙事。
-  4. 进入 `/archive` → 成就系统 Tab。
-- **实际结果**：成就进度和统计摘要始终显示 `MOCK_ACHIEVEMENTS` / `MOCK_ACHIEVEMENT_SUMMARY` 中的固定值（Agent 数=3、模拟次数=3、总 Tick=43、叙事数=6），与用户实际操作无关。无论做了什么，成就始终不变。
-- **期望结果**：成就进度应从共享 Store 读取实时数据。各关键操作点（创建 Agent / 启动模拟 / 生成叙事 / 完成竞技）应触发 Store 更新，Archive 从中动态计算进度。
-- **关联位置**：
-  - `frontend/src/pages/Archive.tsx` — AchievementsPanel 消费 `MOCK_ACHIEVEMENTS`
-  - `frontend/src/mocks/archive.ts` — 静态 Mock 数据
-  - 缺少：共享成就追踪 Store + 各页面埋点
+- **状态**：✅ 已修复 (2026-07-25, Step 45)
+- **修复**：新建 `backend/src/api/achievements.py` — `GET /api/achievements` 从 SQLite 统计 agents/worlds/simulations/arenas 计数；前端 `useAchievements()` 连真实 API
   
   ---
   
@@ -130,70 +117,24 @@
 
 ---
 
-## BUG-007：M8 精彩回放使用静态 Mock 数据，且点击跳转到沙盒创建页而非回放
+## BUG-007：M8 精彩回放使用静态 Mock 数据，且点击跳转到沙盒创建页而非回放 ✅
 
-- **状态**：待处理
-- **优先级**：P2（展示时可看到数据，但无实际追踪价值）
-- **发现日期**：2026-07-23
-- **环境**：前端 Archive → 精彩回放 Tab
-- **复现步骤**：
-  1. 在沙盒运行一次模拟（如期末周，3 Agent × 几 tick）。
-  2. 模拟结束。
-  3. 进入 `/archive` → 精彩回放 Tab。
-- **实际结果**：
-  - 回放列表始终显示 MOCK_REPLAYS（新生报到、期末周、毕业选择），与用户实际运行的模拟无关。
-  - 点击回放卡片跳转到 `/sandbox` 并传入 `{ scenario: scenarioName }`，进入的是**沙盒创建页**（新建模拟），而非该次模拟的回放/详情页。
-- **期望结果**：
-  - 回放列表应从 `GET /api/simulations` 读取真实模拟记录。
-  - 点击应跳转到该次模拟的**历史事件回放页面**（加载已有 World 的事件流，只读模式），而非创建新模拟。
-- **影响范围**：M8 档案馆 → 精彩回放 Tab
-- **关联位置**：
-  - `frontend/src/pages/Archive.tsx` — HighlightsPanel 组件（行 90-140）
-  - `frontend/src/mocks/archive.ts` — MOCK_REPLAYS 静态数据
-  - `backend/src/api/simulations.py` — 已有 `GET /api/simulations` 端点可用
-  - 缺少：历史 World 回放模式（加载已有事件流）
-- **修复方向**：Step 45（档案馆功能 #51）
+- **状态**：✅ 已修复 (2026-07-25, Step 45)
+- **修复**：`useSimulations()` 连真实 API + SQLite 持久化 simulations 表；点击展开卡片在线展示事件（不跳转沙盒）；运行中的模拟每 10s 自动轮询增量事件 + 🔄 手动刷新按钮
 
 ---
 
-## BUG-008：M8 实验模板使用 Mock 数据，点击行为与回放相同
+## BUG-008：M8 实验模板使用 Mock 数据，点击行为与回放相同 ✅
 
-- **状态**：待处理
-- **优先级**：P2
-- **发现日期**：2026-07-23
-- **环境**：前端 Archive → 实验模板 Tab
-- **复现步骤**：
-  1. 进入 `/archive` → 实验模板 Tab。
-  2. 点击"使用模板"。
-- **实际结果**：
-  - 模板列表始终显示 MOCK_TEMPLATES（3 个硬编码模板），无法反映用户保存的场景配置。
-  - 点击跳转到 `/sandbox` 并传入模板名称——进入沙盒创建页，但不会自动填入模板的场景参数。
-- **期望结果**：
-  - 模板列表应从后端 `GET /api/worlds?type=template` 或 `GET /api/scenarios` 获取用户可复用的场景。
-  - 点击应在沙盒创建页预填所选场景配置。
-- **关联位置**：
-  - `frontend/src/pages/Archive.tsx` — TemplatesPanel 组件（行 145-184）
-  - `frontend/src/mocks/archive.ts` — MOCK_TEMPLATES 静态数据
-  - `backend/src/api/scenarios.py` — 已有场景 CRUD 端点
-- **修复方向**：Step 45（档案馆功能 #52）
+- **状态**：✅ 已修复 (2026-07-25, Step 45)
+- **修复**：`useScenarios()` 连真实场景 API；双按钮显式选择 🎭 单人（→ `/theater`）和 👥 多人（→ `/sandbox`）；SoloTheater 支持从导航 state 预选场景；多人沙盒预选 Agent 数量
 
 ---
 
-## BUG-009：M8 研究报告导出使用裸 fetch，未复用 useExportReport hook
+## BUG-009：M8 研究报告导出使用裸 fetch，未复用 useExportReport hook ✅
 
-- **状态**：待处理  
-- **优先级**：P3（功能可用，但代码不规范——Step 36 创建的 hook 未被使用）
-- **发现日期**：2026-07-23
-- **环境**：前端 Archive → 研究报告导出 Tab
-- **复现步骤**：
-  1. Step 36 新建了 `api/export.ts`（`useExportReport()` hook）。
-  2. 进入 `/archive` → 导出 Tab。
-- **实际结果**：ExportPanel 仍使用裸 `fetch(/api/export/report/${worldId}${ext})` 和内联 blob 下载逻辑，未复用 `useExportReport()`。
-- **期望结果**：导出面板应使用 `useExportReport` mutation hook，保持一致性。
-- **关联位置**：
-  - `frontend/src/pages/Archive.tsx` — ExportPanel 组件 handleApiExport（行 265-290）
-  - `frontend/src/api/export.ts` — useExportReport hook
-- **修复方向**：Step 45 中顺手改
+- **状态**：✅ 已修复 (2026-07-25, Step 45)
+- **修复**：`useExportReport()` 重写为匹配真实 GET API（返回 blob），ExportPanel 改用 `exportReport.mutateAsync()`
 
 ---
 
@@ -274,25 +215,10 @@
 
 ---
 
-## BUG-015：M8 研究报告导出 MD 报错、JSON 为空
+## BUG-015：M8 研究报告导出 MD 报错、JSON 为空 ✅
 
-- **状态**：待处理
-- **优先级**：P2（功能可用但数据源错误——只读内存不读 DB）
-- **发现日期**：2026-07-24
-- **环境**：Archive → 研究报告导出
-- **复现步骤**：
-  1. 创建一个 World，模拟几 tick，暂停
-  2. 进入 `/archive` → 研究报告导出 Tab
-  3. 点「导出 Markdown」
-  4. 点「导出 JSON」
-- **实际结果**：
-  - MD：`404 No events found. Start a simulation first.`
-  - JSON：200 OK 但下载文件内容为空（`"total_events": 0`）
-- **根因**：`backend/src/api/export.py:163-168` `_collect_events()` 只从 `_active_worlds` 内存取事件，不查 SQLite。服务器重启、World 结束/重置后 engine 不在内存 → 返回空列表
-- **对比**：`GET /api/worlds/{id}/events` 查询 SQLite `events` 表——正常工作
-- **修复方向**：`_collect_events()` 应增加 DB fallback，与 events API 一致的查询逻辑
-- **关联位置**：
-  - `backend/src/api/export.py` — `_collect_events()` (line 163-168) + `export_report_markdown()` (line 206-209) 空检查 + `export_report_json()` (line 245) 缺空检查
+- **状态**：✅ 已修复 (2026-07-25, Step 45)
+- **修复**：`_collect_events()` 改为 async，优先读内存引擎 → SQLite events 表 fallback；两个调用处已加 `await`
 
 ---
 
@@ -321,3 +247,51 @@
 - **期望结果**：选中 Agent 后，主界面叙事风格选择区和生成按钮应关联到该 Agent
 - **关联位置**：
   - `frontend/src/pages/NarrativeFactory.tsx` — Agent 选择 → 叙事生成的状态绑定
+
+---
+
+## 2026-07-25: Step 45 新增 / 修复
+
+### BUG-018：群体沙盒暂停延迟（前后端不对齐）
+
+- **状态**：✅ 已修复 (2026-07-25)
+- **优先级**：P1（前端显示暂停但后端仍在跑 LLM，最长 40s+ 才生效）
+- **发现日期**：2026-07-25
+- **环境**：GroupSandbox
+- **复现步骤**：
+  1. 群体沙盒投放 2+ Agent，开始模拟
+  2. LLM 正在生成时点「暂停」
+  3. 观察后端日志
+- **实际结果**：前端立即显示"已暂停"，但后端继续生成消息——暂停 POST 返回 200 后，LLM 仍在跑（日志出现 think_aloud / send_message），直到当前 tick 所有 Agent 发言完毕才真正停止
+- **根因**：`_stream_group_tick` 的 AutoGen `GroupChat.run_stream()` 无外部可取消的 CancellationToken——消息间的 `world.status` 检查无法中断正在生成的 LLM 调用
+- **修复**：
+  1. `_stream_group_tick` 中创建 `CancellationToken` 并存在 `engine._group_cancel_token`
+  2. 暂停端点 (`pause_world`) 中主动 `token.cancel()` → GroupChat 收到 CancelledError → 中断当前 LLM 调用
+  3. streaming.py 增加 `CancelledError` 捕获 + `aclose()` 清理
+  4. 单人模式在 Step 45 早期已通过 polling 修复
+- **关联位置**：
+  - `backend/src/engines/world/streaming.py` — `_stream_group_tick`
+  - `backend/src/api/worlds.py` — `pause_world`
+
+### BUG-019：侧边栏导航跳转问题（预存）
+
+- **状态**：📝 已记录，待处理
+- **优先级**：P2
+- **发现日期**：2026-07-25
+- **环境**：前端侧边栏
+- **描述**：侧边栏部分菜单项点击后跳转行为异常（具体表现待补充）
+- **不在 Step 45 范围内**
+
+### BUG-020：REST 事件字段与 SSE 事件字段不一致（已修复）
+
+- **状态**：✅ 已修复 (2026-07-25)
+- **优先级**：P0（导致暂停恢复后历史对话不显示 / 显示 ID）
+- **根因**：`useSSE.replayMissedEvents` 从 REST API 取事件时，`SimEvent` 字段名 (`source_agent_id`, `description`) 与前端消费的 `SSEEvent` 字段名 (`agent_id`, `content`, `message`, `subtext`, `action`, `target`) 不一致，缺少完整的字段平铺
+- **修复**：
+  1. 后端 `get_world_events` 注入 `agent_name` 到 `data` 中
+  2. `useSSE.ts` 映射完全对齐 `sse.py:_event_to_dict`（含 `message`/`subtext`/`tone`/`action`/`target`）
+  3. `Archive.tsx` 回放事件映射同上
+- **关联位置**：
+  - `frontend/src/hooks/useSSE.ts` — `replayMissedEvents`
+  - `frontend/src/pages/Archive.tsx` — `handleToggleReplay`
+  - `backend/src/api/worlds.py` — `get_world_events`

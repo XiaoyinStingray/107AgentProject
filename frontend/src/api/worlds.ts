@@ -137,3 +137,16 @@ export function useInjectEvent() {
     },
   });
 }
+
+/** 结束 World 模拟——标记 finished，保留 tick/事件数据供回放 */
+export function useFinishWorld() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (worldId: string) =>
+      client.post<{ status: string; world_id: string }>(`/worlds/${worldId}/finish`),
+    onSuccess: (_, worldId) => {
+      qc.invalidateQueries({ queryKey: worldKeys.detail(worldId) });
+      qc.invalidateQueries({ queryKey: worldKeys.all });
+    },
+  });
+}

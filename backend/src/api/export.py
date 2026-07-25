@@ -160,12 +160,28 @@ def _ascii_slug(text: str, max_len: int = 20) -> str:
 # =============================================================================
 
 
-def _collect_events(world_id: str) -> list[SimEvent]:
-    """从活跃 WorldEngine 或内存中收集事件。"""
+async def _collect_events(world_id: str) -> list[SimEvent]:
+    """从活跃 WorldEngine 内存或 SQLite events 表收集事件。
+
+    优先内存（运行中的 World），引擎不在时回退 SQLite（已结束/重置的 World）。
+    """
     engine = _active_worlds.get(world_id)
     if engine:
-        return list(engine.events)
-    return []
+        events = list(engine.events)
+        if events:
+            return events
+
+    # Fallback: 从 SQLite events 表查询
+    from db import async_session
+    from models.event import Event
+    async with async_session() as session:
+        result = await session.execute(
+            select(Event)
+            .where(Event.world_id == world_id)
+            .order_by(Event.tick, Event.created_at)
+        )
+        orm_events = result.scalars().all()
+    return [e.to_response() for e in orm_events]
 
 
 async def _collect_agent_names(world_id: str, db: AsyncSession) -> dict[str, str]:
@@ -202,7 +218,7 @@ async def export_report_markdown(
 
     world_data = row.to_dict()
 
-    events = _collect_events(world_id)
+    events = await _collect_events(world_id)
     if not events:
         raise HTTPException(
             status_code=404,
@@ -242,7 +258,7 @@ async def export_report_json(
 
     world_data = row.to_dict()
 
-    events = _collect_events(world_id)
+    events = await _collect_events(world_id)
     agent_names = await _collect_agent_names(world_id, db)
 
     report_data = {

@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useLocation } from "react-router-dom";
 import { useAgents } from "../api/agents";
 import type { GoalStatus } from "../types/agent";
 import {
@@ -8,6 +9,7 @@ import {
   useResetWorld,
   useDeleteWorld,
   useWorlds,
+  useFinishWorld,
 } from "../api/worlds";
 import { useScenarios } from "../api/scenarios";
 import ScenarioEditor from "../components/world/ScenarioEditor";
@@ -28,6 +30,8 @@ import StatusDot from "../components/shared/StatusDot";
    ================================================================ */
 
 export default function SoloTheater() {
+  const location = useLocation();
+  const initialScenario = (location.state as { scenario?: string } | null)?.scenario;
   // Agent 列表：从后端拉取（铸造厂创建的真 Agent）
   const { data: agents = [], isLoading: agentsLoading } = useAgents();
   const { data: scenarios = [] } = useScenarios();
@@ -35,7 +39,7 @@ export default function SoloTheater() {
   const [selectedAgentId, setSelectedAgentId] = useState<string>(
     agents[0]?.id ?? "",
   );
-  const [selectedScenario, setSelectedScenario] = useState("期末周");
+  const [selectedScenario, setSelectedScenario] = useState(initialScenario ?? "期末周");
   const [showEditor, setShowEditor] = useState(false);
   const [worldId, setWorldId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -47,6 +51,7 @@ export default function SoloTheater() {
   const pauseWorld = usePauseWorld();
   const resetWorld = useResetWorld();
   const deleteWorld = useDeleteWorld();
+  const finishWorld = useFinishWorld();
   const { data: allWorlds = [] } = useWorlds();
   // BUG-014: SoloTheater 只展示 solo 类型的 World
   const worlds = useMemo(() => allWorlds.filter((w) => w.world_type !== "group"), [allWorlds]);
@@ -190,7 +195,7 @@ export default function SoloTheater() {
     setWorldId(null);
   };
 
-  /** 重置：调后端 reset → 断开 SSE → 清空前端状态 */
+  /** 重置：调后端 reset → 断开 SSE → 清空前端状态（数据不保留） */
   const handleReset = async () => {
     if (worldId) {
       try {
@@ -201,6 +206,21 @@ export default function SoloTheater() {
     }
     disconnect();
     clear();
+    setWorldId(null);
+    setIsRunning(false);
+    setIsPaused(false);
+  };
+
+  /** 结束：调后端 finish → 标记 finished，保留 tick/事件供回放 */
+  const handleFinish = async () => {
+    if (worldId) {
+      try {
+        await finishWorld.mutateAsync(worldId);
+      } catch (err) {
+        console.error("结束失败:", err);
+      }
+    }
+    disconnect();
     setWorldId(null);
     setIsRunning(false);
     setIsPaused(false);
@@ -462,6 +482,19 @@ export default function SoloTheater() {
             "
           >
             ↺ 重置
+          </button>
+          <button
+            onClick={handleFinish}
+            disabled={finishWorld.isPending}
+            className="
+              px-3 py-1 text-sm font-mono rounded
+              bg-accent-red/10 border border-accent-red/30
+              text-accent-red hover:bg-accent-red/20
+              transition-colors
+              disabled:opacity-50
+            "
+          >
+            ⏹ 结束
           </button>
         </div>
       </div>

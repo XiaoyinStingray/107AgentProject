@@ -14,6 +14,10 @@ export interface SimulationResponse {
   ended_at: string | null;
   total_ticks: number;
   status: string;
+  /** Step 45: 档案馆精彩回放上下文 */
+  world_name: string;
+  agent_count: number;
+  event_count: number;
 }
 
 /** 列出所有模拟记录 */

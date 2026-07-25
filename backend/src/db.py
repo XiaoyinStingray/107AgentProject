@@ -79,6 +79,7 @@ async def init_db():
     import models.world_orm  # noqa: F401 — 注册 World ORM → worlds 表
     import models.scenario_orm  # noqa: F401 — 注册 Scenario ORM → custom_scenarios 表
     import models.arena_orm  # noqa: F401 — 注册 Arena ORM → arenas 表
+    import models.simulation_orm  # noqa: F401 — 注册 Simulation ORM → simulations 表
 
     async with _get_engine().begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

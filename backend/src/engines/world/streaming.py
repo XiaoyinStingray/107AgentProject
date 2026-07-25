@@ -36,7 +36,11 @@ class WorldStreamingMixin:
     _make_message_event: Any
 
     async def _stream_solo_tick(self, agent) -> AsyncGenerator[SimEvent, None]:
-        """Stream one solo response as thought, action, and message events."""
+        """Stream one solo response as thought, action, and message events.
+
+        使用 polling 模式等待 LLM 响应——每 0.5s 检查一次 world.status，
+        用户暂停时即时取消当前 LLM 调用，不再等整个响应完成。
+        """
         from autogen_agentchat.messages import TextMessage
         from autogen_core import CancellationToken
 
@@ -47,13 +51,24 @@ class WorldStreamingMixin:
             "不要提\"我需要以XX的身份\"。你就是你。"
         )
         try:
-            response = await asyncio.wait_for(
+            task = asyncio.ensure_future(
                 agent.autogen_agent.on_messages(
                     [TextMessage(content=prompt, source="world")],
                     cancellation_token=CancellationToken(),
-                ),
-                timeout=settings.agent_timeout_seconds,
+                )
             )
+            # Poll every 0.5s — allow instant pause even during LLM generation
+            while not task.done():
+                if self.world.status == "paused":
+                    task.cancel()
+                    try:
+                        await task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                    logger.info(f"Solo tick cancelled (paused) for agent {agent.id}")
+                    return
+                await asyncio.wait([task], timeout=0.5)
+            response = task.result()
             for event in self._extract_events_from_response(response, agent.id):
                 yield event
                 if self.world.status == "paused":
@@ -61,6 +76,8 @@ class WorldStreamingMixin:
         except asyncio.TimeoutError:
             logger.warning(f"Solo tick timed out for agent {agent.id}")
             yield self._make_error_event(agent.id, "LLM 调用超时，Agent 跳过本轮")
+        except asyncio.CancelledError:
+            logger.info(f"Solo tick cancelled for agent {agent.id}")
         except Exception as error:
             logger.error(f"stream solo error: {error}")
             yield self._make_error_event(agent.id, str(error))
@@ -68,31 +85,35 @@ class WorldStreamingMixin:
     async def _stream_group_tick(self) -> AsyncGenerator[SimEvent, None]:
         """Stream one target-aware multi-Agent SelectorGroupChat tick.
 
-        Checks ``world.status`` between every message so that a
-        user-triggered pause takes effect without waiting for the
-        entire GroupChat to finish.  The outer ``tick_stream()``
-        still post-processes, persists and emits a ``tick_boundary``
-        for the partial tick.
+        Stores a CancellationToken on the engine so that the SSE pause
+        endpoint can cancel mid-generation LLM calls (keyed to world.status).
+        Outer tick_stream still post-processes, persists and emits
+        a tick_boundary for the partial tick.
         """
         from autogen_core import CancellationToken
 
         stream = None
+        self._group_cancel_token = CancellationToken()
         try:
             team = self.build_group_chat()
             stream = team.run_stream(
                 task=self._build_group_task(),
-                cancellation_token=CancellationToken(),
+                cancellation_token=self._group_cancel_token,
             )
             async for message in stream:
                 if self.world.status == "paused":
+                    self._group_cancel_token.cancel()
                     break
                 event = self._stream_message_to_event(message)
                 if event:
                     yield event
+        except asyncio.CancelledError:
+            logger.info("Group tick cancelled (paused)")
         except Exception as error:
             logger.error(f"stream group error: {error}")
             yield self._make_error_event("world", str(error))
         finally:
+            self._group_cancel_token = None
             if stream is not None:
                 try:
                     await stream.aclose()

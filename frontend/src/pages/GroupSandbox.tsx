@@ -30,7 +30,8 @@ import Card from "../components/shared/Card";
 /** Drive a real multi-Agent World through REST control and SSE events. */
 export default function GroupSandbox() {
   const location = useLocation();
-  const initialScenario = (location.state as { scenario?: string } | null)?.scenario;
+  const initialScenario = (location.state as { scenario?: string; agentCount?: number } | null)?.scenario;
+  const initialAgentCount = (location.state as { scenario?: string; agentCount?: number } | null)?.agentCount;
   const { data: agents = [], isLoading: agentsLoading, error: agentsError } = useAgents();
   const initializedAgents = useRef(false);
   const [phase, setPhase] = useState<"setup" | "running">("setup");
@@ -76,9 +77,10 @@ export default function GroupSandbox() {
 
   useEffect(() => {
     if (initializedAgents.current || agents.length === 0) return;
-    setSelectedAgentIds(agents.slice(0, 3).map((agent) => agent.id));
+    const count = initialAgentCount ?? 3;
+    setSelectedAgentIds(agents.slice(0, count).map((agent) => agent.id));
     initializedAgents.current = true;
-  }, [agents]);
+  }, [agents, initialAgentCount]);
 
   useEffect(() => {
     if (relationshipQuery.data) hydrateRelationships(relationshipQuery.data);
@@ -119,13 +121,14 @@ export default function GroupSandbox() {
   const visibleEvents = useMemo(() => {
     // 暂停或恢复中 → 直接展示全部事件，绕过节流器
     const source = (restoring || isPaused) ? events : displayedEvents;
-    return source.filter((event) => {
+    const result = source.filter((event) => {
       if (INFRASTRUCTURE_EVENT_TYPES.has(event.type)) return false;
       // 恢复模式：不过滤 Agent（selectedAgentIds 可能尚未同步到 World 的 agents）
       if (restoring) return true;
       // 正常运行 / 暂停：只显示选中 Agent 的事件
       return !event.agent_id || selectedAgentIds.includes(event.agent_id);
     });
+    return result;
   }, [restoring, isPaused, events, displayedEvents, selectedAgentIds]);
 
   const relationshipValues = useMemo(
