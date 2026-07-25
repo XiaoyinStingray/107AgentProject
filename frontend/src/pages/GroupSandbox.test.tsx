@@ -85,18 +85,28 @@ describe("Step 33 GroupSandbox", () => {
       agent_ids: MOCK_AGENTS.map((agent) => agent.id),
     }));
     expect(start).toHaveBeenCalledWith("world-33");
-    expect(await screen.findByText("RUNNING")).toBeInTheDocument();
+    expect(await screen.findByText(/运行中/)).toBeInTheDocument();
     expect(clear).toHaveBeenCalled();
   });
 
   it("pauses, resumes, and resets the active World", async () => {
+    vi.mocked(useSSE).mockReturnValue({
+      events: [{ type: "paused", tick: 0, status: "paused" }],
+      connected: true,
+      relationships: {},
+      lastRelationshipKey: null,
+      hydrateRelationships,
+      connect: vi.fn(),
+      disconnect,
+      clear,
+    });
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: /3 Agents/ }));
-    await screen.findByText("RUNNING");
+    await screen.findByText(/运行中/);
 
     fireEvent.click(screen.getByRole("button", { name: /暂停/ }));
     await waitFor(() => expect(pause).toHaveBeenCalledWith("world-33"));
-    fireEvent.click(screen.getByRole("button", { name: /继续/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /继续/ }));
     await waitFor(() => expect(start).toHaveBeenCalledTimes(2));
 
     fireEvent.click(screen.getByRole("button", { name: /结束/ }));

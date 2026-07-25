@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from db import Base
 from models.event import Event  # noqa: F401
 from models.memory import Memory  # noqa: F401
+from models.world_orm import WorldRow  # noqa: F401
 
 
 # =============================================================================
@@ -120,11 +121,19 @@ class TestSSEFormatting:
 
 class TestSSEEndpoint:
     @pytest.fixture
-    def app_with_sse(self, db_session):
+    def app_with_sse(self, db_session, engine, monkeypatch):
         """创建包含 SSE 路由的测试应用。"""
+        import db as db_module
         from api.sse import sse_router, register_world
         from engines.world.engine import WorldEngine
         from models.world import Scenario, WorldResponse
+
+        test_session_factory = async_sessionmaker(
+            engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+        monkeypatch.setattr(db_module, "async_session", test_session_factory)
 
         app = FastAPI()
         app.include_router(sse_router)
@@ -134,8 +143,8 @@ class TestSSEEndpoint:
             id="w-sse", name="SSE测试", scenario=Scenario(name="测试场景"),
             agent_ids=[], created_at="2026-01-01",
         )
-        engine = WorldEngine(world, [], db_session)
-        register_world("w-sse", engine)
+        world_engine = WorldEngine(world, [], db_session)
+        register_world("w-sse", world_engine)
 
         return app
 
