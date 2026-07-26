@@ -4,9 +4,10 @@
 > **怎么用：** 每步结束后按 [STEP.md](../STEP.md) 的模板写入。AI 读上一步的 done 来理解当前状态。
 > **规则：** append-only。写完的 done 文件不修改（如需补充，在该文件末尾加"补充记录"）。
 >
-> **两阶段计划：**
+> **三阶段计划：**
 > - [State 1](../development-plan.md) — Step 00–28（骨架搭建，已完成）
-> - [State 2](../plan-state2.md) — Step 29–50（联调 + 功能补全 + 交付）
+> - [State 2](../plan-state2.md) — Step 29–50（联调 + 功能补全 + 交付，Phase 12 完成）
+> - [State 3](../plan-state3.md) — Step 51–75（三大新模块 + 打磨交付）
 
 ---
 
