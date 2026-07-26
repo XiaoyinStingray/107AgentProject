@@ -42,6 +42,7 @@ export default function GroupSandbox() {
   const [worldId, setWorldId] = useState<string | null>(null);
   const [isPaused, setIsPaused] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [replayEvent, setReplayEvent] = useState<SSEEvent | null>(null);
   const [startGen, setStartGen] = useState(0); // 递增以重置节流器（仅新启动时）
   const { activeWorldId, setActiveWorld } = useSandboxStore();
   const queryClient = useQueryClient();
@@ -297,6 +298,7 @@ export default function GroupSandbox() {
         lastRelationshipKey={lastRelationshipKey}
         selectedTick={selectedTick}
         onSelectTick={setSelectedTick}
+        onEventClick={setReplayEvent}
       />
       <SandboxFooter
         selectedTick={selectedTick}
@@ -304,6 +306,36 @@ export default function GroupSandbox() {
         agentCount={selectedAgents.length}
         onClearTick={() => setSelectedTick(null)}
       />
+      {/* 决策回放详情面板 */}
+      {replayEvent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setReplayEvent(null)}>
+          <div className="bg-bg-card border border-border rounded-lg max-w-lg w-full mx-4 p-5 space-y-3 max-h-[70vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-mono text-sm text-text-primary">🔍 决策回放</h3>
+              <button onClick={() => setReplayEvent(null)} className="text-text-secondary hover:text-text-primary text-lg">✕</button>
+            </div>
+            <div className="text-xs font-mono text-text-secondary space-y-1">
+              <p>Agent: {replayEvent.agent_name ?? replayEvent.agent_id ?? "Unknown"}</p>
+              <p>类型: {replayEvent.type} · Tick #{replayEvent.tick}</p>
+              {replayEvent.action && <p>行动: {replayEvent.action}{replayEvent.target ? ` → ${replayEvent.target}` : ""}</p>}
+            </div>
+            <div className="border-t border-border pt-3">
+              <p className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap">
+                {replayEvent.content ?? replayEvent.message ?? replayEvent.description ?? "（无内容）"}
+              </p>
+            </div>
+            {replayEvent.data && Object.keys(replayEvent.data).length > 0 && (
+              <details className="border border-border rounded">
+                <summary className="text-xs font-mono text-text-secondary px-2 py-1 cursor-pointer hover:text-text-primary">原始数据</summary>
+                <pre className="text-xs font-mono text-text-secondary p-2 overflow-x-auto">{JSON.stringify(replayEvent.data, null, 2)}</pre>
+              </details>
+            )}
+            {replayEvent.subtext && (
+              <p className="text-xs text-text-secondary italic">{replayEvent.subtext}</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -315,6 +347,7 @@ interface SandboxRuntimeProps {
   lastRelationshipKey: string | null;
   selectedTick: number | null;
   onSelectTick: (tick: number | null) => void;
+  onEventClick?: (event: SSEEvent) => void;
 }
 
 function SandboxRuntime(props: SandboxRuntimeProps) {
@@ -335,7 +368,7 @@ function SandboxRuntime(props: SandboxRuntimeProps) {
       <aside className="col-span-3 min-h-0 min-w-0 overflow-hidden">
         <Card className="h-full min-h-0 flex flex-col overflow-hidden">
           <div className="px-4 py-3 border-b border-border"><h2 className="font-mono text-sm text-text-primary">THOUGHT STREAM</h2></div>
-          <ThoughtStream events={props.events} className="flex-1 min-h-0" />
+          <ThoughtStream events={props.events} className="flex-1 min-h-0" onEventClick={props.onEventClick} />
         </Card>
       </aside>
     </div>

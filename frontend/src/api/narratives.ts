@@ -82,3 +82,19 @@ export function useGenerateParallel() {
     },
   });
 }
+
+/** 群体动力学报告响应 */
+export interface ReportResponse {
+  title: string;
+  content: string;
+  world_id: string;
+  generated_at: string;
+}
+
+/** 生成群体动力学报告 */
+export function useGenerateReport() {
+  return useMutation({
+    mutationFn: (req: { world_id: string }) =>
+      client.post<ReportResponse>("/narratives/report", req),
+  });
+}

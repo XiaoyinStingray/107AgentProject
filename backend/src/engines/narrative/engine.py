@@ -19,6 +19,7 @@ from engines.narrative.templates import (
     LETTER_PROMPT,
     PARALLEL_PROMPT,
     PODCAST_PROMPT,
+    REPORT_PROMPT,
     STORY_PROMPT,
 )
 
@@ -34,6 +35,7 @@ class NarrativeStyle(StrEnum):
     LETTER = "letter"
     PODCAST = "podcast"
     PARALLEL = "parallel"
+    REPORT = "report"
 
 
 class NarrativeRequest:
@@ -83,6 +85,7 @@ _TEMPLATES: dict[NarrativeStyle, str] = {
     NarrativeStyle.LETTER: LETTER_PROMPT,
     NarrativeStyle.PODCAST: PODCAST_PROMPT,
     NarrativeStyle.PARALLEL: PARALLEL_PROMPT,
+    NarrativeStyle.REPORT: REPORT_PROMPT,
 }
 
 

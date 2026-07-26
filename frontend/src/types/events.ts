@@ -8,6 +8,7 @@ export type SSEEventType =
   | "world_event"
   | "relationship_change"
   | "goal_update"
+  | "conflict_detected"
   | "tick_boundary"
   | "connected"
   | "paused"

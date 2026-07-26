@@ -12,6 +12,7 @@ export type ControlTab =
   | "heatmap"
   | "search"
   | "patterns"
+  | "dynamics"
   | "anomaly"
   | "tracking"
   | "strategy";

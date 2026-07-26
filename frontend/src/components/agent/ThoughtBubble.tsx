@@ -4,6 +4,8 @@ interface ThoughtBubbleProps {
   event: SSEEvent;
   /** 同一 Agent 连续消息时不重复显示头像区域 */
   compact?: boolean;
+  /** 点击回调——用于决策回放展开 */
+  onClick?: (event: SSEEvent) => void;
 }
 
 /* ================================================================
@@ -17,7 +19,7 @@ interface ThoughtBubbleProps {
    - tick_boundary → 全宽分隔线
    ================================================================ */
 
-export default function ThoughtBubble({ event, compact = false }: ThoughtBubbleProps) {
+export default function ThoughtBubble({ event, compact = false, onClick }: ThoughtBubbleProps) {
   // 基础设施事件：不渲染
   if (event.type === "connected" || event.type === "paused" || event.type === "error") {
     return null;
@@ -96,10 +98,12 @@ export default function ThoughtBubble({ event, compact = false }: ThoughtBubbleP
 
       {/* 消息体 */}
       <div
+        onClick={() => onClick?.(event)}
         className={`
           rounded-lg px-3 py-2 max-w-lg
           border text-sm leading-relaxed
           ${config.bg} font-mono text-text-primary
+          ${onClick ? "cursor-pointer hover:brightness-110 transition-all" : ""}
         `.trim()}
       >
         {/* 行动类消息展示 action + target */}

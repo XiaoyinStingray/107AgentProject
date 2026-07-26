@@ -57,9 +57,11 @@ function groupEventsByTick(events: TimelineProps["events"]): TimelineTick[] {
       tick: event.tick,
       eventCount: 0,
       hasRelationshipChange: false,
+      hasConflict: false,
     };
     current.eventCount += 1;
     current.hasRelationshipChange ||= event.type === "relationship_change";
+    current.hasConflict ||= event.type === "conflict_detected";
     grouped.set(event.tick, current);
   });
 
@@ -77,7 +79,9 @@ function TimelineNode({
   isLast: boolean;
   onSelect: () => void;
 }) {
-  const variant = tick.hasRelationshipChange
+  const variant = tick.hasConflict
+    ? "conflict"
+    : tick.hasRelationshipChange
     ? "relationship_change"
     : "tick_boundary";
   const colors = TIMELINE_COLORS[variant];
@@ -112,12 +116,16 @@ function TimelineNode({
 }
 
 const TIMELINE_COLORS: Record<
-  Extract<SSEEventType, "relationship_change" | "tick_boundary">,
+  Extract<SSEEventType, "relationship_change" | "tick_boundary"> | "conflict",
   { dot: string; line: string }
 > = {
   relationship_change: {
     dot: "border-accent-purple bg-accent-purple/30",
     line: "bg-accent-purple/40",
+  },
+  conflict: {
+    dot: "border-accent-red bg-accent-red/30",
+    line: "bg-accent-red/40",
   },
   tick_boundary: {
     dot: "border-accent-blue bg-accent-blue/30",

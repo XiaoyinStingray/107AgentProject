@@ -507,6 +507,7 @@ async def get_world_events(
     tick_from: int = 0,
     tick_to: int | None = None,
     type: str | None = None,
+    agent_id: str | None = None,
 ):
     """查询指定世界的历史事件（从 SQLite events 表）。每个事件附带 agent_name。"""
     stmt = (
@@ -519,6 +520,8 @@ async def get_world_events(
         stmt = stmt.where(Event.tick <= tick_to)
     if type is not None:
         stmt = stmt.where(Event.type == type)
+    if agent_id is not None:
+        stmt = stmt.where(Event.source_agent_id == agent_id)
 
     async with async_session() as session:
         result = await session.execute(stmt)

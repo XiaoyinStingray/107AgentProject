@@ -100,17 +100,18 @@ const EVENTS: SSEEvent[] = MOCK_SANDBOX_EVENTS;
 /* ---------- Layer 1: 组件渲染 + 交互 ---------- */
 
 describe("Step 24 ControlPanel — Tab 栏与切换", () => {
-  it("renders title and all 7 tabs (4 available + 3 P3)", () => {
+  it("renders title and all 8 tabs (5 available + 3 P3)", () => {
     renderControlPanel();
 
     // 标题
     expect(screen.getByText("M6 控制台")).toBeInTheDocument();
 
-    // 4 个可用 Tab
+    // 5 个可用 Tab
     expect(screen.getByRole("button", { name: /多 Agent 仪表盘/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /事件热力图/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Agent 搜索/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /决策模式识别/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /群体动力学/ })).toBeInTheDocument();
 
     // 3 个 P3 占位 Tab
     expect(screen.getByRole("button", { name: /异常检测/ })).toBeInTheDocument();
@@ -344,16 +345,17 @@ describe("Step 24 — DecisionPatterns 组件", () => {
 /* ---------- Layer 2: Mock 工具函数 ---------- */
 
 describe("Step 24 — control mocks utilities", () => {
-  it("CONTROL_TABS has 4 available + 3 placeholders", () => {
+  it("CONTROL_TABS has 5 available + 3 placeholders", () => {
     const available = CONTROL_TABS.filter((t) => t.available);
     const placeholders = CONTROL_TABS.filter((t) => !t.available);
-    expect(available).toHaveLength(4);
+    expect(available).toHaveLength(5);
     expect(placeholders).toHaveLength(3);
     expect(available.map((t) => t.key)).toEqual([
       "dashboard",
       "heatmap",
       "search",
       "patterns",
+      "dynamics",
     ]);
     expect(placeholders.map((t) => t.key)).toEqual([
       "anomaly",

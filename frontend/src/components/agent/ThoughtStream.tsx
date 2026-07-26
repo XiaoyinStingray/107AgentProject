@@ -6,6 +6,8 @@ interface ThoughtStreamProps {
   events: SSEEvent[];
   /** 是否自动滚底——用户手动上滚时暂停 */
   autoScroll?: boolean;
+  /** 点击事件气泡时触发——用于决策回放展开 */
+  onEventClick?: (event: SSEEvent) => void;
   className?: string;
 }
 
@@ -18,6 +20,7 @@ interface ThoughtStreamProps {
 export default function ThoughtStream({
   events,
   autoScroll = true,
+  onEventClick,
   className = "",
 }: ThoughtStreamProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -55,7 +58,7 @@ export default function ThoughtStream({
         prev.type !== "tick_boundary" &&
         prev.type !== "world_event";
 
-      return <ThoughtBubble key={idx} event={event} compact={compact} />;
+      return <ThoughtBubble key={idx} event={event} compact={compact} onClick={onEventClick} />;
     });
   };
 

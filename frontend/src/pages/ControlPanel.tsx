@@ -10,6 +10,7 @@ import AgentDashboard from "../components/control/AgentDashboard";
 import EventHeatmap from "../components/control/EventHeatmap";
 import AgentSearch from "../components/control/AgentSearch";
 import DecisionPatterns from "../components/control/DecisionPatterns";
+import GroupDynamics from "../components/control/GroupDynamics";
 
 /* ================================================================
    Step 24 → 36 → 43 — M6 控制台
@@ -107,6 +108,7 @@ export default function ControlPanel() {
         )}
         {activeTab === "search" && <AgentSearch agents={agents} />}
         {activeTab === "patterns" && <DecisionPatterns agents={agents} />}
+        {activeTab === "dynamics" && <GroupDynamics />}
         {(activeTab === "anomaly" ||
           activeTab === "tracking" ||
           activeTab === "strategy") && (

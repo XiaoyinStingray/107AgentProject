@@ -7,10 +7,12 @@
     POST /api/narratives/letter   生成未来的信
     POST /api/narratives/podcast  生成播客脚本
     POST /api/narratives/parallel 生成平行对话
+    POST /api/narratives/report   生成群体动力学报告
 """
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+import json
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,6 +43,19 @@ class NarrativeGenResponse(BaseModel):
     content: str
     style: str
     agent_id: str
+    generated_at: str
+
+
+class ReportRequest(BaseModel):
+    """群体动力学报告请求——只需 world_id。"""
+    world_id: str
+
+
+class ReportResponse(BaseModel):
+    """群体动力学报告结果。"""
+    title: str
+    content: str
+    world_id: str
     generated_at: str
 
 
@@ -190,3 +205,67 @@ async def generate_parallel(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"叙事生成失败: {str(e)}")
+
+
+@router.post("/report", response_model=ReportResponse)
+async def generate_report(
+    req: ReportRequest,
+    db: AsyncSession = Depends(get_db),
+    engine: NarrativeEngine = Depends(get_narrative_engine),
+):
+    """生成群体动力学报告——LLM 分析事件列表，输出群体分析。"""
+    # 1. 取 World 事件
+    async with async_session() as session:
+        stmt = (
+            select(Event)
+            .where(Event.world_id == req.world_id)
+            .order_by(Event.tick, Event.created_at)
+        )
+        result = await session.execute(stmt)
+        orm_events = result.scalars().all()
+
+    if not orm_events:
+        raise HTTPException(
+            status_code=400,
+            detail=f"World {req.world_id!r} 没有事件记录，无法生成报告",
+        )
+
+    sim_events = [e.to_response() for e in orm_events]
+
+    # 2. 收集所有参与的 Agent 名称作为 persona_narrative
+    agent_ids = {e.source_agent_id for e in sim_events if e.source_agent_id}
+    agent_names: list[str] = []
+    if agent_ids:
+        for aid in agent_ids:
+            row_result = await db.execute(
+                select(AgentRow).where(AgentRow.id == aid)
+            )
+            row = row_result.scalar_one_or_none()
+            if row:
+                try:
+                    persona = json.loads(row.persona_json)
+                    name = persona.get("name", "") or row.name or aid[:8]
+                    agent_names.append(name)
+                except Exception:
+                    agent_names.append(row.name or aid[:8])
+
+    # 3. 用虚拟 Persona 调用 NarrativeEngine
+    from models.agent import Persona
+    virtual_persona = Persona(
+        name="群体分析",
+        narrative="、".join(agent_names) if agent_names else "未知参与者",
+    )
+    narrative_req = NarrativeRequest(
+        style=NarrativeStyle.REPORT,
+        agent_id="group",
+        events=sim_events,
+        persona=virtual_persona,
+    )
+    result = await engine.generate(narrative_req)
+
+    return ReportResponse(
+        title=result.title,
+        content=result.content.strip(),
+        world_id=req.world_id,
+        generated_at=result.generated_at,
+    )

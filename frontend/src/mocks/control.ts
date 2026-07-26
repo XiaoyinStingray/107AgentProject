@@ -56,6 +56,14 @@ export const CONTROL_TABS: ControlTabMeta[] = [
     priority: "P2",
     available: true,
   },
+  {
+    key: "dynamics",
+    label: "群体动力学",
+    emoji: "🌐",
+    description: "LLM 分析群体互动：领导、孤立、氛围、转折点",
+    priority: "P2",
+    available: true,
+  },
   // —— P3 占位 ——
   {
     key: "anomaly",

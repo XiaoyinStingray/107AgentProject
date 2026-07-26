@@ -20,6 +20,7 @@ export interface TimelineTick {
   tick: number;
   eventCount: number;
   hasRelationshipChange: boolean;
+  hasConflict: boolean;
 }
 
 /** Timeline 组件接口。 */

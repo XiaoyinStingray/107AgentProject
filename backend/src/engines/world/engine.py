@@ -154,14 +154,15 @@ class WorldEngine(WorldStreamingMixin, WorldMessageMixin, WorldStateMixin):
             yield event
 
     async def _post_process_tick(self, tick_events: list[SimEvent]) -> list[SimEvent]:
-        """Apply actions, analyze relationships, and update goal progress."""
+        """Apply actions, analyze relationships, update goals, and detect conflicts."""
         derived: list[SimEvent] = []
         for event in tick_events:
             if event.type == "agent_action":
                 derived.extend(self._apply_action(event))
         goal_events = await self._update_goal_progress(tick_events)
         relationship_events = self._update_relationships([*tick_events, *derived])
-        return [*derived, *goal_events, *relationship_events]
+        conflict_events = self._detect_conflict()
+        return [*derived, *goal_events, *relationship_events, *conflict_events]
 
     async def _update_goal_progress(self, tick_events: list[SimEvent]) -> list[SimEvent]:
         """用 LLM 判断 Agent 是否在推进目标。每 2 tick 检测一次。
@@ -214,7 +215,6 @@ class WorldEngine(WorldStreamingMixin, WorldMessageMixin, WorldStateMixin):
                         world_id=self.world.id,
                         tick=self.current_tick,
                         type="goal_update",
-                        timestamp=_dt.now(_tz.utc).isoformat(),
                         source_agent_id=agent.id,
                         target_agent_ids=[],
                         description=desc_text,
@@ -270,6 +270,24 @@ class WorldEngine(WorldStreamingMixin, WorldMessageMixin, WorldStateMixin):
             logger.warning(f"_llm_check_goals failed for agent={name}: {exc}")
             return {}
 
+
+    def _detect_conflict(self) -> list[SimEvent]:
+        """检测 Agent 间的目标冲突，生成 conflict_detected 事件。"""
+        from engines.world.conflict import (
+            build_conflict_events,
+            detect_goal_conflicts,
+        )
+
+        if len(self.agents) < 2:
+            return []
+        agent_names = {
+            aid: agent.persona.name or aid
+            for aid, agent in self.agents.items()
+        }
+        conflicts = detect_goal_conflicts(self.agents)
+        return build_conflict_events(
+            conflicts, self.world.id, self.current_tick, agent_names,
+        )
 
     async def _finish_tick(self, tick_events: list[SimEvent]) -> None:
         """Persist and archive a completed tick, then advance the clock."""

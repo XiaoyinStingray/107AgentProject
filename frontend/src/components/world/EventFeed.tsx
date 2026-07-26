@@ -110,6 +110,9 @@ function EventRow({ event }: { event: SSEEvent }) {
       {event.type === "relationship_change" && (
         <RelationshipMeta event={event} />
       )}
+      {event.type === "conflict_detected" && (
+        <ConflictMeta event={event} />
+      )}
     </article>
   );
 }
@@ -127,6 +130,20 @@ function RelationshipMeta({ event }: { event: SSEEvent }) {
       <span>关系变化 {changeText}</span>
       <span className="text-text-secondary/50">·</span>
       <span>{scoreText}</span>
+    </div>
+  );
+}
+
+function ConflictMeta({ event }: { event: SSEEvent }) {
+  const data = event.data;
+  const goalA = typeof data?.goal_a === "string" ? data.goal_a : null;
+  const goalB = typeof data?.goal_b === "string" ? data.goal_b : null;
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-mono text-accent-red/80">
+      {goalA && <span>⚔️ {goalA}</span>}
+      {goalA && goalB && <span className="text-text-secondary/50">vs</span>}
+      {goalB && <span>{goalB}</span>}
     </div>
   );
 }
@@ -178,6 +195,11 @@ const EVENT_VISUALS: Record<
     label: "RELATION",
     border: "border-accent-purple",
     text: "text-accent-purple",
+  },
+  conflict_detected: {
+    label: "CONFLICT",
+    border: "border-accent-red",
+    text: "text-accent-red",
   },
   tick_boundary: {
     label: "TICK",
