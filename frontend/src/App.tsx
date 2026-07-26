@@ -16,6 +16,7 @@ const NarrativeFactory = lazy(() => import("./pages/NarrativeFactory"));
 const ControlPanel = lazy(() => import("./pages/ControlPanel"));
 const DirectorIntervention = lazy(() => import("./pages/DirectorIntervention"));
 const Archive = lazy(() => import("./pages/Archive"));
+const TeamDashboard = lazy(() => import("./pages/TeamDashboard"));
 
 /** Suspense 占位——加载中显示 */
 function PageFallback() {
@@ -158,6 +159,16 @@ export default function App() {
             element={
               <Suspense fallback={<PageFallback />}>
                 <Archive />
+              </Suspense>
+            }
+          />
+
+          {/* M9 Agent Team */}
+          <Route
+            path="team"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <TeamDashboard />
               </Suspense>
             }
           />

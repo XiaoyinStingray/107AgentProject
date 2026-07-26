@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
 import type { ControlTab } from "../types/control";
 import { convertSimEventsToSSE } from "../types/control";
 import { CONTROL_TABS } from "../mocks/control";
@@ -20,9 +21,17 @@ import GroupDynamics from "../components/control/GroupDynamics";
    ================================================================ */
 
 export default function ControlPanel() {
+  const location = useLocation();
   const { data: agents = [] } = useAgents();
   const { data: worlds = [] } = useWorlds();
   const [activeTab, setActiveTab] = useState<ControlTab>("dashboard");
+
+  // 侧边栏 #item-21 → 自动切到 dynamics tab
+  useEffect(() => {
+    if (location.hash === "#item-21") {
+      setActiveTab("dynamics");
+    }
+  }, [location.hash]);
   const [selectedWorldId, setSelectedWorldId] = useState<string | null>(
     worlds[0]?.id ?? null,
   );

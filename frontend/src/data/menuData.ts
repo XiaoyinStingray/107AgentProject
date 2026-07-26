@@ -53,7 +53,6 @@ export const MENU_SECTIONS: MenuSection[] = [
       { id: 18, emoji: "⚔️", label: "竞争博弈", priority: "P1" },
       { id: 19, emoji: "🎭", label: "角色冲突", priority: "P2" },
       { id: 20, emoji: "🌐", label: "关系网络图", priority: "P2" },
-      { id: 21, emoji: "📊", label: "群体动力学报告", priority: "P2" },
     ],
   },
   {
@@ -89,6 +88,7 @@ export const MENU_SECTIONS: MenuSection[] = [
       { id: 36, emoji: "📊", label: "多 Agent 仪表盘", priority: "P1" },
       { id: 37, emoji: "🗺️", label: "事件热力图", priority: "P2" },
       { id: 38, emoji: "🔍", label: "Agent 搜索", priority: "P2" },
+      { id: 21, emoji: "📊", label: "群体动力学报告", priority: "P2" },
       { id: 39, emoji: "🧠", label: "决策模式识别", priority: "P2" },
       { id: 40, emoji: "⚠️", label: "异常检测", priority: "P3" },
       { id: 41, emoji: "📈", label: "长期追踪", priority: "P3" },
@@ -120,6 +120,11 @@ export const MENU_SECTIONS: MenuSection[] = [
       { id: 55, emoji: "📄", label: "研究报告导出", priority: "P2" },
       { id: 56, emoji: "🔌", label: "API 开放", priority: "P3" },
     ],
+  },
+  {
+    title: "M9 Agent Team",
+    route: "/team",
+    items: [],  // State 3 大模块，子能力在页面内部 Tab 切换
   },
 ];
 

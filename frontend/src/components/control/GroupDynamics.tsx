@@ -4,6 +4,17 @@ import { useGenerateReport } from "../../api/narratives";
 import type { ReportResponse } from "../../api/narratives";
 import Card from "../shared/Card";
 
+function downloadReport(report: ReportResponse) {
+  const text = `# ${report.title}\n\n> 生成时间: ${new Date(report.generated_at).toLocaleString()}\n\n---\n\n${report.content}`;
+  const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${report.title.replace(/[^a-zA-Z0-9一-鿿]/g, "_")}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 /**
  * 群体动力学报告组件 — Step 41 (#21)。
  * 选择 World → 调 POST /api/narratives/report → 展示 LLM 分析报告。
@@ -73,9 +84,18 @@ export default function GroupDynamics() {
 
       {report && (
         <div className="space-y-3 animate-fade-in">
-          <h3 className="text-lg font-mono text-accent-green">
-            {report.title}
-          </h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-mono text-accent-green">
+              {report.title}
+            </h3>
+            <button
+              type="button"
+              onClick={() => downloadReport(report)}
+              className="px-3 py-1 text-xs font-mono rounded border border-border text-text-secondary hover:border-accent-green hover:text-accent-green transition-colors"
+            >
+              ⬇ 下载 .md
+            </button>
+          </div>
           <p className="text-xs font-mono text-text-secondary/60">
             生成时间: {new Date(report.generated_at).toLocaleString()}
           </p>

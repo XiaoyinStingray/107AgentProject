@@ -49,3 +49,8 @@ export const agentTemplateKeys = {
 export const interventionKeys = {
   byWorld: (worldId: string) => ["interventions", worldId] as const,
 };
+
+export const teamKeys = {
+  all: ["teams"] as const,
+  detail: (id: string) => ["teams", id] as const,
+};

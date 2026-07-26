@@ -67,11 +67,17 @@ _narrative_engine: NarrativeEngine | None = None
 
 
 def get_narrative_engine() -> NarrativeEngine:
-    """NarrativeEngine module-level singleton。"""
+    """NarrativeEngine module-level singleton。LLM 不可用时抛明确错误。"""
     global _narrative_engine
     if _narrative_engine is None:
-        from llm.client import create_model_client
-        _narrative_engine = NarrativeEngine(create_model_client())
+        try:
+            from llm.client import create_model_client
+            _narrative_engine = NarrativeEngine(create_model_client())
+        except Exception as e:
+            raise HTTPException(
+                status_code=503,
+                detail=f"LLM 服务不可用，叙事引擎无法启动: {e}",
+            )
     return _narrative_engine
 
 

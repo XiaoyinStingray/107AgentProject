@@ -2,6 +2,15 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import ControlPanel from "../../pages/ControlPanel";
+
+// --- Mock react-router-dom（ControlPanel 用 useLocation 解析 hash）---
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual("react-router-dom");
+  return {
+    ...actual,
+    useLocation: () => ({ hash: "", pathname: "/control", state: null, search: "" }),
+  };
+});
 import AgentDashboard from "./AgentDashboard";
 import EventHeatmap from "./EventHeatmap";
 import AgentSearch from "./AgentSearch";
