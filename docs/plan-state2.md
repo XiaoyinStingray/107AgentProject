@@ -85,8 +85,8 @@
 
 | 状态 | 数量 | 说明 |
 |------|------|------|
-| ✅ **DONE** | 1 | 端到端全通（前端调真后端） |
-| 🟡 **PARTIAL** | 31 | 有代码但未联通，或有缺口 |
+| ✅ **DONE** | 16 | 端到端全通（前端调真后端） |
+| 🟡 **PARTIAL** | 16 | 有代码但未联通，或有缺口 |
 | ❌ **MISSING** | 24 | 完全缺失（仅占位页或完全无代码） |
 
 ### 逐项状态（详见附录 A 完整审计）
@@ -1624,11 +1624,16 @@ interface LoadingSpinnerProps {
 
 ### Step 45 — 档案馆功能 (#51, #52, #54)
 
-| # | 功能 | 数据源 |
-|------|------|--------|
-| 51 | 精彩回放 | `GET /api/simulations` → 最近模拟列表 → 点击回放（跳转 Sandbox 并加载历史事件） |
-| 52 | 实验模板 | `GET /api/worlds?type=template` → 模板浏览/复制 |
-| 54 | 成就系统 | 后端计算成就条件（创建 Agent 数、模拟 tick 数等）→ `GET /api/achievements` |
+> **状态**：✅ done (2026-07-25)
+> **实际产出**：见 `docs/done/step-45.md`
+
+| # | 功能 | 实现 |
+|------|------|------|
+| 51 | 精彩回放 | `GET /api/simulations` → SQLite 持久化 simulations 表 → 前端列表；点击展开在线展示事件列表（不跳转沙盒）；运行中每 10s 自动轮询 + 🔄 手动刷新 |
+| 52 | 实验模板 | `GET /api/scenarios` → 双按钮选择单人（→ /theater）/多人（→ /sandbox + 预选 Agent 数） |
+| 54 | 成就系统 | `GET /api/achievements` → 后端从 SQLite 统计 agents/worlds/simulations/arenas 计数 → 前端展示 |
+
+**附带修复**：simulations SQLite 持久化、events 端点注入 agent_name、REST/SSE 字段映射对齐、导出 SQLite fallback、solo/group 暂停即时中断、单人结束按钮、模拟结束 simulation_id 恢复
 
 ---
 
@@ -1870,10 +1875,10 @@ TC5: 叙事全链路
 | 48 | 干预历史 | P3 | 🟡 | 无持久化 | ✅ Mock 列表 | ❌ 无 /interventions | DB 表+API |
 | 49 | 剧本模式 | P3 | ❌ | 无 | ⚠️ 灰显卡片 | 无 | 占位 |
 | 50 | Agent 市场 | P3 | ❌ | 无 | ⚠️ EmptyState | 无 | 占位 |
-| 51 | 精彩回放 | P2 | 🟡 | 无 | ✅ Mock | ❌ | 真实模拟列表 |
-| 52 | 实验模板 | P2 | 🟡 | ⚠️ 内置场景 | ✅ Mock | ❌ 无 /templates | CRUD API |
+| 51 | 精彩回放 | P2 | ✅ | ✅ simulations 表+API | ✅ useSimulations+轮询 | ✅ /simulations | Step 45 |
+| 52 | 实验模板 | P2 | ✅ | ✅ scenarios API | ✅ useScenarios+双按钮 | ✅ /scenarios | Step 45 |
 | 53 | 社区数据大屏 | P3 | ❌ | 无 | ⚠️ EmptyState | 无 | 占位 |
-| 54 | 成就系统 | P2 | 🟡 | 无 | ✅ Mock 10 成就 | ❌ | 后端计算+API |
+| 54 | 成就系统 | P2 | ✅ | ✅ achievements.py | ✅ useAchievements | ✅ /achievements | Step 45 |
 | 55 | 研究报告导出 | P2 | ✅ | ✅ export.py | ✅ ExportPanel | ✅ /export/report | — |
 | 56 | API 开放 | P3 | ❌ | 无 | ⚠️ EmptyState | 无 | 占位 |
 
@@ -2058,7 +2063,7 @@ State 1 产出（所有 Step 00–28 done）
 
 ---
 
-> **最后更新:** 2026-07-20
+> **最后更新:** 2026-07-26
 > **维护者:** 晓音_Stingray
 > **版本:** 2.0 (Plan State 2)
 > **基准:** 56 项功能审计（附录 A）+ 前端代码审计（`docs/plan-state2.md` 旧版附录 A）
