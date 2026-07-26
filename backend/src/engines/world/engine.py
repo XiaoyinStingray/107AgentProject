@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from engines.agent_factory.factory import LifeAgent
 from engines.agent_factory.memory import MemoryRetriever
+from engines.world.goals import WorldGoalMixin
 from engines.world.messages import END_TICK_TOKEN, WorldMessageMixin
 from engines.world.state import WorldStateMixin, _resolve_agent_id
 from engines.world.streaming import WorldStreamingMixin
@@ -18,7 +19,12 @@ from models.world import WorldResponse
 __all__ = ["WorldEngine", "_resolve_agent_id"]
 
 
-class WorldEngine(WorldStreamingMixin, WorldMessageMixin, WorldStateMixin):
+class WorldEngine(
+    WorldStreamingMixin,
+    WorldGoalMixin,
+    WorldMessageMixin,
+    WorldStateMixin,
+):
     """Manage World ticks, Agent interaction, and event persistence."""
 
     def __init__(
@@ -26,10 +32,12 @@ class WorldEngine(WorldStreamingMixin, WorldMessageMixin, WorldStateMixin):
         world: WorldResponse,
         agents: list[LifeAgent],
         db_session: AsyncSession,
+        act_model_client=None,
     ):
         self.world = world
         self.agents: dict[str, LifeAgent] = {agent.id: agent for agent in agents}
         self._db = db_session
+        self._act_model_client = act_model_client
         self._retriever = MemoryRetriever(db_session)
         self.events: list[SimEvent] = []
         self.relationships: dict[tuple[str, str], float] = {}
@@ -163,113 +171,6 @@ class WorldEngine(WorldStreamingMixin, WorldMessageMixin, WorldStateMixin):
         relationship_events = self._update_relationships([*tick_events, *derived])
         conflict_events = self._detect_conflict()
         return [*derived, *goal_events, *relationship_events, *conflict_events]
-
-    async def _update_goal_progress(self, tick_events: list[SimEvent]) -> list[SimEvent]:
-        """用 LLM 判断 Agent 是否在推进目标。每 2 tick 检测一次。
-        返回 goal_update 事件供 SSE 推送。"""
-        if self.current_tick % 2 != 0:
-            return []  # 隔 tick 检测，省 LLM 调用
-        goal_events: list[SimEvent] = []
-        for agent in self.agents.values():
-            if not hasattr(agent, "goals") or not agent.goals:
-                continue
-            active_goals = [g for g in agent.goals if g.status in ("active", "in_progress")]
-            if not active_goals:
-                continue
-            # 收集该 Agent 近 2 tick 的输出
-            texts: list[str] = []
-            for e in tick_events:
-                if e.source_agent_id != agent.id:
-                    continue
-                if e.type in ("thought_stream", "agent_message"):
-                    content = e.data.get("content", e.description) if e.data else e.description
-                    texts.append(str(content))
-            if not texts:
-                continue
-            combined = " ".join(texts)[:800]
-            # LLM 批量检测
-            scores = await self._llm_check_goals(agent.persona.name or agent.id, active_goals, combined)
-            for goal in active_goals:
-                score = scores.get(goal.description, 0.0)
-                if score <= 0.5:
-                    continue  # 无关或仅间接提及，不推进
-                old_progress = goal.progress
-                goal.progress = min(1.0, goal.progress + score)
-                goal.status = "achieved" if goal.progress >= 1.0 else "in_progress"
-                display_name = agent.persona.name or agent.id
-                desc_text = (
-                    f"🎉 {display_name} 达成目标「{goal.description}」！"
-                    if goal.status == "achieved"
-                    else f"🎯 {display_name} 推进目标「{goal.description}」({goal.progress:.0%})"
-                )
-                if goal.status != "in_progress" or old_progress == 0:
-                    logger.info(
-                        f"Goal progress: agent={agent.id} "
-                        f"goal='{goal.description}' status={goal.status} "
-                        f"progress={goal.progress:.2f} score={score:.2f}"
-                    )
-                    import uuid as _uuid
-                    from datetime import datetime as _dt, timezone as _tz
-                    goal_events.append(SimEvent(
-                        id=str(_uuid.uuid4()),
-                        world_id=self.world.id,
-                        tick=self.current_tick,
-                        type="goal_update",
-                        source_agent_id=agent.id,
-                        target_agent_ids=[],
-                        description=desc_text,
-                        data={
-                            "goal_id": goal.id,
-                            "description": goal.description,
-                            "status": goal.status,
-                            "progress": goal.progress,
-                        },
-                        created_at=_dt.now(_tz.utc).isoformat(),
-                    ))
-        return goal_events
-
-    async def _llm_check_goals(self, name: str, goals: list, text: str) -> dict[str, float]:
-        """LLM 批量判断多个目标的进展。返回 {goal_description: 0.0-1.0}。"""
-        if not goals or not text:
-            return {}
-        goal_list = "\n".join(f"{i+1}. {g.description}" for i, g in enumerate(goals))
-        prompt = (
-            f"Agent「{name}」有以下目标：\n{goal_list}\n\n"
-            f"Agent 最近的发言/思考：\n{text}\n\n"
-            f"对每个目标，判断 Agent 是否在推进它。返回 JSON 数组：\n"
-            f'[{{"index":1,"score":0.0}}, ...]\n'
-            f"score: 0=完全无关, 0.3=间接提及, 0.5=明确在推进, 0.8=接近完成, 1.0=已经达成。\n"
-            f"严格保守打分——Agent 必须正在采取实际行动推进目标才能≥0.5，仅口头提及不算。\n"
-            f"只返回 JSON 数组，不要其他文字。"
-        )
-        try:
-            from llm.client import create_model_client
-            from autogen_core.models import UserMessage
-            client = create_model_client()
-            import json as _json
-            result = await client.create(
-                messages=[UserMessage(content=prompt, source="goal_checker")],
-                json_output=True,
-            )
-            raw = str(result.content).strip()
-            if raw.startswith("```"):
-                raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-            items = _json.loads(raw)
-            if not isinstance(items, list):
-                logger.warning(f"_llm_check_goals: expected list, got {type(items).__name__}: {raw[:120]}")
-                return {}
-            scores: dict[str, float] = {}
-            for it in items:
-                if not isinstance(it, dict) or "index" not in it:
-                    continue
-                idx = int(it["index"]) - 1
-                if 0 <= idx < len(goals):
-                    scores[goals[idx].description] = float(it.get("score", 0.0))
-            return scores
-        except Exception as exc:
-            logger.warning(f"_llm_check_goals failed for agent={name}: {exc}")
-            return {}
-
 
     def _detect_conflict(self) -> list[SimEvent]:
         """检测 Agent 间的目标冲突，生成 conflict_detected 事件。"""

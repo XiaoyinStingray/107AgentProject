@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import type { SSEEvent } from "../../types/events";
 import ThoughtBubble from "./ThoughtBubble";
 
+const WINDOW_SIZE = 200;
+const WINDOW_STEP = 100;
+
 interface ThoughtStreamProps {
   events: SSEEvent[];
   /** 是否自动滚底——用户手动上滚时暂停 */
@@ -24,7 +27,28 @@ export default function ThoughtStream({
   className = "",
 }: ThoughtStreamProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const previousLengthRef = useRef(events.length);
   const [userScrolledUp, setUserScrolledUp] = useState(false);
+  const [windowEnd, setWindowEnd] = useState(events.length);
+
+  useEffect(() => {
+    const previousLength = previousLengthRef.current;
+    setWindowEnd((currentEnd) => {
+      const followedLatest = currentEnd >= previousLength;
+      if (events.length <= WINDOW_SIZE || followedLatest) {
+        return events.length;
+      }
+      return Math.min(currentEnd, events.length);
+    });
+    previousLengthRef.current = events.length;
+    if (events.length === 0) setUserScrolledUp(false);
+  }, [events.length]);
+
+  const boundedEnd = Math.min(windowEnd, events.length);
+  const windowStart = Math.max(0, boundedEnd - WINDOW_SIZE);
+  const visibleEvents = events.slice(windowStart, boundedEnd);
+  const hasEarlier = windowStart > 0;
+  const followsLatest = boundedEnd >= events.length;
 
   // 判断是否在底部
   const isAtBottom = () => {
@@ -35,12 +59,12 @@ export default function ThoughtStream({
 
   // 新事件到达 → 自动滚底
   useEffect(() => {
-    if (!autoScroll || userScrolledUp) return;
+    if (!autoScroll || userScrolledUp || !followsLatest) return;
     const el = containerRef.current;
     if (el) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [events, autoScroll, userScrolledUp]);
+  }, [events.length, autoScroll, userScrolledUp, followsLatest]);
 
   // 检测用户手动滚动
   const handleScroll = () => {
@@ -49,16 +73,43 @@ export default function ThoughtStream({
 
   // 连续同一 Agent 的消息合并显示（compact 模式）
   const renderEvents = () => {
-    return events.map((event, idx) => {
-      const prev = idx > 0 ? events[idx - 1] : null;
+    return visibleEvents.map((event, idx) => {
+      const originalIndex = windowStart + idx;
+      const prev = originalIndex > 0 ? events[originalIndex - 1] : null;
       const compact =
         prev != null &&
         prev.type === event.type &&
         prev.agent_id === event.agent_id &&
         prev.type !== "tick_boundary" &&
         prev.type !== "world_event";
+      const key =
+        event.id ??
+        `${event.tick}-${event.type}-${event.agent_id ?? "world"}-${originalIndex}`;
 
-      return <ThoughtBubble key={idx} event={event} compact={compact} onClick={onEventClick} />;
+      return (
+        <ThoughtBubble
+          key={key}
+          event={event}
+          compact={compact}
+          onClick={onEventClick}
+        />
+      );
+    });
+  };
+
+  const showEarlier = () => {
+    setUserScrolledUp(true);
+    setWindowEnd((currentEnd) =>
+      Math.max(WINDOW_SIZE, currentEnd - WINDOW_STEP),
+    );
+  };
+
+  const returnToLatest = () => {
+    setWindowEnd(events.length);
+    setUserScrolledUp(false);
+    requestAnimationFrame(() => {
+      const el = containerRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
     });
   };
 
@@ -78,16 +129,27 @@ export default function ThoughtStream({
         </p>
       ) : (
         <div className="max-w-2xl mx-auto">
+          {hasEarlier && (
+            <button
+              type="button"
+              onClick={showEarlier}
+              className="
+                block mx-auto mb-3 text-xs font-mono text-text-secondary
+                border border-border rounded-full px-3 py-1
+                hover:text-accent-blue hover:border-accent-blue/40
+                transition-colors
+              "
+            >
+              查看更早记录
+            </button>
+          )}
+
           {renderEvents()}
 
-          {/* 手动上滚提示 */}
-          {userScrolledUp && (
+          {(userScrolledUp || !followsLatest) && (
             <button
-              onClick={() => {
-                setUserScrolledUp(false);
-                const el = containerRef.current;
-                if (el) el.scrollTop = el.scrollHeight;
-              }}
+              type="button"
+              onClick={returnToLatest}
               className="
                 sticky bottom-2 left-1/2 -translate-x-1/2
                 text-xs font-mono text-accent-blue/80
@@ -95,7 +157,7 @@ export default function ThoughtStream({
                 px-3 py-1 hover:bg-accent-blue/10 transition-colors
               "
             >
-              ↓ 回到底部
+              ↓ 回到最新
             </button>
           )}
         </div>

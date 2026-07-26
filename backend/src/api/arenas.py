@@ -35,7 +35,7 @@ def get_arena_engine() -> ArenaEngine:
     if _arena_engine is None:
         from llm.client import create_model_client
 
-        _arena_engine = ArenaEngine(create_model_client())
+        _arena_engine = ArenaEngine(create_model_client("act"))
     return _arena_engine
 
 

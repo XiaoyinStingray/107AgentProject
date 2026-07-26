@@ -14,6 +14,11 @@ from engines.world.resources import build_resource_context
 from models.event import Event, SimEvent
 
 
+RECENT_EVENT_COUNT = 3
+EVENT_DESCRIPTION_CHAR_LIMIT = 240
+RECENT_EVENT_CONTEXT_CHAR_LIMIT = 800
+
+
 def _resolve_agent_id(
     name_or_id: str,
     agents: dict,
@@ -62,7 +67,7 @@ class WorldStateMixin:
         if weather:
             context += f"🌤️ 天气: {weather}\n"
         context += build_resource_context(params, self.current_tick)
-        recent = self._recent_events_text(3)
+        recent = self._recent_events_text()
         if recent:
             context += f"📋 最近事件:\n{recent}"
         # 目标完成提示——Agent 会看到自己的成就并被鼓励设定新目标
@@ -94,10 +99,21 @@ class WorldStateMixin:
                         hints += f"  ▶ {g.description} ({g.progress:.0%})\n"
         return hints
 
-    def _recent_events_text(self, count: int = 3) -> str:
-        """Return a compact summary of the most recent World events."""
-        recent = self.events[-count:]
-        return "\n".join(f"  - {event.description}" for event in recent)
+    def _recent_events_text(self, count: int = RECENT_EVENT_COUNT) -> str:
+        """Return recent event descriptions within a deterministic text budget."""
+        lines = [
+            f"  - {self._compact_event_description(event.description)}"
+            for event in self.events[-count:]
+        ]
+        return "\n".join(lines)[:RECENT_EVENT_CONTEXT_CHAR_LIMIT]
+
+    @staticmethod
+    def _compact_event_description(description: str) -> str:
+        """Normalize whitespace and cap one event copied into an LLM prompt."""
+        compact = " ".join(description.split())
+        if len(compact) <= EVENT_DESCRIPTION_CHAR_LIMIT:
+            return compact
+        return f"{compact[:EVENT_DESCRIPTION_CHAR_LIMIT - 1]}…"
 
     def _apply_action(self, event: SimEvent) -> list[SimEvent]:
         """Apply one agent_action event and return derived events."""

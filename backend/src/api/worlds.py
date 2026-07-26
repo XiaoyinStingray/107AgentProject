@@ -79,9 +79,16 @@ async def _rebuild_agents_from_db(agent_ids: list[str]) -> list:
 
 async def _build_world_engine(world: WorldResponse) -> WorldEngine:
     """从 DB 获取 Agent 实例，构建 WorldEngine。"""
+    from llm.client import create_model_client
+
     agents = await _rebuild_agents_from_db(world.agent_ids)
     session = async_session()
-    return WorldEngine(world, agents, session)
+    return WorldEngine(
+        world,
+        agents,
+        session,
+        act_model_client=create_model_client("act"),
+    )
 
 
 async def _sync_world_to_db(world: WorldResponse) -> None:
