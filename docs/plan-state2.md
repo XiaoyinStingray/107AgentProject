@@ -85,9 +85,10 @@
 
 | 状态 | 数量 | 说明 |
 |------|------|------|
-| ✅ **DONE** | 16 | 端到端全通（前端调真后端） |
-| 🟡 **PARTIAL** | 16 | 有代码但未联通，或有缺口 |
-| ❌ **MISSING** | 24 | 完全缺失（仅占位页或完全无代码） |
+| ✅ **DONE** | 32 | 端到端全通（前端调真后端） |
+| 🟡 **PARTIAL** | 2 | 有代码但未联通（#19 角色冲突, #48 干预历史） |
+| ⏭️ **SKIPPED** | 2 | 明确定义跳过（#11 动态计划, #13 决策回放） |
+| ❌ **MISSING** | 20 | P3 占位 / 未实现 |
 
 ### 逐项状态（详见附录 A 完整审计）
 
@@ -148,12 +149,13 @@
 
 ### State 2 完成标准
 
-| 优先级 | 目标 | 数量 |
-|--------|------|------|
-| P0 (6) | 全部 DONE — 端到端真实联通 | 6 |
-| P1 (14) | 全部 DONE — 端到端真实联通 | 14 |
-| P2 (19) | DONE 或有功能骨架（Mock 可接受） | 19 |
-| P3 (17) | 占位页面（"建设中"统一模板） | 17 |
+| 优先级 | 现状 |
+|--------|------|
+| P0 (6) | ✅ 全部 DONE — 端到端真实联通 |
+| P1 (11) | ✅ 10 DONE + ⏭️ 1 跳过 (#11 动态计划) |
+| P2 (20) | ✅ 17 DONE + 🟡 2 部分 (#19 角色冲突, #48 干预历史) + ⏭️ 1 跳过 (#13) + ❌ 1 (#21) |
+| P3 (18) | ❌ 17 占位 + 🟡 1 (#48) |
+| **总** | ✅ 33 / 🟡 3 / ⏭️ 2 / ❌ 18 |
 
 ---
 
@@ -1823,58 +1825,58 @@ TC5: 叙事全链路
 
 ### 清单
 
-| # | 功能 | 优先级 | 状态 | 后端 | 前端 | API | 缺失项 |
+| # | 功能 | 优先级 | 状态 | 后端 | 前端 | API | 完成于 |
 |---|------|--------|------|------|------|-----|--------|
-| 1 | 自然语言创建 Agent | P0 | 🟡 | ✅ PersonaBuilder | ✅ AgentFoundry | ✅ POST /api/agents | 前端 Mock 阻隔 |
-| 2 | 人格引擎 | P0 | 🟡 | ✅ Persona + Prompt | ✅ PersonaRadar | ✅ 同上 | 前端 Mock 阻隔 |
-| 3 | 背景故事自动生成 | P1 | 🟡 | ✅ 内嵌于 #1 | ✅ 显示 | ✅ 同上 | 前端 Mock 阻隔 |
-| 4 | 目标系统 | P1 | 🟡 | ✅ set_goal tool | ✅ AgentCard | ✅ 同上 | 目标生命周期 |
-| 5 | 决策风格参数 | P1 | 🟡 | ✅ DecisionStyle | ✅ 2x2 网格 | ✅ 同上 | 前端 Mock 阻隔 |
-| 6 | Agent Remix | P2 | ❌ | 无 | 无 | 无 /remix | 全部 |
-| 7 | 模板库 (30+) | P2 | ❌ | 无 | 无 | 无 /templates | 全部 |
-| 8 | 场景投放 | P0 | 🟡 | ✅ WorldEngine | ✅ SoloTheater | ✅ POST /api/worlds | 前端 useMockSSE |
-| 9 | 思维流实时展示 | P0 | 🟡 | ✅ tick_stream | ✅ ThoughtStream | ✅ SSE /stream | 前端未连 SSE |
-| 10 | 目标追逐 | P1 | 🟡 | ✅ set_goal | ⚠️ 无进度 UI | ✅ 同上 | 目标状态机 |
-| 11 | 动态计划调整 | P1 | ❌ | 无 Plan 模型 | 无 | 无 | 全部 |
-| 12 | Agent 日记 | P1 | 🟡 | ✅ NarrativeEngine | ✅ NarrativeFactory | ❌ 无 /narratives | API 路由 |
-| 13 | 决策回放 | P2 | ❌ | 无展开 API | 无 | 无 | 全部 |
-| 14 | 暂停干预 | P2 | 🟡 | ✅ inject/pause | ✅ Pause 按钮 | ✅ /pause /inject | 前端未调 API |
-| 15 | 群体投放 | P0 | 🟡 | ✅ GroupChat | ✅ GroupSandbox | ✅ POST /api/worlds | 前端 useSandboxMockSSE |
-| 16 | Agent 间对话 | P1 | 🟡 | ✅ RoundRobin | ✅ EventFeed | ✅ SSE | 同上 |
-| 17 | 关系演化 | P1 | 🟡 | ✅ relationships.py | ✅ RelationshipGraph | ✅ SSE | 同上 |
-| 18 | 竞争博弈 | P1 | 🟡 | ⚠️ 关键词检测 | ⚠️ Mock | ✅ 同上 | 资源模型 |
-| 19 | 角色冲突 | P2 | 🟡 | ⚠️ 关键词检测 | 无 | 无 | 编排+UI |
-| 20 | 关系网络图 | P2 | 🟡 | ⚠️ 无快照 API | ✅ Graph 组件 | ❌ 无 /relationships | API 端点 |
-| 21 | 群体动力学报告 | P2 | ❌ | 无 | 无 | 无 | 全部 |
-| 22 | 1v1 对抗 | P1 | 🟡 | ✅ ArenaEngine | ✅ Arena.tsx | ❌ 无 /arenas | API 路由 |
-| 23 | 大乱斗 | P2 | ❌ | 无 | ⚠️ 占位 | 无 | 全部 |
-| 24 | 战报生成 | P2 | 🟡 | ⚠️ judge_reasoning | ✅ ResultPanel | ❌ 无 /report | 报告端点 |
-| 25 | 盲测模式 | P3 | ❌ | 无 | 无 | 无 | 全部 |
-| 26 | 复盘对比 | P2 | ❌ | 无 | 无 | 无 | 全部 |
-| 27 | 排行榜 | P3 | ❌ | 无 | 无 | 无 | 全部 |
-| 28 | A/B 测试 | P3 | ❌ | 无 | 无 | 无 | 全部 |
-| 29 | 小说化叙事 | P1 | 🟡 | ✅ STORY 模板 | ✅ Mock 库 | ❌ 无 /narratives | API 路由 |
-| 30 | 未来的信 | P2 | 🟡 | ✅ LETTER 模板 | ✅ Mock 库 | ❌ 同上 | API 路由 |
-| 31 | 平行对话 | P2 | ❌ | 无模板 | 无 UI | 无 | 全部 |
-| 32 | 播客脚本 | P2 | 🟡 | ✅ PODCAST 模板 | ✅ Mock 库 | ❌ 同上 | API 路由 |
-| 33 | 微电影大纲 | P3 | ❌ | 无 | ⚠️ 灰显按钮 | 无 | 占位 |
-| 34 | 自动连载 | P3 | ❌ | 无 | ⚠️ 灰显按钮 | 无 | 占位 |
-| 35 | Agent 自画像 | P3 | ❌ | 无 | ⚠️ 灰显按钮 | 无 | 占位 |
-| 36 | 多 Agent 仪表盘 | P0 | 🟡 | ⚠️ 无聚合端点 | ✅ AgentDashboard | ❌ 无 /dashboard | API + 数据源 |
-| 37 | 事件热力图 | P2 | 🟡 | 无 | ✅ EventHeatmap | ❌ | Mock→真数据 |
-| 38 | Agent 搜索 | P2 | 🟡 | 无查询参数 | ✅ AgentSearch | ❌ | 后端加 ?q= |
-| 39 | 决策模式识别 | P2 | 🟡 | 无 | ✅ DecisionPatterns | ❌ | Mock→真数据 |
-| 40 | 异常检测 | P3 | ❌ | 无 | ⚠️ EmptyState | 无 | 占位 |
-| 41 | 长期追踪 | P3 | ❌ | 无 | ⚠️ EmptyState | 无 | 占位 |
-| 42 | 策略提取 | P3 | ❌ | 无 | ⚠️ EmptyState | 无 | 占位 |
-| 43 | 事件注入 | P2 | 🟡 | ✅ inject_event | ✅ 注入表单 | ✅ /inject | 前端未调 API |
-| 44 | 上帝之声 | P3 | ❌ | 无 | ⚠️ 灰显卡片 | 无 | 占位 |
-| 45 | 时间回溯 | P3 | ❌ | 无 | ⚠️ 灰显卡片 | 无 | 占位 |
-| 46 | 分支探索 | P3 | ❌ | 无 | ⚠️ 灰显卡片 | 无 | 占位 |
-| 47 | 人格篡改 | P3 | ❌ | 无 PUT /agents | ⚠️ 灰显卡片 | 无 | 占位 |
-| 48 | 干预历史 | P3 | 🟡 | 无持久化 | ✅ Mock 列表 | ❌ 无 /interventions | DB 表+API |
-| 49 | 剧本模式 | P3 | ❌ | 无 | ⚠️ 灰显卡片 | 无 | 占位 |
-| 50 | Agent 市场 | P3 | ❌ | 无 | ⚠️ EmptyState | 无 | 占位 |
+| 1 | 自然语言创建 Agent | P0 | ✅ | ✅ PersonaBuilder | ✅ AgentFoundry | ✅ POST /api/agents | Step 29 |
+| 2 | 人格引擎 | P0 | ✅ | ✅ Persona + Prompt | ✅ PersonaRadar | ✅ | Step 29 |
+| 3 | 背景故事自动生成 | P1 | ✅ | ✅ 内嵌于 #1 | ✅ 显示 | ✅ | Step 29 |
+| 4 | 目标系统 | P1 | ✅ | ✅ Goal+progress | ✅ GoalPanel | ✅ | Step 40 |
+| 5 | 决策风格参数 | P1 | ✅ | ✅ DecisionStyle | ✅ 2x2 网格 | ✅ | Step 29 |
+| 6 | Agent Remix | P2 | ✅ | ✅ remixer | ✅ RemixPanel | ✅ /remix | Step 39 |
+| 7 | 模板库 (36) | P2 | ✅ | ✅ JSON 36模板 | ✅ TemplateBrowser | ✅ /templates | Step 39 |
+| 8 | 场景投放 | P0 | ✅ | ✅ WorldEngine | ✅ SoloTheater | ✅ /worlds | Step 32 |
+| 9 | 思维流实时展示 | P0 | ✅ | ✅ tick_stream | ✅ ThoughtStream | ✅ SSE | Step 32 |
+| 10 | 目标追逐 | P1 | ✅ | ✅ goal_check | ✅ GoalPanel+SSE | ✅ | Step 40 |
+| 11 | 动态计划调整 | P1 | ⏭️ | — | — | — | 跳过 |
+| 12 | Agent 日记 | P1 | ✅ | ✅ NarrativeEngine | ✅ NarrativeFactory | ✅ /narratives/diary | Step 30+34 |
+| 13 | 决策回放 | P2 | ⏭️ | — | — | — | 跳过(41) |
+| 14 | 暂停干预 | P2 | ✅ | ✅ inject/pause | ✅ 按钮 | ✅ /pause /inject | Step 32+34 |
+| 15 | 群体投放 | P0 | ✅ | ✅ GroupChat | ✅ GroupSandbox | ✅ /worlds | Step 33 |
+| 16 | Agent 间对话 | P1 | ✅ | ✅ RoundRobin | ✅ EventFeed | ✅ SSE | Step 33 |
+| 17 | 关系演化 | P1 | ✅ | ✅ relationships | ✅ RelationshipGraph | ✅ SSE | Step 33 |
+| 18 | 竞争博弈 | P1 | ✅ | ✅ 资源模型 | ✅ 展示 | ✅ | Step 33 |
+| 19 | 角色冲突 | P2 | 🟡 | ⚠️ 关键词检测 | 无 | 无 | 部分 |
+| 20 | 关系网络图 | P2 | ✅ | ✅ 快照 API | ✅ Graph | ✅ /relationships | Step 31 |
+| 21 | 群体动力学报告 | P2 | ❌ | 无 | 无 | 无 | — |
+| 22 | 1v1 对抗 | P1 | ✅ | ✅ ArenaEngine | ✅ DuelArena | ✅ /arenas/debate | Step 31+46 |
+| 23 | 大乱斗 | P2 | ✅ | ✅ battle_royale | ✅ BattleRoyale | ✅ /arenas/battle_royale | Step 46 |
+| 24 | 战报生成 | P2 | ✅ | ✅ report.py | ✅ ArenaReport | ✅ /arenas/{id}/report | Step 46 |
+| 25 | 盲测模式 | P3 | ❌ | 无 | ⚠️ EmptyState | 无 | — |
+| 26 | 复盘对比 | P2 | ✅ | ✅ list筛选 | ✅ ArenaComparison | ✅ /arenas?agent_id= | Step 46 |
+| 27 | 排行榜 | P3 | ❌ | 无 | 无 | 无 | — |
+| 28 | A/B 测试 | P3 | ❌ | 无 | 无 | 无 | — |
+| 29 | 小说化叙事 | P1 | ✅ | ✅ STORY 模板 | ✅ 重新生成 | ✅ /narratives/story | Step 30+34+42 |
+| 30 | 未来的信 | P2 | ✅ | ✅ LETTER 模板 | ✅ 时间跨度 | ✅ /narratives/letter | Step 30+34+42 |
+| 31 | 平行对话 | P2 | ✅ | ✅ PARALLEL 模板 | ✅ 对话选择 | ✅ /narratives/parallel | Step 42 |
+| 32 | 播客脚本 | P2 | ✅ | ✅ PODCAST 模板 | ✅ 嘉宾选择 | ✅ /narratives/podcast | Step 30+34+42 |
+| 33 | 微电影大纲 | P3 | ❌ | 无 | ⚠️ 灰显按钮 | 无 | — |
+| 34 | 自动连载 | P3 | ❌ | 无 | ⚠️ 灰显按钮 | 无 | — |
+| 35 | Agent 自画像 | P3 | ❌ | 无 | ⚠️ 灰显按钮 | 无 | — |
+| 36 | 多 Agent 仪表盘 | P0 | ✅ | ✅ agents API | ✅ Dashboard | ✅ GET /agents | Step 43 |
+| 37 | 事件热力图 | P2 | ✅ | ✅ events API | ✅ Heatmap | ✅ /events | Step 43 |
+| 38 | Agent 搜索 | P2 | ✅ | ✅ 客户端过滤 | ✅ Search | ✅ | Step 43 |
+| 39 | 决策模式识别 | P2 | ✅ | ✅ agents API | ✅ Patterns | ✅ | Step 43 |
+| 40 | 异常检测 | P3 | ❌ | 无 | ⚠️ EmptyState | 无 | — |
+| 41 | 长期追踪 | P3 | ❌ | 无 | ⚠️ EmptyState | 无 | — |
+| 42 | 策略提取 | P3 | ❌ | 无 | ⚠️ EmptyState | 无 | — |
+| 43 | 事件注入 | P2 | ✅ | ✅ inject_event | ✅ 注入表单 | ✅ /inject | Step 34 |
+| 44 | 上帝之声 | P3 | ❌ | 无 | ⚠️ 灰显卡片 | 无 | — |
+| 45 | 时间回溯 | P3 | ❌ | 无 | ⚠️ 灰显卡片 | 无 | — |
+| 46 | 分支探索 | P3 | ❌ | 无 | ⚠️ 灰显卡片 | 无 | — |
+| 47 | 人格篡改 | P3 | ❌ | 无 PUT /agents | ⚠️ 灰显卡片 | 无 | — |
+| 48 | 干预历史 | P3 | 🟡 | 无持久化 | ✅ Mock 列表 | ❌ | 部分 |
+| 49 | 剧本模式 | P3 | ❌ | 无 | ⚠️ 灰显卡片 | 无 | — |
+| 50 | Agent 市场 | P3 | ❌ | 无 | ⚠️ EmptyState | 无 | — |
 | 51 | 精彩回放 | P2 | ✅ | ✅ simulations 表+API | ✅ useSimulations+轮询 | ✅ /simulations | Step 45 |
 | 52 | 实验模板 | P2 | ✅ | ✅ scenarios API | ✅ useScenarios+双按钮 | ✅ /scenarios | Step 45 |
 | 53 | 社区数据大屏 | P3 | ❌ | 无 | ⚠️ EmptyState | 无 | 占位 |
