@@ -227,6 +227,10 @@ async def suggest_roles(body: dict) -> list[dict]:
     except Exception as e:
         logger.warning(f"LLM 角色推荐不可用，使用规则兜底: {e}")
 
+    # LLM 返回了非数组（如 JSON 对象）→ 视为无效，走兜底
+    if not isinstance(llm_roles, list):
+        llm_roles = None
+
     # 规则兜底：MBTI → 角色映射
     if not llm_roles:
         mbti_role_map = {
@@ -269,3 +273,93 @@ async def suggest_roles(body: dict) -> list[dict]:
                 "reason": r.get("reason", ""),
             })
     return validated
+
+
+# =============================================================================
+# 执行 + Plan（Step 52）
+# =============================================================================
+
+
+@router.post("/{team_id}/execute")
+async def execute_team(
+    team_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """启动 Team 执行——分解任务、创建 Plan、创建临时 World。"""
+    from engines.team.engine import TeamEngine
+    from models.plan_orm import PlanRow
+
+    result = await db.execute(select(TeamRow).where(TeamRow.id == team_id))
+    team_row = result.scalar_one_or_none()
+    if not team_row:
+        raise HTTPException(status_code=404, detail=f"Team {team_id!r} 不存在")
+
+    if team_row.status == "executing":
+        plan_result = await db.execute(
+            select(PlanRow)
+            .where(PlanRow.team_id == team_id)
+            .where(PlanRow.status == "executing")
+            .order_by(PlanRow.created_at.desc())
+            .limit(1)
+        )
+        plan_row = plan_result.scalar_one_or_none()
+        if plan_row:
+            return plan_row.to_dict()
+        raise HTTPException(status_code=400, detail="Team 正在执行中但 Plan 丢失")
+
+    if team_row.status not in ("idle", "finished"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Team 状态为 {team_row.status}，无法启动"
+        )
+
+    team = team_row.to_dict()
+
+    try:
+        from api.agents import get_agent_factory
+        model_client = get_agent_factory().model_client
+    except Exception:
+        model_client = None
+
+    engine = TeamEngine(team, db)
+    plan = await engine.execute(model_client)
+
+    logger.info(f"Team {team_id!r} execution started: plan={plan['id']}")
+    return plan
+
+
+@router.get("/{team_id}/plan")
+async def get_team_plan(
+    team_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """获取 Team 的当前或最近一次 Plan。"""
+    from models.plan_orm import PlanRow
+
+    result = await db.execute(
+        select(PlanRow)
+        .where(PlanRow.team_id == team_id)
+        .order_by(PlanRow.created_at.desc())
+        .limit(1)
+    )
+    plan_row = result.scalar_one_or_none()
+    if not plan_row:
+        raise HTTPException(status_code=404, detail=f"Team {team_id!r} 还没有执行计划")
+    return plan_row.to_dict()
+
+
+@router.get("/{team_id}/plan/history")
+async def get_team_plan_history(
+    team_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """获取 Team 的全部历史 Plan。"""
+    from models.plan_orm import PlanRow
+
+    result = await db.execute(
+        select(PlanRow)
+        .where(PlanRow.team_id == team_id)
+        .order_by(PlanRow.created_at.desc())
+    )
+    rows = result.scalars().all()
+    return [row.to_dict() for row in rows]

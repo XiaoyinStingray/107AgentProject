@@ -46,3 +46,26 @@ export interface AgentBrief {
 export interface TeamDetail extends TeamSummary {
   agents: AgentBrief[];
 }
+
+/** Plan 步骤 */
+export interface PlanStep {
+  id: string;
+  title: string;
+  assignee: string | null;
+  description: string;
+  status: "pending" | "active" | "done";
+  progress: number;
+  depends_on: string[];
+}
+
+/** Team 执行 Plan */
+export interface TeamPlan {
+  id: string;
+  team_id: string;
+  task: string;
+  steps: PlanStep[];
+  status: "executing" | "paused" | "finished";
+  world_id: string | null;
+  created_at: string;
+  progress_pct?: number;
+}

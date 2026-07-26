@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useAgents } from "../api/agents";
-import { useTeams, useCreateTeam, useDeleteTeam, useSuggestRoles } from "../api/teams";
+import { useTeams, useCreateTeam, useDeleteTeam, useSuggestRoles, useExecuteTeam } from "../api/teams";
 import type { TeamRole, SuggestedRole } from "../types/team";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
@@ -16,6 +16,7 @@ export default function TeamDashboard() {
   const { data: teams = [], isLoading: teamsLoading } = useTeams();
   const createTeam = useCreateTeam();
   const deleteTeam = useDeleteTeam();
+  const executeTeam = useExecuteTeam();
 
   // 创建表单
   const [showCreate, setShowCreate] = useState(false);
@@ -92,6 +93,17 @@ export default function TeamDashboard() {
       await deleteTeam.mutateAsync(id);
     },
     [deleteTeam],
+  );
+
+  const handleExecute = useCallback(
+    async (id: string) => {
+      try {
+        await executeTeam.mutateAsync(id);
+      } catch (e) {
+        setErrorMsg(e instanceof Error ? e.message : "执行失败");
+      }
+    },
+    [executeTeam],
   );
 
   // 角色预览组件
@@ -324,10 +336,30 @@ export default function TeamDashboard() {
                     </p>
                   </div>
                   <div className="flex gap-2 mt-3 pt-3 border-t border-border">
+                    {team.status === "idle" && (
+                      <button
+                        type="button"
+                        onClick={() => handleExecute(team.id)}
+                        disabled={executeTeam.isPending}
+                        className="text-xs font-mono text-accent-orange hover:text-accent-orange/80 transition-colors"
+                      >
+                        {executeTeam.isPending ? "启动中…" : "▶ 执行"}
+                      </button>
+                    )}
+                    {team.status === "executing" && (
+                      <span className="text-xs font-mono text-accent-green animate-pulse">
+                        ● 执行中
+                      </span>
+                    )}
+                    {team.status === "finished" && (
+                      <span className="text-xs font-mono text-text-secondary/60">
+                        ✓ 已完成
+                      </span>
+                    )}
                     <button
                       type="button"
                       onClick={() => handleDelete(team.id)}
-                      className="text-xs font-mono text-text-secondary hover:text-accent-red transition-colors"
+                      className="text-xs font-mono text-text-secondary hover:text-accent-red transition-colors ml-auto"
                     >
                       删除
                     </button>

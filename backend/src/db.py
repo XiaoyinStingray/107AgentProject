@@ -82,6 +82,7 @@ async def init_db():
     import models.simulation_orm  # noqa: F401 — 注册 Simulation ORM → simulations 表
     import models.intervention_orm  # noqa: F401 — 注册 Intervention ORM → interventions 表
     import models.team_orm  # noqa: F401 — 注册 Team ORM → teams 表
+    import models.plan_orm  # noqa: F401 — 注册 Plan ORM → plans 表
 
     async with _get_engine().begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

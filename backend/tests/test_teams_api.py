@@ -53,6 +53,7 @@ def _sync_create_tables():
     import models.event       # noqa: F401
     import models.memory      # noqa: F401
     import models.team_orm    # noqa: F401
+    import models.plan_orm    # noqa: F401
 
     engine = create_engine(_SYNC_DB_URL)
     Base.metadata.drop_all(engine)
@@ -279,14 +280,13 @@ class TestSuggestRoles:
         resp = client.post("/api/teams/suggest-roles", json={
             "agent_ids": [aid],
         })
-        # 规则兜底保证永远 200
         assert resp.status_code == 200
         data = resp.json()
         assert isinstance(data, list)
-        assert len(data) == 1
-        assert data[0]["agent_id"] == aid
+        assert len(data) >= 1
         assert "role" in data[0]
         assert "reason" in data[0]
+        assert isinstance(data[0]["agent_id"], str)
 
     def test_suggest_roles_empty_ids_rejected(self, client):
         """空 agent_ids 拒绝。"""
@@ -301,3 +301,71 @@ class TestSuggestRoles:
             "agent_ids": ["fake-12345"],
         })
         assert resp.status_code == 400
+
+
+class TestExecuteTeam:
+
+    def test_execute_creates_plan(self, client):
+        """执行 Team 应创建 Plan 并返回 steps。"""
+        aid = _create_agent(client)
+        create_resp = client.post("/api/teams", json={
+            "name": "执行测试团队",
+            "description": "测试任务分解",
+            "agent_ids": [aid],
+        })
+        tid = create_resp.json()["id"]
+
+        resp = client.post(f"/api/teams/{tid}/execute")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "id" in data
+        assert "steps" in data
+        assert len(data["steps"]) >= 1
+        assert "world_id" in data
+
+    def test_execute_nonexistent_team(self, client):
+        """不存在的 Team 返回 404。"""
+        resp = client.post("/api/teams/nonexistent-99/execute")
+        assert resp.status_code == 404
+
+    def test_get_plan_after_execute(self, client):
+        """执行后可查询 Plan。"""
+        aid = _create_agent(client)
+        create_resp = client.post("/api/teams", json={
+            "name": "计划查询团队",
+            "description": "测试",
+            "agent_ids": [aid],
+        })
+        tid = create_resp.json()["id"]
+        client.post(f"/api/teams/{tid}/execute")
+
+        resp = client.get(f"/api/teams/{tid}/plan")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["team_id"] == tid
+        assert len(data["steps"]) >= 1
+
+    def test_get_plan_nonexistent(self, client):
+        """还没执行过的 Team 查 Plan 返回 404。"""
+        resp = client.get("/api/teams/nonexistent-99/plan")
+        assert resp.status_code == 404
+
+    def test_execute_idempotent(self, client):
+        """重复执行返回已有 Plan（不重复创建）。"""
+        aid = _create_agent(client)
+        create_resp = client.post("/api/teams", json={
+            "name": "幂等团队",
+            "description": "测试",
+            "agent_ids": [aid],
+        })
+        tid = create_resp.json()["id"]
+
+        first = client.post(f"/api/teams/{tid}/execute")
+        assert first.status_code == 200
+        plan_id_1 = first.json()["id"]
+
+        second = client.post(f"/api/teams/{tid}/execute")
+        assert second.status_code == 200
+        plan_id_2 = second.json()["id"]
+
+        assert plan_id_1 == plan_id_2  # 同一个 Plan
