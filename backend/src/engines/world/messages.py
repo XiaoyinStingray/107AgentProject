@@ -60,6 +60,7 @@ class WorldMessageMixin:
     agents: dict[str, Any]
     current_tick: int
     _name_to_id: dict[str, str]
+    _act_model_client: Any
 
     def build_group_chat(self):
         """Create a target-aware AutoGen SelectorGroupChat for World Agents."""
@@ -70,7 +71,7 @@ class WorldMessageMixin:
         first_agent = next(iter(self.agents.values()))
         return SelectorGroupChat(
             participants=participants,  # type: ignore[arg-type]
-            model_client=first_agent.model_client,
+            model_client=self._act_model_client or first_agent.model_client,
             selector_prompt=SELECTOR_PROMPT,
             selector_func=self._select_addressed_speaker,
             allow_repeated_speaker=False,

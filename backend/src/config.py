@@ -21,7 +21,8 @@ class Settings(BaseSettings):
     # === LLM ===
     llm_api_key: str = ""
     llm_base_url: str = "https://api.deepseek.com/v1"
-    llm_model: str = "deepseek-chat"
+    llm_model: str = "deepseek-v4-flash"
+    llm_thinking_enabled: bool = False
     llm_temperature_think: float = 0.8
     llm_temperature_act: float = 0.5
     llm_max_tokens: int = 4096
