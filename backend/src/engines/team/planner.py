@@ -1,137 +1,144 @@
 """
-PlanManager — 跟踪计划进度，处理 Agent 的 update_plan tool。
-Step 52: 在 TeamEngine 的每个 tick 中检查进度，发射 plan_updated 事件。
+PlanManager — LLM 协调器驱动的阶段门控。
+Step 53: 收集对话 → 每 3 tick LLM 判定 → 推进阶段。
 """
 
 import json as _json
+import asyncio
 from typing import Callable
 
 from loguru import logger
 
+COORDINATOR_PROMPT = """你是项目协调器。根据以下团队成员的最新对话，判断当前任务阶段是否已完成。
+
+当前阶段：{current_step}
+负责人：{assignee}
+
+最近对话：
+{conversation}
+
+标准：如果该阶段目标已被充分讨论、形成明确结论或产出，回复 YES。如果仍在讨论中，回复 NO。
+只回复 YES 或 NO。"""
+
 
 class PlanManager:
-    """管理一个 Team 的任务计划，跟踪每个步骤的状态和进度。
-
-    不直接操作 DB——由 TeamEngine 在 tick 结束时同步到 PlanRow。
-    """
-
-    def __init__(self, steps: list[dict], on_event: Callable | None = None):
-        """
-        steps: [{id, title, assignee, description, status, progress, depends_on}, ...]
-        on_event: 回调——发射 SSE plan_updated 事件
-        """
+    def __init__(self, steps: list[dict], on_event: Callable | None = None,
+                 model_client=None):
         self.steps: list[dict] = steps
         self._on_event = on_event
-        self._current_step_idx = 0
-
-    # ── 状态查询 ──────────────────────────────────────────────────
+        self._results: dict[str, str] = {}
+        self._model_client = model_client
+        self._ticks_on_step = 0
+        self._recent_msgs: list[str] = []
 
     @property
-    def all_done(self) -> bool:
+    def all_done(self):
         return all(s.get("status") == "done" for s in self.steps)
 
     @property
-    def progress_pct(self) -> float:
-        if not self.steps:
-            return 1.0
-        done = sum(1 for s in self.steps if s.get("status") == "done")
-        return round(done / len(self.steps), 2)
+    def progress_pct(self):
+        if not self.steps: return 1.0
+        return round(sum(1 for s in self.steps if s.get("status") == "done") / len(self.steps), 2)
 
-    def current_step(self) -> dict | None:
-        """返回第一个未完成的步骤。"""
+    def current_step(self):
         for s in self.steps:
-            if s.get("status") != "done":
-                return s
+            if s.get("status") != "done": return s
         return None
 
-    def to_dict(self) -> dict:
-        return {
-            "steps": self.steps,
-            "progress_pct": self.progress_pct,
-            "all_done": self.all_done,
-        }
+    def to_dict(self):
+        return {"steps": self.steps, "progress_pct": self.progress_pct, "all_done": self.all_done}
 
-    # ── 进度更新 ──────────────────────────────────────────────────
+    def build_report(self):
+        secs = [f"## {s.get('title','')}\n\n{self._results.get(s.get('title',''), '（未提交产出）')}" for s in self.steps]
+        return {"title": "团队任务完成报告", "content": "\n\n".join(secs),
+                "steps_count": len(self.steps), "completed_count": sum(1 for s in self.steps if s.get("status") == "done")}
 
-    def check_progress(self, tick: int, agent_messages: list[str]) -> list[dict]:
-        """每个 tick 结束时调用——分析 Agent 对话，更新步骤进度。
+    # ── 进度更新 ──────────────────────────────────────
 
-        agent_messages: 本 tick 中所有 Agent 的发言文本
-
-        返回: 本 tick 发生变化的步骤列表（供 SSE 事件使用）
-        """
+    async def check_progress(self, tick: int, events: list[dict]) -> list[dict]:
         changed = []
 
-        # 激活第一个 pending 步骤
-        for s in self.steps:
-            if s.get("status") == "pending":
-                # 检查依赖：所有前置步骤必须 done
-                deps = s.get("depends_on", [])
-                deps_met = all(
-                    any(d == s2["id"] and s2.get("status") == "done"
-                        for s2 in self.steps)
-                    for d in deps
-                )
-                if deps_met:
-                    s["status"] = "active"
-                    s["progress"] = 0.1
-                    changed.append(s)
-                    logger.debug(f"Plan: step {s['title']!r} activated at tick {tick}")
-                break  # 一次只激活一个
+        # 收集本 tick 对话
+        for e in events:
+            msg = e.get("content", "") or e.get("message", "")
+            if msg and len(msg) > 10:
+                self._recent_msgs.append(msg)
 
-        # 推进 active 步骤的进度
-        joined = " ".join(agent_messages).lower()
-        for s in self.steps:
-            if s.get("status") != "active":
-                continue
-            title_keywords = s.get("title", "").lower()
-            # 简单启发式：Agent 消息中提及步骤关键词 → 推进进度
-            if any(kw in joined for kw in title_keywords.split() if len(kw) >= 2):
-                old = s.get("progress", 0)
-                s["progress"] = min(1.0, old + 0.25)
-                if s["progress"] >= 1.0:
-                    s["status"] = "done"
-                changed.append(s)
+        # 激活第一个 pending
+        if not any(s.get("status") == "active" for s in self.steps):
+            for s in self.steps:
+                if s.get("status") == "pending":
+                    s["status"] = "active"; s["progress"] = 0.1
+                    self._ticks_on_step = 0; self._recent_msgs = []
+                    changed.append(s)
+                    logger.info(f"Plan: step {s['title']!r} activated")
+                    break
+
+        # Agent 提交交付物 or 结束任务
+        for e in events:
+            action = e.get("action", "")
+            if action in ("complete_step", "submit_deliverable"):
+                data = e.get("data", {}) if isinstance(e.get("data"), dict) else {}
+                title = data.get("step_title", "")
+                result = data.get("result") or data.get("deliverable", "")
+                self._complete(title, result)
+                changed.append(self.current_step() or {})
+            if action == "finish_task":
+                # Agent 主动结束——标记所有步骤完成
+                for s in self.steps:
+                    if s.get("status") != "done":
+                        s["status"] = "done"
+                        s["progress"] = 1.0
+                changed.append({"all_forced_done": True})
+                self._ticks_on_step = 0
+
+        # LLM 协调器（每 3 tick）
+        self._ticks_on_step += 1
+        step = self.current_step()
+        if step and self._ticks_on_step >= 3 and self._model_client:
+            ok = await self._llm_check(step)
+            if ok:
+                self._complete(step.get("title", ""), "（协调器判定：阶段完成）")
+                changed.append(step)
 
         if changed and self._on_event:
             self._on_event("plan_updated", self.to_dict())
-
+        if self.all_done and changed and self._on_event:
+            self._on_event("report_ready", self.build_report())
         return changed
 
-    # ── Agent tool: update_plan ──────────────────────────────────
+    def _complete(self, title: str, result: str):
+        for s in self.steps:
+            if s.get("status") == "active" and (not title or s.get("title") == title):
+                s["status"] = "done"; s["progress"] = 1.0
+                if result: self._results[s.get("title", "")] = result
+                logger.info(f"Plan: step {s['title']!r} completed")
+                self._activate_next()
+                break
 
-    def handle_update_plan(self, args: dict) -> str:
-        """Agent 调用 update_plan tool 时触发。
+    def _activate_next(self):
+        self._ticks_on_step = 0; self._recent_msgs = []
+        for s in self.steps:
+            if s.get("status") == "pending":
+                s["status"] = "active"; s["progress"] = 0.1
+                break
 
-        args: {action: "add"|"complete"|"reorder", step_title?: str, ...}
-
-        返回: 给 Agent 的响应文本
-        """
-        action = args.get("action", "")
-        step_title = args.get("step_title", "")
-
-        if action == "complete":
-            for s in self.steps:
-                if s.get("title") == step_title:
-                    s["status"] = "done"
-                    s["progress"] = 1.0
-                    if self._on_event:
-                        self._on_event("plan_updated", self.to_dict())
-                    return f"步骤 {step_title!r} 已标记为完成"
-
-        if action == "add":
-            new_step = {
-                "id": args.get("id", "step-new"),
-                "title": args.get("title", ""),
-                "assignee": args.get("assignee"),
-                "description": args.get("description", ""),
-                "status": "pending",
-                "progress": 0.0,
-                "depends_on": args.get("depends_on", []),
-            }
-            self.steps.append(new_step)
-            if self._on_event:
-                self._on_event("plan_updated", self.to_dict())
-            return f"新增步骤: {new_step['title']}"
-
-        return f"未知的 plan 操作: {action}"
+    async def _llm_check(self, step: dict) -> bool:
+        conv = "\n".join(self._recent_msgs[-8:])
+        if len(conv) < 30: return False
+        prompt = COORDINATOR_PROMPT.format(
+            current_step=step.get("title", ""),
+            assignee=step.get("assignee") or "全员",
+            conversation=conv[:2000],
+        )
+        try:
+            from autogen_core.models import UserMessage
+            result = await asyncio.wait_for(
+                self._model_client.create(messages=[UserMessage(content=prompt, source="coordinator")]),
+                timeout=10.0,
+            )
+            text = (result.content if hasattr(result, "content") else str(result)).strip().upper()
+            return text.startswith("YES")
+        except Exception as e:
+            logger.debug(f"Coordinator: {e}")
+            return False

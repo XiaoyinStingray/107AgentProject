@@ -31,7 +31,13 @@ def _build_action_description(tool_name: str, arguments: dict) -> str:
         if msg:
             return msg
         return ""
-    # Unknown tool – produce a clean label instead of raw dict
+    if tool_name in ("complete_step", "submit_deliverable"):
+        step_title = arguments.get("step_title", "")
+        result = arguments.get("result") or arguments.get("deliverable", "")
+        return f"📤 提交交付物：{step_title}" + (f" — {result[:80]}..." if result else "")
+    if tool_name == "finish_task":
+        summary = arguments.get("summary", "")
+        return "🏁 任务完成" + (f" — {summary[:80]}" if summary else "")
     return f"执行了 {tool_name}" if tool_name else ""
 
 
@@ -97,7 +103,10 @@ class WorldMessageMixin:
         return matches[0] if len(matches) == 1 else None
 
     def _has_identity_conflict(self, source_id: str, content: str) -> bool:
-        """Reject obvious self/other identity contradictions before persistence."""
+        """Reject obvious self/other identity contradictions before persistence。
+        Team 任务模式下放宽检查——Agent 在讨论中提及同事名字是正常的。"""
+        if hasattr(self, "team_task") and self.team_task:
+            return False  # Team 模式不检查身份冲突
         source_agent = self.agents.get(source_id)
         if source_agent is None:
             return False
@@ -208,7 +217,7 @@ class WorldMessageMixin:
             tick=self.current_tick,
             type="agent_message",
             source_agent_id=source_id,
-            description=content[:500],
+            description=content,
             created_at=datetime.now(timezone.utc).isoformat(),
         )
 
@@ -234,7 +243,7 @@ class WorldMessageMixin:
             tick=self.current_tick,
             type="agent_action",
             source_agent_id=source_id,
-            description=description[:500],
+            description=description,
             data={"action": tool_name, **arguments},
             created_at=datetime.now(timezone.utc).isoformat(),
         )

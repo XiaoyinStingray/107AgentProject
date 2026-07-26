@@ -55,7 +55,7 @@ export default function DirectorIntervention() {
     !injectEvent.isPending;
 
   const activeWorlds = worlds.filter(
-    (w) => w.status === "running" || w.status === "paused",
+    (w) => (w.status === "running" || w.status === "paused") && !w.name.startsWith("Team:"),
   );
 
   const handleInject = useCallback(async () => {

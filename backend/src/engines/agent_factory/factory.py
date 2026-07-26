@@ -145,6 +145,25 @@ class LifeAgent:
             updated_at=self.updated_at,
         )
 
+    def replace_tools(self, tools: list):
+        """替换 Agent 的工具集——Team 任务需切换到 TEAM_AGENT_TOOLS。"""
+        from autogen_agentchat.agents import AssistantAgent
+
+        old_name = self._agent.name
+        old_desc = self._agent.description
+        old_sys = self._agent._system_messages[0].content if self._agent._system_messages else ""
+
+        self._agent = AssistantAgent(
+            name=old_name,
+            model_client=self._model_client,
+            description=old_desc,
+            system_message=old_sys,
+            tools=tools or [],
+            reflect_on_tool_use=True,
+            max_tool_iterations=3,
+        )
+        logger.info(f"LifeAgent.replace_tools: {old_name} → {len(tools)} tools")
+
     def __repr__(self) -> str:
         return f"<LifeAgent id={self.id!r} name={self.persona.name!r}>"
 

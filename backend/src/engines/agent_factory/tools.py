@@ -61,12 +61,61 @@ async def observe(target: str) -> str:
     return f"正在观察: {target}"
 
 
+async def submit_deliverable(step_title: str, deliverable: str) -> str:
+    """【团队任务】提交当前阶段的交付物。
+
+    这不是"汇报进度"，而是提交实质性产出。deliverable 必须是可直接使用的结构化内容。
+
+    调研类输出示例：
+    | 选题名称 | 技术栈 | 难度 | 创新点 | 可行性 |
+    |---------|--------|------|--------|--------|
+    | 智能课表 | React+Node | 中 | AI推荐 | 高 |
+
+    设计类输出示例：
+    ## 方案：校园社交App
+    **核心功能**：课表共享、二手交易、组队学习
+    **技术选型**：Flutter + Go + PostgreSQL
+    **风险点**：用户冷启动、实时消息成本
+
+    Args:
+        step_title: 步骤标题（必须与你分配到的任务标题一致）
+        deliverable: 交付物——结构化内容，将直接汇入最终报告。留空表示不需要帮助
+    """
+    logger.info(f"[tool] submit_deliverable: {step_title} — {len(deliverable)} chars")
+    return f"✅ 交付物已提交：{step_title}。内容已汇入报告。"
+
+
+async def complete_step(step_title: str, result: str) -> str:
+    """【已弃用】请使用 submit_deliverable 代替。"""
+    return await submit_deliverable(step_title, result)
+
+
 # =============================================================================
 # Tool 集合
 # =============================================================================
 
 # 所有 Agent 默认可用的 tool 集合
 DEFAULT_AGENT_TOOLS: list = [send_message, think_aloud, set_goal, observe]
+
+async def finish_task(summary: str = "") -> str:
+    """【团队任务】所有阶段完成后，调用此工具结束任务并生成最终报告。
+
+    仅在以下情况下调用：
+    - 你已完成所有分配给你的任务（submit_deliverable 已提交）
+    - 你认为团队的所有阶段目标都已达成
+
+    Args:
+        summary: 任务完成的总体总结（可选）
+    """
+    logger.info(f"[tool] finish_task: {summary[:120] if summary else '无摘要'}")
+    return "任务已标记完成。系统将生成最终报告。"
+
+
+# Team 任务专用 tools——不需要 observe/set_goal
+TEAM_AGENT_TOOLS: list = [send_message, think_aloud, submit_deliverable, finish_task]
+
+# 保留旧名兼容
+complete_step = submit_deliverable
 
 # 场景特定 tool 集合——不同 Scenario 注册不同 tools
 # （预留，后续 Step 按场景扩展）

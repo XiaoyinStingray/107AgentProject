@@ -13,7 +13,10 @@ export type SSEEventType =
   | "connected"
   | "paused"
   | "error"
-  | "session_end";
+  | "session_end"
+  | "plan_updated"
+  | "coordinator_nudge"
+  | "report_ready";
 
 export interface SimEvent {
   id: string;

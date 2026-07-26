@@ -169,12 +169,49 @@ async def _world_event_generator(
                 })
                 break
             if engine.world.status == "running":
+                tick_events = []  # 收集本 tick 的事件用于 PlanManager
                 async for event in engine.tick_stream():
-                    # 若中途被暂停，不再向前端推送事件（tick 在后台静默完成）
                     if engine.world.status != "running":
                         continue
-                    yield _sse_event(_event_to_dict(event, name_map))
+                    d = _event_to_dict(event, name_map)
+                    tick_events.append(d)
+                    yield _sse_event(d)
                 tick_count += 1
+                # Team Plan 进度推进（Step 53）——LLM 协调器判定
+                if hasattr(engine, "team_plan") and engine.team_plan:
+                    plan = engine.team_plan
+                    await plan.check_progress(tick_count, tick_events)
+                    # 发射 plan_updated 事件——前端看板实时更新
+                    yield _sse_event({
+                        "type": "plan_updated",
+                        "world_id": world_id,
+                        "tick": engine.current_tick,
+                        "data": plan.to_dict(),
+                    })
+                    # 协调器催促（连续多轮未推进）
+                    step = plan.current_step()
+                    if step and plan._ticks_on_step >= 5:
+                        yield _sse_event({
+                            "type": "coordinator_nudge",
+                            "world_id": world_id,
+                            "tick": engine.current_tick,
+                            "content": f"⚠️ 协调器：当前阶段「{step['title']}」已讨论{plan._ticks_on_step}轮。请立即调用 submit_deliverable 提交交付物。",
+                        })
+                    if plan.all_done:
+                        engine.world.status = "finished"
+                        await _finish_engine_simulation(engine)
+                        yield _sse_event({
+                            "type": "session_end",
+                            "world_id": world_id,
+                            "tick": engine.current_tick,
+                        })
+                        yield _sse_event({
+                            "type": "report_ready",
+                            "world_id": world_id,
+                            "tick": engine.current_tick,
+                            "data": plan.build_report(),
+                        })
+                        break
             elif engine.world.status == "paused":
                 yield _sse_event({
                     "type": "paused",

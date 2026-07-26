@@ -212,6 +212,9 @@ const EVENT_VISUALS: Record<
   error: { label: "", border: "", text: "" },
   session_end: { label: "", border: "", text: "" },
   goal_update: { label: "", border: "", text: "" },
+  plan_updated: { label: "", border: "", text: "" },
+  coordinator_nudge: { label: "", border: "", text: "" },
+  report_ready: { label: "", border: "", text: "" },
 };
 
 const INFRASTRUCTURE_EVENTS = new Set<SSEEventType>([
@@ -220,4 +223,7 @@ const INFRASTRUCTURE_EVENTS = new Set<SSEEventType>([
   "error",
   "session_end",
   "goal_update",
+  "plan_updated",
+  "coordinator_nudge",
+  "report_ready",
 ]);

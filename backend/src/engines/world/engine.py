@@ -162,12 +162,16 @@ class WorldEngine(
             yield event
 
     async def _post_process_tick(self, tick_events: list[SimEvent]) -> list[SimEvent]:
-        """Apply actions, analyze relationships, update goals, and detect conflicts."""
+        """Apply actions, analyze relationships, update goals, and detect conflicts。
+        Team 任务模式跳过关系和冲突检测。"""
         derived: list[SimEvent] = []
         for event in tick_events:
             if event.type == "agent_action":
                 derived.extend(self._apply_action(event))
         goal_events = await self._update_goal_progress(tick_events)
+        # Team 任务：不需要关系变化和冲突检测
+        if hasattr(self, "team_task") and self.team_task:
+            return [*derived, *goal_events]
         relationship_events = self._update_relationships([*tick_events, *derived])
         conflict_events = self._detect_conflict()
         return [*derived, *goal_events, *relationship_events, *conflict_events]

@@ -324,6 +324,50 @@ async def execute_team(
     engine = TeamEngine(team, db)
     plan = await engine.execute(model_client)
 
+    # Step 53: 自动启动关联的 World + 挂载 PlanManager
+    world_id = plan.get("world_id")
+    if world_id:
+        try:
+            from api.worlds import _rebuild_agents_from_db, _build_world_engine
+            from api.sse import register_world as sse_register
+            from models.world_orm import WorldRow
+            from models.world import WorldResponse
+
+            world_result = await db.execute(
+                select(WorldRow).where(WorldRow.id == world_id)
+            )
+            world_row = world_result.scalar_one_or_none()
+            if world_row:
+                world = WorldResponse(**world_row.to_dict())
+                world_engine = await _build_world_engine(world)
+                world_engine.world.status = "running"
+                world_engine.current_tick = 0
+                # 替换为 Team 专用 tools（含 complete_step，无 observe/set_goal）
+                from engines.agent_factory.tools import TEAM_AGENT_TOOLS
+                for agent in world_engine.agents.values():
+                    agent.replace_tools(TEAM_AGENT_TOOLS)
+                # Team 任务上下文——替换默认场景上下文
+                world_engine.team_task = team.get("description") or team.get("name")
+                world_engine.team_agent_steps = {
+                    s["assignee"]: [s]
+                    for s in plan.get("steps", [])
+                    if s.get("assignee")
+                }
+                world_engine.team_agent_roles = {
+                    r.get("agent_id"): r.get("role", "成员")
+                    for r in (team.get("roles") or [])
+                }
+                # 挂载 PlanManager → SSE tick 循环中自动推进进度
+                world_engine.team_plan = engine.plan
+                world_engine.team_engine = engine  # 保持引用，防止 GC
+                sse_register(world_id, world_engine)
+                world.status = "running"
+                world_row.status = "running"
+                await db.commit()
+                logger.info(f"Team world {world_id} auto-started for team {team_id}")
+        except Exception as e:
+            logger.warning(f"Failed to auto-start team world: {e}")
+
     logger.info(f"Team {team_id!r} execution started: plan={plan['id']}")
     return plan
 

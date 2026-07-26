@@ -84,7 +84,7 @@ class TeamEngine:
                 "tick": self._tick_count,
             })
 
-        self.plan = PlanManager(steps, on_event=on_plan_event)
+        self.plan = PlanManager(steps, on_event=on_plan_event, model_client=model_client)
         self._tick_count = 0
 
         # 6. 创建临时 World

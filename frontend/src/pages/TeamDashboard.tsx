@@ -1,15 +1,22 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { useAgents } from "../api/agents";
-import { useTeams, useCreateTeam, useDeleteTeam, useSuggestRoles, useExecuteTeam } from "../api/teams";
+import { useTeams, useCreateTeam, useDeleteTeam, useSuggestRoles, useExecuteTeam, useTeamPlan } from "../api/teams";
+import { usePauseWorld, useStartWorld } from "../api/worlds";
+import { useSSE } from "../hooks/useSSE";
 import type { TeamRole, SuggestedRole } from "../types/team";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
 import EmptyState from "../components/shared/EmptyState";
+import TaskKanban from "./team/TaskKanban";
+import LiveChat from "./team/LiveChat";
+import HealthPanel from "./team/HealthPanel";
 
 /* ================================================================
-   Step 51 — M9 Agent Team 仪表盘
-   Team 创建 + 列表页面。角色推荐走真实 LLM API。
+   Step 51–53 — M9 Agent Team 仪表盘
+   Team 创建 + 列表 + 看板（Kanban + 实时对话 + 健康面板）
    ================================================================ */
+
+type ViewTab = "kanban" | "chat" | "health";
 
 export default function TeamDashboard() {
   const { data: agents = [] } = useAgents();
@@ -17,6 +24,61 @@ export default function TeamDashboard() {
   const createTeam = useCreateTeam();
   const deleteTeam = useDeleteTeam();
   const executeTeam = useExecuteTeam();
+
+  // 看板状态
+  const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
+  const [viewTab, setViewTab] = useState<ViewTab>("kanban");
+  const { data: teamPlan } = useTeamPlan(activeTeamId);
+
+  // SSE + World 控制
+  const worldId = teamPlan?.world_id ?? null;
+  const { events, connected, disconnect, clear } = useSSE(worldId);
+
+  // 从 SSE 实时提取 plan_updated / coordinator_nudge / report_ready
+  const livePlan = useMemo(() => {
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i].type === "plan_updated" && events[i].data) {
+        return events[i].data as { steps: typeof teamPlan extends { steps: infer S } ? S : never; progress_pct: number; all_done: boolean };
+      }
+    }
+    return null;
+  }, [events]);
+
+  const coordinatorMsg = useMemo(() => {
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i].type === "coordinator_nudge") {
+        return events[i].content ?? null;
+      }
+    }
+    return null;
+  }, [events]);
+
+  const report = useMemo(() => {
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i].type === "report_ready") {
+        return events[i].data as { title: string; content: string };
+      }
+    }
+    return null;
+  }, [events]);
+
+  // 优先用 SSE 实时数据，fallback 到轮询
+  const steps = livePlan?.steps ?? teamPlan?.steps ?? [];
+  const progressPct = livePlan?.progress_pct ?? teamPlan?.progress_pct ?? 0;
+
+  // 完成时自动切到看板（展示报告）
+  useEffect(() => {
+    if (report) setViewTab("kanban");
+  }, [report]);
+  const pauseWorld = usePauseWorld();
+  const startWorld = useStartWorld();
+  const [isPaused, setIsPaused] = useState(false);
+
+  const agentNames = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const a of agents) map[a.id] = a.name;
+    return map;
+  }, [agents]);
 
   // 创建表单
   const [showCreate, setShowCreate] = useState(false);
@@ -98,13 +160,35 @@ export default function TeamDashboard() {
   const handleExecute = useCallback(
     async (id: string) => {
       try {
-        await executeTeam.mutateAsync(id);
+        clear(); // BUG-010: 新执行前清空上次残留事件
+        const plan = await executeTeam.mutateAsync(id);
+        setActiveTeamId(id);
+        setViewTab("kanban");
+        setIsPaused(false);
       } catch (e) {
         setErrorMsg(e instanceof Error ? e.message : "执行失败");
       }
     },
-    [executeTeam],
+    [executeTeam, clear],
   );
+
+  const handleBackToList = useCallback(() => {
+    setActiveTeamId(null);
+    setIsPaused(false);
+    disconnect();
+  }, [disconnect]);
+
+  const handlePause = useCallback(async () => {
+    if (!worldId) return;
+    try { await pauseWorld.mutateAsync(worldId); } catch { return; }
+    setIsPaused(true);
+  }, [worldId, pauseWorld]);
+
+  const handleResume = useCallback(async () => {
+    if (!worldId) return;
+    try { await startWorld.mutateAsync(worldId); } catch { return; }
+    setIsPaused(false);
+  }, [worldId, startWorld]);
 
   // 角色预览组件
   const RolePreview = roles.length > 0 && (
@@ -143,11 +227,112 @@ export default function TeamDashboard() {
     </div>
   );
 
+  // ── 看板视图 ──────────────────────────────────────────────────
+  const activeTeam = teams.find((t) => t.id === activeTeamId);
+  const doneSteps = steps.filter((s) => s.status === "done").length;
+
   return (
     <div className="h-full overflow-y-auto p-6 animate-fade-in">
-      {/* 标题 */}
-      <h1 className="text-2xl font-mono text-accent-orange mb-1">
-        M9 Agent Team
+      {/* 看板模式 */}
+      {activeTeamId && activeTeam ? (
+        <div className="h-full flex flex-col">
+          <div className="flex items-center gap-3 mb-4 shrink-0">
+            <button
+              type="button"
+              onClick={handleBackToList}
+              className="text-xs font-mono text-text-secondary hover:text-text-primary"
+            >
+              ← 返回列表
+            </button>
+            <h1 className="text-lg font-mono text-accent-orange">{activeTeam.name}</h1>
+            <Badge label={isPaused ? "已暂停" : "执行中"} variant="P1" />
+            <button
+              type="button"
+              onClick={isPaused ? handleResume : handlePause}
+              className={`ml-auto px-3 py-1 text-xs font-mono rounded border transition-colors ${
+                isPaused
+                  ? "border-accent-green/60 text-accent-green hover:bg-accent-green/10"
+                  : "border-accent-orange/60 text-accent-orange hover:bg-accent-orange/10"
+              }`}
+            >
+              {isPaused ? "▶ 继续" : "⏸ 暂停"}
+            </button>
+          </div>
+
+          {/* Tab 栏 */}
+          <div className="flex gap-2 mb-3 shrink-0">
+            {([
+              ["kanban", "📋 任务看板"],
+              ["chat", "💬 实时对话"],
+              ["health", "📊 协作分析"],
+            ] as [ViewTab, string][]).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setViewTab(key)}
+                className={`px-3 py-1.5 text-xs font-mono rounded border transition-colors ${
+                  viewTab === key
+                    ? "border-accent-orange/60 bg-accent-orange/10 text-accent-orange"
+                    : "border-border text-text-secondary hover:border-text-secondary/40"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* 面板内容 */}
+          <div className="flex-1 min-h-0">
+            {viewTab === "kanban" && (
+              report ? (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">📄</span>
+                    <h3 className="text-sm font-mono text-accent-green">{report.title as string}</h3>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const text = `# ${report.title}\n\n${report.content}`;
+                        const blob = new Blob([text as string], { type: "text/markdown;charset=utf-8" });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url; a.download = "team-report.md"; a.click();
+                        URL.revokeObjectURL(url);
+                      }}
+                      className="ml-auto px-3 py-1 text-xs font-mono rounded border border-border text-text-secondary hover:border-accent-green hover:text-accent-green transition-colors"
+                    >
+                      ⬇ 下载报告
+                    </button>
+                  </div>
+                  <Card className="p-4 max-h-[60vh] overflow-y-auto">
+                    <div className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap font-mono">
+                      {report.content as string}
+                    </div>
+                  </Card>
+                </div>
+              ) : (
+                <TaskKanban steps={steps} agentNames={agentNames} coordinatorMsg={coordinatorMsg} />
+              )
+            )}
+            {viewTab === "chat" && (
+              <LiveChat events={events} connected={connected} isPaused={isPaused} />
+            )}
+            {viewTab === "health" && (
+              <HealthPanel
+                steps={steps}
+                progressPct={progressPct}
+                coordinatorMsg={coordinatorMsg}
+                reportReady={!!report}
+                agentNames={agentNames}
+              />
+            )}
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* 标题 */}
+          <h1 className="text-2xl font-mono text-accent-orange mb-1">
+            M9 Agent Team
       </h1>
       <p className="text-sm text-text-secondary font-mono mb-6">
         把 Agent 组成团队，协作完成产品设计、市场调研、代码开发
@@ -347,9 +532,13 @@ export default function TeamDashboard() {
                       </button>
                     )}
                     {team.status === "executing" && (
-                      <span className="text-xs font-mono text-accent-green animate-pulse">
-                        ● 执行中
-                      </span>
+                      <button
+                        type="button"
+                        onClick={() => { setActiveTeamId(team.id); setViewTab("kanban"); }}
+                        className="text-xs font-mono text-accent-green hover:text-accent-green/80 transition-colors"
+                      >
+                        ● 执行中 — 进入
+                      </button>
                     )}
                     {team.status === "finished" && (
                       <span className="text-xs font-mono text-text-secondary/60">
@@ -370,6 +559,8 @@ export default function TeamDashboard() {
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 }
