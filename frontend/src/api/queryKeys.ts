@@ -45,3 +45,7 @@ export const achievementKeys = {
 export const agentTemplateKeys = {
   all: ["agent-templates"] as const,
 };
+
+export const interventionKeys = {
+  byWorld: (worldId: string) => ["interventions", worldId] as const,
+};

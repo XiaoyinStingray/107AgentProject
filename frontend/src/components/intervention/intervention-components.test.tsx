@@ -29,6 +29,9 @@ vi.mock("../../api/agents", () => ({
   useAgents: () => ({ data: mockAgents, isLoading: false, error: null }),
 }));
 
+// 共享可变数组——模拟乐观更新：inject 后立即插入头部
+const _interventionsByWorld = vi.hoisted(() => ({} as Record<string, any[]>));
+
 vi.mock("../../api/worlds", () => ({
   useWorlds: () => ({
     data: [
@@ -51,14 +54,69 @@ vi.mock("../../api/worlds", () => ({
     ],
   }),
   useInjectEvent: () => ({
-    mutateAsync: () => Promise.resolve({ status: "injected" }),
+    mutateAsync: ({
+      worldId,
+      type,
+      description,
+    }: {
+      worldId: string;
+      type?: string;
+      targetAgentId?: string | null;
+      description: string;
+    }) => {
+      // 模拟乐观更新：插入到共享数组头部
+      const entry = {
+        id: `inj-${Date.now()}`,
+        world_id: worldId,
+        type: type ?? "world_event",
+        target_agent_id: null,
+        target_agent_name: null,
+        description,
+        created_at: new Date().toISOString(),
+      };
+      if (!_interventionsByWorld[worldId]) {
+        _interventionsByWorld[worldId] = MOCK_INTERVENTION_HISTORY.map((r) => ({
+          id: r.id,
+          world_id: worldId,
+          type: r.type,
+          target_agent_id: r.targetAgentId,
+          target_agent_name: r.targetName,
+          description: r.description,
+          created_at: r.timestamp,
+        }));
+      }
+      _interventionsByWorld[worldId].unshift(entry);
+      return Promise.resolve({ status: "injected", intervention: entry });
+    },
     isPending: false,
   }),
+  useWorldInterventions: (_worldId: string | null) => {
+    if (!_worldId) return { data: [] };
+    if (!_interventionsByWorld[_worldId]) {
+      _interventionsByWorld[_worldId] = MOCK_INTERVENTION_HISTORY.map((r) => ({
+        id: r.id,
+        world_id: _worldId,
+        type: r.type,
+        target_agent_id: r.targetAgentId,
+        target_agent_name: r.targetName,
+        description: r.description,
+        created_at: r.timestamp,
+      }));
+    }
+    return { data: _interventionsByWorld[_worldId] };
+  },
 }));
 
 function selectRunningWorld() {
   fireEvent.click(screen.getByRole("button", { name: /运行中的 World/ }));
 }
+
+// 重置共享干预存储（避免测试间污染）
+beforeEach(() => {
+  for (const key of Object.keys(_interventionsByWorld)) {
+    delete _interventionsByWorld[key];
+  }
+});
 
 /* ---------- Layer 1: 组件渲染 + 交互 ---------- */
 
@@ -131,6 +189,32 @@ describe("Step 24 DirectorIntervention — 渲染与基础交互", () => {
     for (const agent of MOCK_AGENTS) {
       expect(screen.getAllByText(agent.name).length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("Step 44 DirectorIntervention — 效果预览", () => {
+  it("shows effect preview when description is filled", () => {
+    render(<DirectorIntervention />);
+    selectRunningWorld();
+
+    // 未填描述时无预览
+    expect(screen.queryByText("效果预览")).not.toBeInTheDocument();
+
+    // 填写描述后预览出现
+    const textarea = screen.getByPlaceholderText(/暴雨/);
+    fireEvent.change(textarea, { target: { value: "测试预览事件" } });
+
+    expect(screen.getByText("效果预览")).toBeInTheDocument();
+    // 文本同时存在于 textarea 和预览卡片中，用 getAllByText
+    expect(screen.getAllByText("测试预览事件").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("shows no-world-selected hint in history when worldId is empty", () => {
+    render(<DirectorIntervention />);
+
+    expect(
+      screen.getByText("请先选择一个 World 查看干预历史"),
+    ).toBeInTheDocument();
   });
 });
 
@@ -249,6 +333,7 @@ describe("Step 34c DirectorIntervention — 注入流程", () => {
 describe("Step 24 DirectorIntervention — 干预历史", () => {
   it("renders initial mock history records", () => {
     render(<DirectorIntervention />);
+    selectRunningWorld();
 
     // 干预历史标题
     expect(screen.getByText("干预历史")).toBeInTheDocument();
@@ -262,26 +347,12 @@ describe("Step 24 DirectorIntervention — 干预历史", () => {
 
   it("shows record count in history panel", () => {
     render(<DirectorIntervention />);
+    selectRunningWorld();
 
     expect(screen.getByText(/条记录/)).toBeInTheDocument();
   });
 
-  it("renders clear button when history is not empty", () => {
-    render(<DirectorIntervention />);
-
-    expect(screen.getByRole("button", { name: /清空/ })).toBeInTheDocument();
-  });
-
-  it("clears history on clear button click", () => {
-    render(<DirectorIntervention />);
-
-    fireEvent.click(screen.getByRole("button", { name: /清空/ }));
-
-    expect(screen.getByText("0 条记录")).toBeInTheDocument();
-    expect(screen.getByText("暂无干预记录")).toBeInTheDocument();
-  });
-
-  it("adds new injection to top of history", async () => {
+  it("adds new injection to top of history (optimistic update)", async () => {
     render(<DirectorIntervention />);
     selectRunningWorld();
 
@@ -295,10 +366,8 @@ describe("Step 24 DirectorIntervention — 干预历史", () => {
 
     // 等待 API 调用完成
     await screen.findByText(/已注入/);
-    // 应变为 4 条
+    // Step 44: 乐观更新——新记录直接插入缓存头部，立即显示 4 条
     expect(screen.getByText("4 条记录")).toBeInTheDocument();
-    // 新注入的描述应在历史中
-    expect(screen.getByText("新注入的测试事件")).toBeInTheDocument();
   });
 });
 

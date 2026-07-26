@@ -41,3 +41,14 @@ export type InterventionPanel =
   | "persona"
   | "history"
   | "script";
+
+/** 后端干预历史响应（Step 44 — interventions 表持久化）。 */
+export interface InterventionResponse {
+  id: string;
+  world_id: string;
+  type: InjectionEventType;
+  target_agent_id: string | null;
+  target_agent_name: string | null;
+  description: string;
+  created_at: string;
+}

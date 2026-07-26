@@ -54,6 +54,7 @@ def _sync_create_tables():
     import models.world_orm   # noqa: F401
     import models.event       # noqa: F401
     import models.memory      # noqa: F401
+    import models.intervention_orm  # noqa: F401
 
     engine = create_engine(_SYNC_DB_URL)
     Base.metadata.drop_all(engine)

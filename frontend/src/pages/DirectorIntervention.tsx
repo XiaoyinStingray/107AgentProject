@@ -3,29 +3,26 @@ import type { InjectionEventType, InjectionRecord } from "../types/intervention"
 import {
   INJECTION_TYPES,
   INTERVENTION_PLACEHOLDERS,
-  MOCK_INTERVENTION_HISTORY,
   createInjectionRecord,
   formatInjectionTime,
   getInjectionTypeMeta,
 } from "../mocks/intervention";
 import { useAgents } from "../api/agents";
-import { useWorlds, useInjectEvent } from "../api/worlds";
+import { useWorlds, useInjectEvent, useWorldInterventions } from "../api/worlds";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
 import StatusDot from "../components/shared/StatusDot";
 
 /* ================================================================
-   Step 34c — M7 导演干预台
-   事件注入走真实 POST /api/worlds/{id}/inject，历史仍为本地状态。
+   Step 44 — M7 导演干预台
+   事件注入走真实 POST /api/worlds/{id}/inject，
+   干预历史从 interventions 表持久化加载 + 效果预览。
    ================================================================ */
 
 export default function DirectorIntervention() {
   const { data: agents = [] } = useAgents();
   const { data: worlds = [] } = useWorlds();
   const injectEvent = useInjectEvent();
-  const [history, setHistory] = useState<InjectionRecord[]>(
-    MOCK_INTERVENTION_HISTORY,
-  );
 
   // 注入表单状态
   const [worldId, setWorldId] = useState<string>("");
@@ -34,6 +31,19 @@ export default function DirectorIntervention() {
   const [description, setDescription] = useState("");
   const [lastInjected, setLastInjected] = useState<InjectionRecord | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // 干预历史——从后端 interventions 表加载
+  const { data: apiInterventions = [] } = useWorldInterventions(worldId || null);
+
+  const history: InjectionRecord[] = apiInterventions.map((r) => ({
+    id: r.id,
+    type: r.type as InjectionEventType,
+    targetAgentId: r.target_agent_id,
+    targetName: r.target_agent_name ?? "世界",
+    description: r.description,
+    timestamp: r.created_at,
+    status: "applied" as const,
+  }));
 
   const selectedType = getInjectionTypeMeta(type);
   const needsTarget = selectedType?.needsTarget ?? false;
@@ -54,33 +64,32 @@ export default function DirectorIntervention() {
     const targetName = needsTarget
       ? (targetAgent?.name ?? "未知")
       : "世界";
+    const desc = description.trim();
 
     try {
       await injectEvent.mutateAsync({
         worldId,
-        description: description.trim(),
+        type,
+        targetAgentId: needsTarget ? targetAgentId : null,
+        description: desc,
       });
     } catch (cause) {
       setErrorMsg(cause instanceof Error ? cause.message : "事件注入失败");
       return;
     }
 
+    // 本地乐观记录——API refetch 后由 useWorldInterventions 提供完整数据
     const record = createInjectionRecord(
       type,
       needsTarget ? targetAgentId : null,
       targetName,
-      description.trim(),
+      desc,
     );
-    setHistory((prev) => [record, ...prev]);
     setLastInjected(record);
     setDescription("");
     setTimeout(() => setLastInjected(null), 2000);
   }, [canInject, needsTarget, targetAgent, type, targetAgentId, description,
       worldId, injectEvent]);
-
-  const handleClearHistory = useCallback(() => {
-    setHistory([]);
-  }, []);
 
   return (
     <div className="h-full overflow-y-auto p-6 animate-fade-in">
@@ -283,6 +292,41 @@ export default function DirectorIntervention() {
             {errorMsg && (
               <p className="text-xs font-mono text-accent-red mt-2">{errorMsg}</p>
             )}
+
+            {/* 效果预览（Step 44 —— 实时显示注入事件在 World 中的样貌） */}
+            {description.trim() && (
+              <div className="mt-4 pt-4 border-t border-border">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <span className="text-xs select-none">👁️</span>
+                  <span className="text-xs font-mono text-text-secondary">
+                    效果预览
+                  </span>
+                </div>
+                <div className="bg-bg-primary/40 border border-border rounded p-3">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-sm select-none">
+                      {selectedType?.emoji ?? "📡"}
+                    </span>
+                    <span className="text-xs font-mono text-text-primary">
+                      {selectedType?.label ?? type}
+                    </span>
+                    {needsTarget && targetAgent && (
+                      <span className="text-xs font-mono text-accent-green">
+                        → {targetAgent.name}
+                      </span>
+                    )}
+                    {!needsTarget && (
+                      <span className="text-xs font-mono text-accent-orange/70">
+                        → 世界
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-text-secondary leading-relaxed">
+                    {description.trim()}
+                  </p>
+                </div>
+              </div>
+            )}
           </Card>
 
           {/* P3 占位面板 */}
@@ -308,30 +352,23 @@ export default function DirectorIntervention() {
         {/* 右栏：干预历史 */}
         <div className="lg:col-span-1">
           <Card className="sticky top-4">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <span className="text-lg select-none">📋</span>
-                <h2 className="text-sm font-mono text-text-primary">
-                  干预历史
-                </h2>
-                <Badge label="P3" variant="P3" />
-              </div>
-              {history.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleClearHistory}
-                  className="text-xs font-mono text-text-secondary hover:text-accent-red transition-colors"
-                >
-                  清空
-                </button>
-              )}
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-lg select-none">📋</span>
+              <h2 className="text-sm font-mono text-text-primary">
+                干预历史
+              </h2>
+              <Badge label="P2" variant="P2" />
             </div>
 
             <p className="text-xs font-mono text-text-secondary/60 mb-3">
               {history.length} 条记录
             </p>
 
-            {history.length === 0 ? (
+            {!worldId ? (
+              <p className="text-xs font-mono text-text-secondary/60 text-center py-6">
+                请先选择一个 World 查看干预历史
+              </p>
+            ) : history.length === 0 ? (
               <p className="text-xs font-mono text-text-secondary/60 text-center py-6">
                 暂无干预记录
               </p>

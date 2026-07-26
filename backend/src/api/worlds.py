@@ -322,8 +322,10 @@ async def inject_event(
     event: dict,
     db: AsyncSession = Depends(get_db),
 ):
-    """注入事件（M7 干预台）——用户可随时向运行中的世界插入事件。"""
+    """注入事件（M7 干预台）——用户可随时向运行中的世界插入事件。
+    同时持久化到 interventions 表，供干预历史查询。"""
     from api.sse import get_world_engine
+    from models.intervention_orm import InterventionRow
 
     result = await db.execute(select(WorldRow).where(WorldRow.id == world_id))
     row = result.scalar_one_or_none()
@@ -355,8 +357,91 @@ async def inject_event(
                    f"只能在运行中或暂停的 World 中注入事件。",
         )
 
-    engine.inject_event(event.get("description", str(event)))
-    return {"status": "injected"}
+    description = event.get("description", str(event))
+    injection_type = event.get("type", "world_event")
+    target_agent_id = event.get("target_agent_id", None)
+
+    engine.inject_event(description)
+
+    # 查询 target agent name
+    target_agent_name = None
+    if target_agent_id:
+        from models.agent_orm import AgentRow as _AgentRow
+        agent_result = await db.execute(
+            select(_AgentRow).where(_AgentRow.id == target_agent_id)
+        )
+        agent_row = agent_result.scalar_one_or_none()
+        if agent_row:
+            try:
+                persona = json.loads(agent_row.persona_json)
+                target_agent_name = persona.get("name", "") or agent_row.name or target_agent_id[:8]
+            except Exception:
+                target_agent_name = agent_row.name or target_agent_id[:8]
+
+    # 持久化干预记录
+    intervention = InterventionRow(
+        id=str(uuid.uuid4()),
+        world_id=world_id,
+        type=injection_type,
+        target_agent_id=target_agent_id,
+        description=description,
+    )
+    db.add(intervention)
+    await db.commit()
+
+    return {
+        "status": "injected",
+        "intervention": {
+            "id": intervention.id,
+            "world_id": intervention.world_id,
+            "type": intervention.type,
+            "target_agent_id": intervention.target_agent_id,
+            "target_agent_name": target_agent_name,
+            "description": intervention.description,
+            "created_at": intervention.created_at,
+        },
+    }
+
+
+@router.get("/{world_id}/interventions")
+async def get_world_interventions(
+    world_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """查询指定世界的历史干预记录（M7 干预台）。"""
+    from models.intervention_orm import InterventionRow
+    from models.agent_orm import AgentRow
+
+    result = await db.execute(
+        select(InterventionRow)
+        .where(InterventionRow.world_id == world_id)
+        .order_by(InterventionRow.created_at.desc())
+    )
+    rows = result.scalars().all()
+
+    # 批量查询 Agent 名称
+    agent_names: dict[str, str] = {}
+    unique_agent_ids = {r.target_agent_id for r in rows if r.target_agent_id}
+    if unique_agent_ids:
+        for aid in unique_agent_ids:
+            agent_result = await db.execute(
+                select(AgentRow).where(AgentRow.id == aid)
+            )
+            agent_row = agent_result.scalar_one_or_none()
+            if agent_row:
+                try:
+                    persona = json.loads(agent_row.persona_json)
+                    agent_names[aid] = persona.get("name", "") or agent_row.name or aid[:8]
+                except Exception:
+                    agent_names[aid] = agent_row.name or aid[:8]
+
+    interventions = []
+    for r in rows:
+        d = r.to_dict()
+        d["target_agent_name"] = agent_names.get(r.target_agent_id) if r.target_agent_id else None
+        interventions.append(d)
+
+    return interventions
 
 
 @router.delete("/{world_id}", status_code=204)

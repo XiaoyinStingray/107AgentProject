@@ -5,10 +5,11 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { client } from "./client";
-import { worldKeys } from "./queryKeys";
+import { worldKeys, interventionKeys } from "./queryKeys";
 import type { WorldCreate, WorldResponse } from "../types/world";
 import type { SimEvent } from "../types/events";
 import type { RelationshipSnapshot } from "../types/relationships";
+import type { InterventionResponse } from "../types/intervention";
 
 // ===== Queries =====
 
@@ -118,23 +119,58 @@ export function useDeleteWorld() {
   });
 }
 
-/** 向运行中的 World 注入干预事件 */
+/** 向运行中的 World 注入干预事件（Step 44：乐观更新 + 持久化到 interventions 表） */
 export function useInjectEvent() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({
       worldId,
+      type,
+      targetAgentId,
       description,
     }: {
       worldId: string;
+      type?: string;
+      targetAgentId?: string | null;
       description: string;
     }) =>
-      client.post<{ status: string }>(`/worlds/${worldId}/inject`, {
+      client.post<{
+        status: string;
+        intervention: InterventionResponse;
+      }>(`/worlds/${worldId}/inject`, {
         description,
+        type: type ?? "world_event",
+        target_agent_id: targetAgentId ?? null,
       }),
-    onSuccess: (_, { worldId }) => {
+    onSuccess: (data, { worldId, type, targetAgentId, description }) => {
+      // 乐观更新：直接将新记录插入缓存头部，不等 refetch
+      const cacheKey = interventionKeys.byWorld(worldId);
+      const existing = qc.getQueryData<InterventionResponse[]>(cacheKey) ?? [];
+      const newEntry: InterventionResponse = data.intervention ?? {
+        id: `optimistic-${Date.now()}`,
+        world_id: worldId,
+        type: (type ?? "world_event") as InterventionResponse["type"],
+        target_agent_id: targetAgentId ?? null,
+        target_agent_name: null,
+        description,
+        created_at: new Date().toISOString(),
+      };
+      qc.setQueryData(cacheKey, [newEntry, ...existing]);
+
+      // 同时刷新 events（干预事件可能影响 World 事件流）
       qc.invalidateQueries({ queryKey: worldKeys.events(worldId) });
     },
+  });
+}
+
+/** 查询 World 的干预历史（Step 44 — 从 interventions 表加载） */
+export function useWorldInterventions(worldId: string | null) {
+  return useQuery({
+    queryKey: interventionKeys.byWorld(worldId ?? ""),
+    queryFn: () =>
+      client.get<InterventionResponse[]>(`/worlds/${worldId}/interventions`),
+    enabled: !!worldId,
+    staleTime: 10_000,
   });
 }
 
