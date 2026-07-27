@@ -30,7 +30,7 @@
 
 ## BUG-001：React Router 加载页面时产生 Future Flag 控制台警告
 
-- **状态**：待处理
+- **状态**：🔴 复测确认仍存在（2026-07-27）
 - **优先级**：P2（不阻塞功能，但污染测试控制台）
 - **发现日期**：2026-07-18
 - **环境**：前端 Vite，`http://127.0.0.1:5173/`
@@ -42,12 +42,15 @@
 - **期望结果**：测试控制台无框架升级提示，或项目显式配置对应 future flags 后不再重复提示。
 - **影响范围**：不影响当前页面渲染与交互，但会干扰控制台错误筛查。
 - **关联位置**：`frontend/src/App.tsx` 的 `BrowserRouter` 路由入口。
+- **2026-07-27 复测**：
+  - 浏览器刷新后仍稳定出现 `v7_startTransition` 与 `v7_relativeSplatPath` 两条 warning。
+  - 相关 Vitest 回归测试全部通过，但测试 stderr 同样输出上述 warning，确认记录仍有效。
 
 ---
 
 ## BUG-003：M7 导演干预台注入事件与沙盒隔离
 
-- **状态**：待处理
+- **状态**：🟡 已实现修复，待真实运行中 World E2E 验证（2026-07-27）
 - **优先级**：P1（注入是 M7 核心功能，但完全不影响模拟）
 - **发现日期**：2026-07-19
 - **环境**：前端 DirectorIntervention + GroupSandbox
@@ -55,11 +58,16 @@
   1. 进入 `/intervention`，选择"世界事件"，填写描述，点击"注入事件"。
   2. 成功提示显示，干预历史新增一条记录。
   3. 切换到 `/sandbox`，启动模拟。
-- **实际结果**：注入的事件仅保存在 DirectorIntervention 的本地 `useState` 中，GroupSandbox 的 `useSandboxMockSSE` 完全不知情。注入的历史记录能看，但不会出现在沙盒的 EventFeed / ThoughtStream 中。
+- **原始实际结果**：注入的事件仅保存在 DirectorIntervention 的本地 `useState` 中，GroupSandbox 的 `useSandboxMockSSE` 完全不知情。注入的历史记录能看，但不会出现在沙盒的 EventFeed / ThoughtStream 中。
 - **期望结果**：注入事件应写入共享 Store（Zustand），GroupSandbox 消费该 Store 并将注入事件混入 `visibleEvents` 流。
-- **关联位置**：
+- **原关联位置**：
   - `frontend/src/pages/DirectorIntervention.tsx` — 注入仅写本地 `history` state
   - `frontend/src/pages/GroupSandbox.tsx` — `useSandboxMockSSE` 独立事件源
+- **2026-07-27 复测**：
+  - 当前干预台已改为真实 `POST /api/worlds/{id}/inject`，历史从后端 `interventions` 表加载。
+  - World 引擎已通过 `_pending_injects` 将干预加入 SSE 流，群体沙盒使用真实 `useSSE`。
+  - 后端注入相关测试 `2 passed`；前端干预组件测试 `37 passed`。
+  - 当前数据库中的 World 为暂停状态，且本次后端进程未持有其运行时引擎，因此未执行一次会调用真实 LLM 的完整注入链路；完成该 E2E 后再标记为 verified。
 
 ---
 
@@ -70,30 +78,31 @@
   
   ---
   
-  ## BUG-005：LLM API Key 无效时错误提示不友好
-  
-  - **状态**：待处理
-  - **优先级**：P2（不阻塞代码运行，但影响用户体验）
-  - **发现日期**：2026-07-21
-  - **环境**：后端 `POST /api/agents`，DeepSeek API
-  - **复现步骤**：
-    1. 在 `.env` 中配置无效的 LLM API Key。
-    2. 启动后端，访问 M1 铸造厂。
-    3. 输入描述，点击「创建 Agent」。
-  - **实际结果**：前端显示红色错误「failed to fetch」，后端日志显示 `401 Authentication Fails`。用户无法判断是网络问题、后端问题还是 API Key 问题。
-  - **期望结果**：前端应显示明确的错误提示，如「LLM API Key 无效，请检查 .env 配置」。后端应返回结构化的错误信息（如 `{error: "invalid_api_key", message: "..."}`），而非通用 400/500。
-  - **影响范围**：M1 铸造厂、M2 单人剧场、M3 群体沙盒、M4 竞技场、M5 叙事工厂——所有依赖 LLM 的功能。
-  - **关联位置**：
-    - `backend/src/api/agents.py` — `create_agent` 错误处理
-    - `backend/src/llm/client.py` — LLM 客户端初始化
-    - `frontend/src/api/client.ts` — 错误展示逻辑
-  - **临时解决方案**：确保 `.env` 中的 `LLM_API_KEY` 有效。
+## BUG-005：LLM API Key 无效时错误提示不友好
+
+- **状态**：🔴 复测确认仍存在（2026-07-27）
+- **优先级**：P2（不阻塞代码运行，但影响用户体验）
+- **发现日期**：2026-07-21
+- **环境**：后端 `POST /api/agents`，DeepSeek API
+- **复现步骤**：
+  1. 在 `.env` 中配置无效的 LLM API Key。
+  2. 启动后端，访问 M1 铸造厂。
+  3. 输入描述，点击「创建 Agent」。
+- **实际结果**：前端显示红色错误「failed to fetch」，后端日志显示 `401 Authentication Fails`。用户无法判断是网络问题、后端问题还是 API Key 问题。
+- **期望结果**：前端应显示明确的错误提示，如「LLM API Key 无效，请检查 .env 配置」。后端应返回结构化的错误信息（如 `{error: "invalid_api_key", message: "..."}`），而非通用 400/500。
+- **影响范围**：M1 铸造厂、M2 单人剧场、M3 群体沙盒、M4 竞技场、M5 叙事工厂——所有依赖 LLM 的功能。
+- **关联位置**：
+  - `backend/src/api/agents.py` — `create_agent` 错误处理
+  - `backend/src/llm/client.py` — LLM 客户端初始化
+  - `frontend/src/api/client.ts` — 错误展示逻辑
+- **临时解决方案**：确保 `.env` 中的 `LLM_API_KEY` 有效。
+- **2026-07-27 复测**：为避免覆盖有效 Key 和产生真实 API 调用，本次未改 `.env`；代码审查确认后端创建接口仍只捕获 `ValueError`，未映射上游 401，前端统一客户端也只透传通用 `detail`，因此根因仍在。
 
 ---
 
-## BUG-006：M4/M5/M6 页面仍使用 Mock 数据，新创建 Agent 不出现
+## BUG-006：M4/M5/M6 页面仍使用 Mock 数据，新创建 Agent 不出现 ✅
 
-- **状态**：待处理
+- **状态**：✅ 已修复并复测（2026-07-27）
 - **优先级**：P1（核心功能链路断裂——铸造厂创建的 Agent 无法在竞技场、叙事工厂、控制台中使用）
 - **发现日期**：2026-07-23
 - **环境**：前端 Arena / NarrativeFactory / ControlPanel 页面
@@ -102,18 +111,19 @@
   2. 切换到 M4 竞技场（`/arena`）→ Agent 选择列表中没有刚创建的 Agent。
   3. 切换到 M5 叙事工厂（`/narratives`）→ Agent 选择列表中没有刚创建的 Agent。
   4. 切换到 M6 控制台（`/control`）→ 仪表盘/搜索等面板未显示新 Agent。
-- **实际结果**：M4/M5/M6 的 Agent 列表仍从 Mock 数据或本地 Zustand Store 获取，未走真实 API（`GET /api/agents`）。铸造厂创建的 Agent 已持久化到 SQLite，但这些页面无法感知。
+- **原始实际结果**：M4/M5/M6 的 Agent 列表仍从 Mock 数据或本地 Zustand Store 获取，未走真实 API（`GET /api/agents`）。铸造厂创建的 Agent 已持久化到 SQLite，但这些页面无法感知。
 - **期望结果**：所有页面的 Agent 列表应统一从 `useAgents()` hook（React Query + `GET /api/agents`）获取，创建 Agent 后通过 `invalidateQueries(['agents'])` 自动刷新所有消费方。
 - **影响范围**：
   - M4 竞技场：无法选择真实 Agent 进行辩论/面试/路演
   - M5 叙事工厂：无法选择真实 Agent 生成叙事
   - M6 控制台：仪表盘/热力图/搜索/决策模式均显示 Mock 数据
-- **关联位置**：
+- **原关联位置**：
   - `frontend/src/pages/Arena.tsx` — Agent 选择组件
   - `frontend/src/pages/NarrativeFactory.tsx` — Agent 选择组件
   - `frontend/src/pages/ControlPanel.tsx` — Dashboard / Search 面板
   - 根因：这些页面尚未完成 Step 36（API 层收敛），仍使用 Step 29 之前的 Mock/Store 数据源
 - **修复方向**：Step 36 中统一将上述页面切换为 `useAgents()` hook，消除 Mock 数据依赖。
+- **2026-07-27 复测**：M4 竞技场、M5 叙事工厂、M6 控制台均通过 `useAgents()` 展示与 `GET /api/agents` 一致的 6 个真实 Agent，未再发现 Mock/Store 数据隔离。
 
 ---
 
@@ -222,20 +232,21 @@
 
 ---
 
-## BUG-017：Agent 日记入口在 M1 但实现在 M5
+## BUG-017：Agent 日记入口在 M1 但实现在 M5 ✅
 
-- **状态**：待处理
+- **状态**：✅ 已修复并复测（2026-07-27）
 - **优先级**：P2（功能可用但入口放错模块）
 - **发现日期**：2026-07-24
 - **环境**：M1 铸造厂 / M5 叙事工厂
-- **实际结果**：M1 Agent 详情中有「生成日记」按钮，点击后跳转到 M5 叙事工厂——功能本身在 M5 实现，但入口放在了 M1。用户困惑日记是 M1 的功能还是 M5 的
+- **原始实际结果**：M1 Agent 详情中有「生成日记」按钮，点击后跳转到 M5 叙事工厂——功能本身在 M5 实现，但入口放在了 M1。用户困惑日记是 M1 的功能还是 M5 的
 - **修复方向**：要么把入口移到 M5（叙事工厂 Agent 选择后直接生成），要么在 M1 保持入口但跳转时自动选中该 Agent 并切换到日记风格
+- **2026-07-27 复测**：M1 当前已无「生成日记」入口；M5 叙事工厂提供独立「Agent 日记」风格，模块归属明确。
 
 ---
 
-## BUG-016：M5 叙事工厂侧边栏选取无效
+## BUG-016：M5 叙事工厂侧边栏选取无效 ✅
 
-- **状态**：待处理
+- **状态**：✅ 已修复并复测（2026-07-27）
 - **优先级**：P1（侧边栏 Agent 列表点击后主界面功能框不切换）
 - **发现日期**：2026-07-24
 - **环境**：前端 NarrativeFactory 页面
@@ -243,10 +254,11 @@
   1. 打开 `/narratives`
   2. 左侧 Agent 列表中点击某个 Agent
   3. 观察右侧主界面的叙事风格选择 / 生成按钮
-- **实际结果**：右侧功能框不跟随侧边栏选择变化——始终停留在初始状态
+- **原始实际结果**：右侧功能框不跟随侧边栏选择变化——始终停留在初始状态
 - **期望结果**：选中 Agent 后，主界面叙事风格选择区和生成按钮应关联到该 Agent
 - **关联位置**：
   - `frontend/src/pages/NarrativeFactory.tsx` — Agent 选择 → 叙事生成的状态绑定
+- **2026-07-27 复测**：点击 Agent 后「当前选择」立即显示对应姓名；继续选择 World 后「生成叙事」按钮正常启用。
 
 ---
 
@@ -275,21 +287,22 @@
 
 ### BUG-019：侧边栏导航跳转问题（预存）
 
-- **状态**：📝 已记录，待处理
+- **状态**：🟡 待产品确认（2026-07-27 复测）
 - **优先级**：P2
 - **发现日期**：2026-07-25
 - **环境**：前端侧边栏
-- **描述**：侧边栏部分菜单项点击后跳转行为异常（具体表现待补充）
+- **描述**：复测 10 个顶层入口均能进入正确模块；其中从其他模块点击 M5 时，URL 会自动变为 `/narratives#item-29`，而不是停留在 `/narratives`。根因是 NarrativeFactory 将默认「小说化叙事」主动同步为 `#item-29`。功能可用，需要团队确认这是预期的默认功能定位，还是应保持模块根路由。
 - **不在 Step 45 范围内**
 
 ### BUG-022：档案馆成就系统 4 个统计数字不显示
 
-- **状态**：待处理
+- **状态**：🔴 复测确认仍存在（2026-07-27）
 - **优先级**：P2
 - **发现日期**：2026-07-26
 - **环境**：M8 档案馆 → 成就 tab
 - **实际结果**：成就页面的 Agent 总数/World 总数/模拟次数/竞技场次数字显示为空或 0
 - **关联位置**：`frontend/src/pages/Archive.tsx` AchievementsPanel、`backend/src/api/achievements.py`
+- **2026-07-27 复测**：成就页四个标签均正常出现，但数字为空。后端响应使用 `total_agents` / `total_simulations` / `total_ticks` / `total_narratives`，前端读取 `totalAgents` / `totalSimulations` / `totalTicks` / `totalNarratives`，字段命名未转换。
 
 ### BUG-021：群体动力学报告生成后无下载按钮 ✅
 
