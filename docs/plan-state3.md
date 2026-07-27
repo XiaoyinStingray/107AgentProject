@@ -26,11 +26,11 @@
 | **🏗️ Phase 15: LLM Bench** | | | | | | |
 | 56 | — | 开发 | Team 模板 | 55 | 本地保存/复用 Team 配置（#50 降级，Phase 14 收尾） | ✅ |
 | 57 | — | — | ~~API 开放~~ | — | 已砍——单机版无外部程序场景 | 🗑️ |
-| 58 | 15.1 | 开发 | 批量评测调度 | 33, 35 | 选 Agent × 场景 × LLM → 排队并发 → 收集结果 | 4h |
-| 59 | 15.2 | 开发 | 指标与评分 | 58 | 一致性/创造力/稳定性/协作力 四维评分 + 结果存储 | 4h |
-| 60 | 15.3 | 开发 | 对比与盲测 | 59 | 并排对比 + 身份脱敏 + 揭盲 + 差异可视化 | 4h |
+| 58 | 15.1 | 开发 | 批量评测调度 + 指标 | 33, 35 | 标准化套件（3 Agent × 3 场景 × 3 重复=27条）+ 六维评分（一致性/决策/交互/鲁棒性/创造力/适应性）+ 聚合报告 | 6h |
+| 59 | 15.2 | 开发 | 六边形图 + 报告 | 58 | `/bench` 页面：LLM 配置 → 一键评测 → 六边形雷达图 + 分析报告 + 详细结果表 | 5h |
+| 60 | 15.3 | 开发 | 对比与盲测 | 59 | 多次评测并排对比 + 身份脱敏 + 揭盲 + 差异可视化 | 4h |
 | 61 | 15.4 | 开发 | 排行榜与趋势 | 60 | 多维排序 + 长期追踪 + 退化检测 | 3h |
-| T3 | — | 测试 | Phase 15 集成 + E2E | 58–61 | Bench 全链路（实验设计→批量运行→盲测→排行榜） | 3h |
+| T3 | — | 测试 | Phase 15 集成 + E2E | 58–61 | Bench 全链路（配置→27条评测→六边形→报告） | 3h |
 | T4 | — | 测试 | Phase 15 Bug 修补 | T3 | 并发调度 + 指标边界 + 前端性能 | 2h |
 | **🏗️ Phase 16: 游戏化** | | | | | | |
 | 62 | 16.1 | 开发 | 场景画布 | — | Canvas 渲染：场景背景 + Agent 放置 + 环境动态 | 5h |
@@ -61,7 +61,7 @@
   - [Step 51–55: 开发](#step-51--team-组建)
   - [Step T1: 单元 + 集成 + E2E](#step-t1--phase-14-单元测试--集成测试--e2e)
   - [Step T2: Bug 修补](#step-t2--phase-14-bug-修补)
-- [Phase 15: Team 收尾 + LLM Bench 启动](#phase-15-team-收尾--llm-bench-启动)
+- [Phase 15: LLM Bench](#phase-15--llm-bench-设计)
   - [Step 56–57: A 线](#step-56--agent-市场)
   - [Step 58–61: B 线](#step-58--批量调度器)
   - [Step T3: 集成 + E2E](#step-t3--phase-15-集成测试--e2e)
@@ -486,121 +486,103 @@ Sidebar 新增 3 个顶级入口                  ├─ 批量调度器
 
 ---
 
-### 15a — Team 收尾（A 线）
+### Phase 15 — LLM Bench 设计
+
+> Life Lab 是天然的 LLM 评测平台。传统 benchmark 只测"答对了吗"，我们测"演得像吗"——Agent 需要持续维持人格、做决策、社交互动，评测的是 LLM 驱动角色的能力。
+
+#### 六维评测体系
+
+| 维度 | 定义 | 评分依据（来自平台数据） |
+|------|------|------------------------|
+| **人格一致性** | 行为贴合 MBTI/大五的程度 | 情绪波动范围、decision_style 匹配度 |
+| **决策质量** | 选择是否连贯、目标导向 | Goal 完成率、行动步骤的逻辑链长度 |
+| **交互深度** | 社交是否丰富、语境恰当 | 对话轮次、消息长度、关系变化幅度 |
+| **鲁棒性** | 跨场景/跨重复的稳定性 | 同维度 3 次重复的方差（越小越稳定） |
+| **创造力** | 行为多样性、非重复性 | 事件类型熵、独特 tool call 种类数 |
+| **适应性** | 对环境变化的响应 | stress_level 变化时的行为调整速度 |
+
+每维 0-100 分，最终输出六边形雷达图 + 分析报告。
+
+#### 标准化评测套件
+
+```
+3 标准 Agent 模板               3 标准场景                标准任务
+───────────────────            ─────────────────        ──────────
+INTJ 学霸（理性、孤僻）          期末周（资源竞争）         生存 8 tick
+ENFP 社交家（外向、创意）        新生报到（社交建立）       自由互动
+ESTJ 领导者（果断、务实）        毕业选择（道德困境）       做出决策
+
+每 LLM = 3 Agent × 3 场景 × 3 次重复 = 27 条标准化评测记录
+统计上可比较、可复现、可写进论文章节。
+```
 
 ### Step 56 — Team 模板
 
-> **目标：** 实现 #50。Team 配置本地保存为模板，可浏览和复用。降级为本地模板库（单机版无联网/评分）。
+> **目标：** 实现 #50。Team 配置本地保存为模板。已交付，见 [done/step-56.md](done/step-56.md)。
 
-实际产出见 [done/step-56.md](done/step-56.md)。
+### Step 57 — ~~API 开放~~ 🗑️ 已砍
 
-### Step 57 — API 开放
+### Step 58 — 批量评测调度 + 指标
 
-> **目标：** 实现 #56。外部程序通过 REST API 控制 Team 执行。
-
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `backend/src/api/teams.py` | 修改 | 已有端点补全文档 + example |
-| `backend/src/main.py` | 修改 | Swagger tags 描述完善 |
-| `frontend/src/pages/team/ApiDocPanel.tsx` | **新建** | 内嵌 API 文档页 |
-
-**验收标准：** ① `curl` 可创建 Team 并触发执行 ② Swagger 文档完整可交互
-
----
-
-### 15b — LLM Bench 启动（B 线）
-
-### Step 58 — 批量调度器
-
-> **目标：** 选 N 个 Agent × M 个场景 → 并发队列 → 收集所有结果。
+> **目标：** 标准化套件一键运行 + 六维评分采集 + 聚合报告。
 
 #### 设计
 
 ```
-BatchScheduler：
-  1. 解析实验配置（agents × scenarios × repeat_count）
-  2. 生成执行队列（每对 agent+scenario 一个 task）
-  3. asyncio.Semaphore 控制并发 ≤3
-  4. 每个 task：创建临时 World → 运行模拟 → 收集事件 → 写入 bench_results
-  5. 进度回调 → SSE 推送给前端
-  6. 超时 120s/task → fallback → 标记失败
+POST /api/bench/runs {api_key, base_url, model}
+  → BatchScheduler:
+    for agent_tpl in [INTJ, ENFP, ESTJ]:
+      → 用指定 LLM 创建 Agent
+      for scenario in [期末周, 新生报到, 毕业选择]:
+        for repeat in range(3):
+          → 创建 World → run 8 ticks → 收集 events
+          → MetricCalculator 计算六维分数 → 写入 BenchResult
+    → 聚合 27 条记录的平均分 → 写入 BenchRun.scores_json
+    → LLM 生成分析报告 → 写入 BenchRun.report
 ```
+
+#### 涉及文件
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `backend/src/models/bench_orm.py` | **新建** | BenchRun + BenchResult 表 |
-| `backend/src/engines/bench/scheduler.py` | **新建** | BatchScheduler |
-| `backend/src/api/bench.py` | **新建** | `POST /api/bench/runs`；`GET /api/bench/runs/{id}` |
+| `backend/src/models/bench_orm.py` | **新建** | BenchRun + BenchResult 表（含 scores_json / report 列） |
+| `backend/src/engines/bench/__init__.py` | **新建** | 包初始化 |
+| `backend/src/engines/bench/scheduler.py` | **新建** | BatchScheduler：遍历套件 → 创建 World → run → 采集 |
+| `backend/src/engines/bench/metrics.py` | **新建** | MetricCalculator：六维评分器 + 归一化公式 |
+| `backend/src/engines/bench/reporter.py` | **新建** | 分析报告生成（LLM 聚合 27 条评分 → 文本报告） |
+| `backend/src/api/bench.py` | **新建** | `POST/GET /api/bench/runs` + `GET /api/bench/runs/{id}` + `GET /api/bench/runs/{id}/report` |
+| `backend/src/db.py` | 修改 | 注册 bench_orm |
 | `backend/src/main.py` | 修改 | 注册 bench router |
-| `frontend/src/types/bench.ts` | **新建** | BenchRun / BenchResult TS 类型 |
-| `frontend/src/api/bench.ts` | **新建** | useBenchRuns / useBenchResult |
-| `frontend/src/pages/BenchLab.tsx` | **新建** | 实验设计器 + 运行状态 |
 
-**验收标准：** ① 5 Agent × 3 场景 × 2 次重复 = 30 个 task 全部执行 ② 并发 ≤3 ③ 进度实时推送
+#### 验收标准
 
----
+- [ ] 输入 LLM 配置 → 27 条评测全部执行完毕
+- [ ] 每条评测有六维分数写入 BenchResult
+- [ ] 聚合后的平均分写入 BenchRun.scores_json
+- [ ] LLM 分析报告写入 BenchRun.report
+- [ ] 超时/失败 task 的 metric 有兜底值（0 分）
 
-### Step 59 — 指标框架
+### Step 59 — 六边形图 + 报告 UI
 
-> **目标：** 定义 4 维 metric + 评分器 + 结果持久化。
-
-#### 四维指标
-
-| 指标 | 定义 | 评分方式 |
-|------|------|---------|
-| **一致性** | Agent 行为与人格的匹配度 | 人格基线偏差检测 |
-| **创造力** | 行为多样性、非重复性 | 事件类型熵 + LLM 评审 |
-| **稳定性** | 多次运行的方差 | 统计方差 |
-| **协作力** | 与其他 Agent 的合作深度 | 关系变化 + 对话轮次 |
+> **目标：** `/bench` 页面——配置 LLM → 一键评测 → 六边形雷达图 + 报告。
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `backend/src/engines/bench/metrics.py` | **新建** | 4 个 MetricCalculator 类 |
-| `backend/src/engines/bench/scheduler.py` | 修改 | 每 task 结束后跑 metric 采集 |
+| `frontend/src/types/bench.ts` | **新建** | BenchRun / BenchResult / HexagonScores 类型 |
+| `frontend/src/api/bench.ts` | **新建** | useBenchRuns / useCreateRun / useBenchReport |
+| `frontend/src/pages/BenchLab.tsx` | **新建** | `/bench` 页面：LLM 配置表单 + 进度条 + 六边形图 + 报告 |
+| `frontend/src/components/bench/HexagonChart.tsx` | **新建** | SVG 六边形雷达图组件 |
+| `frontend/src/App.tsx` | 修改 | +`/bench` 路由 |
 
-**验收标准：** ① 每个 task 产出 4 个 metric 分数 ② 分数写入 bench_results.metrics_json ③ 异常情况（无事件/崩溃）metric 有兜底值
+**验收标准：** ① 配置 LLM → 一键启动评测 ② 运行中显示进度条 ③ 完成后显示六边形雷达图 ④ 分析报告可读、可下载
 
----
+### Step 60 — 对比与盲测
 
-### Step 60 — 对比 UI
+> **目标：** 多次评测并排对比 + 盲测。
 
-> **目标：** 实现 #28 A/B。`/bench` 页面核心——并排展示多次运行结果。
+### Step 61 — 排行榜与趋势
 
-#### 设计
-
-```
-┌─────────────────────────────────────────────────────┐
-│  A 组: DeepSeek v3              B 组: GPT-5         │
-│  ─────────────────              ──────────          │
-│  一致性: ████████░░ 82          ██████░░░░ 65       │
-│  创造力: ██████░░░░ 68          ████████░░ 84  ← 优 │
-│  稳定性: ████████░░ 85          █████████░ 91  ← 优 │
-│  协作力: █████████░ 94  ← 优    ██████░░░░ 67       │
-│                                                     │
-│  [详细展开]  [并排对话对比]  [导出报告]                │
-└─────────────────────────────────────────────────────┘
-```
-
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `frontend/src/pages/bench/CompareView.tsx` | **新建** | 并排对比面板 |
-| `frontend/src/pages/bench/ExperimentDesigner.tsx` | **新建** | 配置 Agent + 场景 + LLM + 次数 |
-| `frontend/src/pages/bench/RunMonitor.tsx` | **新建** | 实时进度 + 中间结果 |
-
-**验收标准：** ① 两组结果并排展示 ② 差异高亮（胜出方标绿） ③ 支持展开单维度详细数据
-
----
-
-### Step 61 — 排行榜
-
-> **目标：** 实现 #27。所有评测结果可排序、筛选、对比趋势。
-
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `frontend/src/pages/bench/Leaderboard.tsx` | **新建** | 排行表 + 筛选 + 趋势图 |
-| `backend/src/api/bench.py` | 修改 | `GET /api/bench/leaderboard?metric=X&limit=N` |
-
-**验收标准：** ① 按任一 metric 排序 ② 按 LLM/场景/Agent 筛选 ③ 显示历史最佳/最差/平均
+> **目标：** 多维排序 + 长期追踪 + 退化检测。
 
 ---
 
