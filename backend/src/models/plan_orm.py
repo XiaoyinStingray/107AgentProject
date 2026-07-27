@@ -23,6 +23,7 @@ class PlanRow(Base):
     steps: Mapped[str] = mapped_column(Text, default="[]")  # JSON array of PlanStep
     status: Mapped[str] = mapped_column(String, default="executing")  # executing | paused | finished
     world_id: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
+    report: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)  # JSON: {title, content}
     created_at: Mapped[str] = mapped_column(
         String, default=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -46,4 +47,5 @@ class PlanRow(Base):
             "status": self.status,
             "world_id": self.world_id,
             "created_at": self.created_at,
+            "report": json.loads(self.report) if self.report else None,
         }

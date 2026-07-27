@@ -27,7 +27,7 @@ class TestGroupIdentityProtocol:
         assert "你的唯一身份：苏瑶" in context
         assert f"{chen.autogen_agent.name} = 陈默" in context
         assert f"{su.autogen_agent.name} = 苏瑶" in context
-        assert "‘我’只能指苏瑶" in context
+        assert "'我'只能指苏瑶" in context
         assert "source 是发言者身份的唯一依据" in context
         assert "回复末尾追加 [END_TICK]" in context
         assert "[SKIP_TURN]" not in context

@@ -137,6 +137,42 @@ class TeamEngine:
 
     # ── 结束 ──────────────────────────────────────────────────────
 
+    async def _save_report(self, report: dict):
+        """保存最终报告到 PlanRow + 标记 Team 完成。"""
+        if not self.plan_row:
+            return
+        import json as _json
+        from sqlalchemy import select as _sel
+        from models.team_orm import TeamRow
+
+        self.plan_row.report = _json.dumps(report, ensure_ascii=False)
+        self.plan_row.status = "finished"
+        # Team 状态同步
+        result = await self.db.execute(_sel(TeamRow).where(TeamRow.id == self.team["id"]))
+        tr = result.scalar_one_or_none()
+        if tr:
+            tr.status = "finished"
+        self.db.add(self.plan_row)
+        await self.db.commit()
+
+    async def _sync_plan_to_db(self):
+        """将 PlanManager 的当前状态同步到 PlanRow + TeamRow。"""
+        if not self.plan_row or not self.plan:
+            return
+        import json as _json
+        self.plan_row.steps = _json.dumps(self.plan.steps, ensure_ascii=False)
+        if self.plan.all_done:
+            self.plan_row.status = "finished"
+            # 同步更新 Team 状态
+            from sqlalchemy import select as _sel
+            from models.team_orm import TeamRow
+            result = await self.db.execute(_sel(TeamRow).where(TeamRow.id == self.team["id"]))
+            tr = result.scalar_one_or_none()
+            if tr:
+                tr.status = "finished"
+        self.db.add(self.plan_row)
+        await self.db.commit()
+
     async def finish(self) -> dict:
         """结束执行——更新 Team 和 Plan 状态。"""
         if self.plan_row:

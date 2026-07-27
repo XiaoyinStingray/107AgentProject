@@ -68,4 +68,5 @@ export interface TeamPlan {
   world_id: string | null;
   created_at: string;
   progress_pct?: number;
+  report?: { title: string; content: string } | null;
 }

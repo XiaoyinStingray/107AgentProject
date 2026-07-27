@@ -1,13 +1,12 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { useAgents } from "../api/agents";
-import { useTeams, useCreateTeam, useDeleteTeam, useSuggestRoles, useExecuteTeam, useTeamPlan } from "../api/teams";
+import { useTeams, useCreateTeam, useDeleteTeam, useSuggestRoles, useExecuteTeam, useTeamPlan, useEvaluateTeam } from "../api/teams";
 import { usePauseWorld, useStartWorld } from "../api/worlds";
 import { useSSE } from "../hooks/useSSE";
 import type { TeamRole, SuggestedRole } from "../types/team";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
 import EmptyState from "../components/shared/EmptyState";
-import TaskKanban from "./team/TaskKanban";
 import LiveChat from "./team/LiveChat";
 import HealthPanel from "./team/HealthPanel";
 
@@ -16,18 +15,17 @@ import HealthPanel from "./team/HealthPanel";
    Team 创建 + 列表 + 看板（Kanban + 实时对话 + 健康面板）
    ================================================================ */
 
-type ViewTab = "kanban" | "chat" | "health";
-
 export default function TeamDashboard() {
   const { data: agents = [] } = useAgents();
   const { data: teams = [], isLoading: teamsLoading } = useTeams();
   const createTeam = useCreateTeam();
   const deleteTeam = useDeleteTeam();
   const executeTeam = useExecuteTeam();
+  const evaluateTeam = useEvaluateTeam();
+  const [evaluation, setEvaluation] = useState<string | null>(null);
 
   // 看板状态
   const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
-  const [viewTab, setViewTab] = useState<ViewTab>("kanban");
   const { data: teamPlan } = useTeamPlan(activeTeamId);
 
   // SSE + World 控制
@@ -66,10 +64,8 @@ export default function TeamDashboard() {
   const steps = livePlan?.steps ?? teamPlan?.steps ?? [];
   const progressPct = livePlan?.progress_pct ?? teamPlan?.progress_pct ?? 0;
 
-  // 完成时自动切到看板（展示报告）
-  useEffect(() => {
-    if (report) setViewTab("kanban");
-  }, [report]);
+  // 重入时从 DB 恢复报告（SSE 事件已丢失）
+  const displayReport = report ?? (teamPlan?.report as { title: string; content: string } | null) ?? null;
   const pauseWorld = usePauseWorld();
   const startWorld = useStartWorld();
   const [isPaused, setIsPaused] = useState(false);
@@ -163,7 +159,6 @@ export default function TeamDashboard() {
         clear(); // BUG-010: 新执行前清空上次残留事件
         const plan = await executeTeam.mutateAsync(id);
         setActiveTeamId(id);
-        setViewTab("kanban");
         setIsPaused(false);
       } catch (e) {
         setErrorMsg(e instanceof Error ? e.message : "执行失败");
@@ -172,11 +167,15 @@ export default function TeamDashboard() {
     [executeTeam, clear],
   );
 
-  const handleBackToList = useCallback(() => {
+  const handleBackToList = useCallback(async () => {
+    // 先暂停 World，再断开连接——防止丢失中间对话
+    if (worldId && !isPaused) {
+      try { await pauseWorld.mutateAsync(worldId); } catch {}
+    }
+    disconnect();
     setActiveTeamId(null);
     setIsPaused(false);
-    disconnect();
-  }, [disconnect]);
+  }, [worldId, isPaused, pauseWorld, disconnect]);
 
   const handlePause = useCallback(async () => {
     if (!worldId) return;
@@ -189,6 +188,13 @@ export default function TeamDashboard() {
     try { await startWorld.mutateAsync(worldId); } catch { return; }
     setIsPaused(false);
   }, [worldId, startWorld]);
+
+  // 重入执行中的 Team——自动恢复 SSE 连接
+  useEffect(() => {
+    if (activeTeamId && activeTeam && activeTeam.status === "executing" && worldId && !connected && !isPaused) {
+      startWorld.mutateAsync(worldId).catch(() => {});
+    }
+  }, [activeTeamId, worldId]);
 
   // 角色预览组件
   const RolePreview = roles.length > 0 && (
@@ -245,86 +251,97 @@ export default function TeamDashboard() {
               ← 返回列表
             </button>
             <h1 className="text-lg font-mono text-accent-orange">{activeTeam.name}</h1>
-            <Badge label={isPaused ? "已暂停" : "执行中"} variant="P1" />
-            <button
-              type="button"
-              onClick={isPaused ? handleResume : handlePause}
-              className={`ml-auto px-3 py-1 text-xs font-mono rounded border transition-colors ${
-                isPaused
-                  ? "border-accent-green/60 text-accent-green hover:bg-accent-green/10"
-                  : "border-accent-orange/60 text-accent-orange hover:bg-accent-orange/10"
-              }`}
-            >
-              {isPaused ? "▶ 继续" : "⏸ 暂停"}
-            </button>
-          </div>
-
-          {/* Tab 栏 */}
-          <div className="flex gap-2 mb-3 shrink-0">
-            {([
-              ["kanban", "📋 任务看板"],
-              ["chat", "💬 实时对话"],
-              ["health", "📊 协作分析"],
-            ] as [ViewTab, string][]).map(([key, label]) => (
+            <Badge
+              label={activeTeam.status === "finished" ? "已完成" : isPaused ? "已暂停" : "执行中"}
+              variant={activeTeam.status === "finished" ? "P2" : "P1"}
+            />
+            {activeTeam.status !== "finished" && (
               <button
-                key={key}
                 type="button"
-                onClick={() => setViewTab(key)}
-                className={`px-3 py-1.5 text-xs font-mono rounded border transition-colors ${
-                  viewTab === key
-                    ? "border-accent-orange/60 bg-accent-orange/10 text-accent-orange"
-                    : "border-border text-text-secondary hover:border-text-secondary/40"
+                onClick={isPaused ? handleResume : handlePause}
+                className={`ml-auto px-3 py-1 text-xs font-mono rounded border transition-colors ${
+                  isPaused
+                    ? "border-accent-green/60 text-accent-green hover:bg-accent-green/10"
+                    : "border-accent-orange/60 text-accent-orange hover:bg-accent-orange/10"
                 }`}
               >
-                {label}
+                {isPaused ? "▶ 继续" : "⏸ 暂停"}
               </button>
-            ))}
+            )}
           </div>
 
-          {/* 面板内容 */}
+          {/* 内容区 —— 完成则全宽报告，否则左右分栏 */}
           <div className="flex-1 min-h-0">
-            {viewTab === "kanban" && (
-              report ? (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg">📄</span>
-                    <h3 className="text-sm font-mono text-accent-green">{report.title as string}</h3>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const text = `# ${report.title}\n\n${report.content}`;
-                        const blob = new Blob([text as string], { type: "text/markdown;charset=utf-8" });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement("a");
-                        a.href = url; a.download = "team-report.md"; a.click();
-                        URL.revokeObjectURL(url);
-                      }}
-                      className="ml-auto px-3 py-1 text-xs font-mono rounded border border-border text-text-secondary hover:border-accent-green hover:text-accent-green transition-colors"
-                    >
-                      ⬇ 下载报告
-                    </button>
+            {displayReport ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">📄</span>
+                  <h3 className="text-sm font-mono text-accent-green">{displayReport.title as string}</h3>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const text = `# ${displayReport.title}\n\n${displayReport.content}`;
+                      const blob = new Blob([text as string], { type: "text/markdown;charset=utf-8" });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url; a.download = "team-report.md"; a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                    className="px-3 py-1 text-xs font-mono rounded border border-border text-text-secondary hover:border-accent-green hover:text-accent-green transition-colors"
+                  >
+                    ⬇ 下载
+                  </button>
+                  <button
+                    type="button"
+                    disabled={evaluateTeam.isPending}
+                    onClick={async () => {
+                      if (!activeTeamId) return;
+                      try {
+                        const result = await evaluateTeam.mutateAsync(activeTeamId);
+                        setEvaluation(result.evaluation);
+                      } catch { setEvaluation("评估失败，请重试"); }
+                    }}
+                    className="px-3 py-1 text-xs font-mono rounded border border-accent-orange/60 text-accent-orange hover:bg-accent-orange/10 transition-colors disabled:opacity-40"
+                  >
+                    {evaluateTeam.isPending ? "评估中…" : "📊 评估团队"}
+                  </button>
+                </div>
+                <Card className="p-4 max-h-[60vh] overflow-y-auto">
+                  <div className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap font-mono">
+                    {displayReport.content as string}
                   </div>
-                  <Card className="p-4 max-h-[60vh] overflow-y-auto">
-                    <div className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap font-mono">
-                      {report.content as string}
+                </Card>
+                {evaluation && (
+                  <Card className="p-4 border-accent-orange/40 bg-accent-orange/5">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-sm">📊</span>
+                      <h3 className="text-xs font-mono text-accent-orange">团队评估</h3>
+                    </div>
+                    <div className="text-xs text-text-primary leading-relaxed whitespace-pre-wrap font-mono">
+                      {evaluation}
                     </div>
                   </Card>
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 h-full">
+                {/* 左：实时对话 */}
+                <div className="lg:col-span-2 min-h-0">
+                  <div className="text-xs font-mono text-text-secondary mb-2">💬 实时对话</div>
+                  <LiveChat events={events} connected={connected} isPaused={isPaused} />
                 </div>
-              ) : (
-                <TaskKanban steps={steps} agentNames={agentNames} coordinatorMsg={coordinatorMsg} />
-              )
-            )}
-            {viewTab === "chat" && (
-              <LiveChat events={events} connected={connected} isPaused={isPaused} />
-            )}
-            {viewTab === "health" && (
-              <HealthPanel
-                steps={steps}
-                progressPct={progressPct}
-                coordinatorMsg={coordinatorMsg}
-                reportReady={!!report}
-                agentNames={agentNames}
-              />
+                {/* 右：任务进展 */}
+                <div className="lg:col-span-1 min-h-0 overflow-y-auto">
+                  <div className="text-xs font-mono text-text-secondary mb-2">📊 任务进展</div>
+                  <HealthPanel
+                    steps={steps}
+                    progressPct={progressPct}
+                    coordinatorMsg={coordinatorMsg}
+                    reportReady={!!report}
+                    agentNames={agentNames}
+                  />
+                </div>
+              </div>
             )}
           </div>
         </div>
@@ -534,7 +551,7 @@ export default function TeamDashboard() {
                     {team.status === "executing" && (
                       <button
                         type="button"
-                        onClick={() => { setActiveTeamId(team.id); setViewTab("kanban"); }}
+                        onClick={() => setActiveTeamId(team.id)}
                         className="text-xs font-mono text-accent-green hover:text-accent-green/80 transition-colors"
                       >
                         ● 执行中 — 进入

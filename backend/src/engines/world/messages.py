@@ -69,7 +69,7 @@ class WorldMessageMixin:
     _act_model_client: Any
 
     def build_group_chat(self):
-        """Create a target-aware AutoGen SelectorGroupChat for World Agents."""
+        """Create a target-aware AutoGen SelectorGroupChat for World Agents。"""
         from autogen_agentchat.conditions import TextMentionTermination
         from autogen_agentchat.teams import SelectorGroupChat
 
@@ -147,14 +147,31 @@ class WorldMessageMixin:
         return content
 
     def _build_group_task(self) -> str:
-        """Build one shared task with explicit multiplayer identity rules."""
+        """Build one shared task with explicit multiplayer identity rules。
+        Team 模式下注入跨 tick 对话历史，保持上下文连贯。"""
+        # Team 模式：注入历史对话
+        if hasattr(self, "team_task") and self.team_task:
+            base = "继续团队协作。参考以下最近的对话历史，接着上次的进度继续讨论。\n"
+            history = getattr(self, "_team_chat_history", None)
+            if history:
+                recent = "\n".join(
+                    "[{}]: {}".format(
+                        getattr(m, "source", "?"),
+                        str(getattr(m, "content", ""))[:200],
+                    )
+                    for m in history[-10:]
+                )
+                base += "\n--- 最近对话 ---\n{}\n---\n".format(recent)
+            base += "\n继续推进当前阶段的任务。完成你的部分后请调用 submit_deliverable 提交。"
+            return base
+
         initial_events = self.world.scenario.initial_events
         return (
             f"场景：{self.world.scenario.name} — {self.world.scenario.description}\n"
             f"初始事件：{'；'.join(initial_events)}\n"
             f"现在是第 {self.current_tick} 个时间段。\n"
             "请根据你的角色设定自然地互动。你可以说话、思考、行动。\n"
-            "每次发言只能使用系统消息指定的唯一身份，正文中的‘我’只能指你自己。\n"
+            "每次发言只能使用系统消息指定的唯一身份，正文中的'我'只能指你自己。\n"
             "不得代替其他参与者回答、行动或描述其内心。"
         )
 

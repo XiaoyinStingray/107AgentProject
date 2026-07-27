@@ -71,6 +71,14 @@ export function useExecuteTeam() {
   });
 }
 
+/** 评估 Team 协作 */
+export function useEvaluateTeam() {
+  return useMutation({
+    mutationFn: (teamId: string) =>
+      client.post<{ evaluation: string }>(`/teams/${teamId}/evaluate`),
+  });
+}
+
 /** 获取 Team 的当前 Plan */
 export function useTeamPlan(teamId: string | null) {
   return useQuery({

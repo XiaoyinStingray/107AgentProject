@@ -392,6 +392,95 @@ async def get_team_plan(
     return plan_row.to_dict()
 
 
+@router.post("/{team_id}/evaluate")
+async def evaluate_team(
+    team_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """评估团队协作——LLM 分析 Plan 产出 + World 事件，给出评估报告。"""
+    from models.plan_orm import PlanRow
+    from models.event import Event
+
+    # 获取最近的 Plan
+    plan_result = await db.execute(
+        select(PlanRow)
+        .where(PlanRow.team_id == team_id)
+        .order_by(PlanRow.created_at.desc())
+        .limit(1)
+    )
+    plan_row = plan_result.scalar_one_or_none()
+    if not plan_row:
+        raise HTTPException(status_code=404, detail="该 Team 还没有执行记录")
+
+    plan = plan_row.to_dict()
+    if plan_row.report:
+        plan["report"] = __import__("json").loads(plan_row.report)
+
+    # 获取 World 事件
+    world_id = plan_row.world_id
+    events_text = ""
+    if world_id:
+        evt_result = await db.execute(
+            select(Event)
+            .where(Event.world_id == world_id)
+            .order_by(Event.tick, Event.created_at)
+            .limit(30)
+        )
+        evts = evt_result.scalars().all()
+        events_text = "\n".join(
+            f"[{e.tick}] {e.type}: {e.description[:200]}"
+            for e in evts
+            if e.description
+        )
+
+    # LLM 评估
+    prompt = f"""你是一个团队协作评估专家。请根据以下团队任务执行记录，给出简洁的评估。
+
+任务：{plan.get('task', '')}
+步骤完成：{plan.get('completed_count', 0)}/{plan.get('steps_count', 0)}
+
+各步骤产出：
+{plan.get('report', {}).get('content', '无')[:1500]}
+
+关键事件：
+{events_text[:2000]}
+
+请用 200 字以内给出评估，包含：
+1. 协作质量（1-10分）
+2. 亮点
+3. 改进建议
+
+直接回复评估文本，不需要 JSON 格式。"""
+
+    try:
+        from api.agents import get_agent_factory
+        from autogen_core.models import UserMessage
+        import asyncio
+
+        factory = get_agent_factory()
+        result = await asyncio.wait_for(
+            factory.model_client.create(
+                messages=[UserMessage(content=prompt, source="evaluator")],
+            ),
+            timeout=20.0,
+        )
+        evaluation = result.content if hasattr(result, "content") else str(result)
+        return {"evaluation": evaluation.strip()}
+    except Exception as e:
+        logger.warning(f"团队评估失败: {e}")
+        # 兜底：基于数据的简单评估
+        pc = plan.get("progress_pct", 0)
+        steps_done = plan.get("completed_count", 0)
+        steps_total = plan.get("steps_count", 0)
+        return {
+            "evaluation": (
+                f"【自动评估】\n"
+                f"任务完成度：{steps_done}/{steps_total}（{int(pc * 100)}%）\n"
+                f"协作质量：因 LLM 不可用，无法给出详细评估。"
+            )
+        }
+
+
 @router.get("/{team_id}/plan/history")
 async def get_team_plan_history(
     team_id: str,

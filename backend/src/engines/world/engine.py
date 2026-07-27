@@ -135,7 +135,7 @@ class WorldEngine(
             f"你的唯一身份：{display_name}\n"
             f"你的内部发言标识：{agent.autogen_agent.name}\n"
             f"参与者标识对应关系：\n{aliases}\n"
-            f"你生成的文本中，‘我’只能指{display_name}。\n"
+            f"你生成的文本中，'我'只能指{display_name}。\n"
             "对话历史中每条消息的 source 是发言者身份的唯一依据。\n"
             "每次回复前先在内部核对自己的身份、上一位发言者和当前被点名对象，"
             "不要输出核对过程。\n"

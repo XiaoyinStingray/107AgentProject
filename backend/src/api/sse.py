@@ -177,10 +177,24 @@ async def _world_event_generator(
                     tick_events.append(d)
                     yield _sse_event(d)
                 tick_count += 1
+                # Team 模式：收集本 tick 的 AutoGen 消息，存为跨 tick 对话历史
+                if hasattr(engine, "team_task") and engine.team_task:
+                    from autogen_agentchat.messages import TextMessage
+                    history = getattr(engine, "_team_chat_history", None) or []
+                    for e in tick_events:
+                        role = "assistant"
+                        content = e.get("content", "") or e.get("message", "")
+                        if content and len(content) > 5:
+                            history.append(TextMessage(content=content, source=e.get("agent_name", "agent"), role=role))
+                    engine._team_chat_history = history[-20:]  # 保留最近 20 条，防 token 爆炸
+
                 # Team Plan 进度推进（Step 53）——LLM 协调器判定
                 if hasattr(engine, "team_plan") and engine.team_plan:
                     plan = engine.team_plan
                     await plan.check_progress(tick_count, tick_events)
+                    # 同步到 DB——确保退出重进不丢状态
+                    if hasattr(engine, "team_engine") and engine.team_engine:
+                        await engine.team_engine._sync_plan_to_db()
                     # 发射 plan_updated 事件——前端看板实时更新
                     yield _sse_event({
                         "type": "plan_updated",
@@ -191,11 +205,17 @@ async def _world_event_generator(
                     # 协调器催促（连续多轮未推进）
                     step = plan.current_step()
                     if step and plan._ticks_on_step >= 5:
+                        drift = getattr(plan, "_drift_count", 0)
+                        msg = (
+                            f"⚠️ 协调器：当前阶段「{step['title']}」已讨论{plan._ticks_on_step}轮。"
+                            + (f" 已检测到{drift}次偏离主题。" if drift else "")
+                            + " 请聚焦当前任务或调用 submit_deliverable 提交。"
+                        )
                         yield _sse_event({
                             "type": "coordinator_nudge",
                             "world_id": world_id,
                             "tick": engine.current_tick,
-                            "content": f"⚠️ 协调器：当前阶段「{step['title']}」已讨论{plan._ticks_on_step}轮。请立即调用 submit_deliverable 提交交付物。",
+                            "content": msg,
                         })
                     if plan.all_done:
                         engine.world.status = "finished"
@@ -205,12 +225,16 @@ async def _world_event_generator(
                             "world_id": world_id,
                             "tick": engine.current_tick,
                         })
+                        report = plan.build_report()
                         yield _sse_event({
                             "type": "report_ready",
                             "world_id": world_id,
                             "tick": engine.current_tick,
-                            "data": plan.build_report(),
+                            "data": report,
                         })
+                        # 持久化报告到 PlanRow
+                        if hasattr(engine, "team_engine") and engine.team_engine:
+                            await engine.team_engine._save_report(report)
                         break
             elif engine.world.status == "paused":
                 yield _sse_event({

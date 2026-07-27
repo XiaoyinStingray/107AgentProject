@@ -97,6 +97,13 @@ async def init_db():
             pass  # 列已存在，忽略
         await conn.commit()
 
+        # 2026-07-27: plans 表加 report 列
+        try:
+            await conn.execute(_text("ALTER TABLE plans ADD COLUMN report TEXT"))
+        except Exception:
+            pass
+        await conn.commit()
+
         # BUG-014: 修正历史 World——单 Agent → solo
         import json as _json
         result = await conn.execute(

@@ -9,16 +9,23 @@ from typing import Callable
 
 from loguru import logger
 
-COORDINATOR_PROMPT = """你是项目协调器。根据以下团队成员的最新对话，判断当前任务阶段是否已完成。
+COORDINATOR_PROMPT = """你是项目协调器。根据以下团队成员的最新对话，判断当前任务阶段是否已实质性完成。
 
 当前阶段：{current_step}
+阶段描述：{step_desc}
 负责人：{assignee}
 
 最近对话：
 {conversation}
 
-标准：如果该阶段目标已被充分讨论、形成明确结论或产出，回复 YES。如果仍在讨论中，回复 NO。
-只回复 YES 或 NO。"""
+判断标准：
+- 对话是否聚焦于当前阶段的任务？
+- 负责该阶段的成员是否已产出明确结果或交付物？
+- 如果对话明显偏离了当前阶段主题（跑题），回复 DRIFT
+- 如果阶段目标已达成，回复 YES
+- 如果仍在进行中，回复 NO
+
+只回复 YES、NO 或 DRIFT。"""
 
 
 class PlanManager:
@@ -84,22 +91,28 @@ class PlanManager:
                 self._complete(title, result)
                 changed.append(self.current_step() or {})
             if action == "finish_task":
-                # Agent 主动结束——标记所有步骤完成
-                for s in self.steps:
-                    if s.get("status") != "done":
-                        s["status"] = "done"
-                        s["progress"] = 1.0
-                changed.append({"all_forced_done": True})
-                self._ticks_on_step = 0
+                # 只标记当前 active 步骤完成，不跳过未开始步骤
+                step = self.current_step()
+                if step and step.get("status") == "active":
+                    self._complete(step.get("title", ""), "（Agent 主动标记完成）")
+                    changed.append(step)
 
         # LLM 协调器（每 3 tick）
         self._ticks_on_step += 1
         step = self.current_step()
         if step and self._ticks_on_step >= 3 and self._model_client:
-            ok = await self._llm_check(step)
-            if ok:
+            verdict = await self._llm_check(step)
+            if verdict == "yes":
                 self._complete(step.get("title", ""), "（协调器判定：阶段完成）")
                 changed.append(step)
+            elif verdict == "drift":
+                self._drift_count = getattr(self, "_drift_count", 0) + 1
+                logger.warning(f"Plan: step {step['title']!r} appears off-topic (drift {self._drift_count})")
+                if self._drift_count >= 3:
+                    # 连续跑偏，强制结束当前步骤并激活下一个
+                    self._complete(step.get("title", ""), "（协调器强制推进：对话持续偏离主题）")
+                    changed.append(step)
+                    self._drift_count = 0
 
         if changed and self._on_event:
             self._on_event("plan_updated", self.to_dict())
@@ -123,11 +136,13 @@ class PlanManager:
                 s["status"] = "active"; s["progress"] = 0.1
                 break
 
-    async def _llm_check(self, step: dict) -> bool:
+    async def _llm_check(self, step: dict) -> str:
+        """返回 'yes'（完成）、'drift'（跑偏）、'no'（继续）。"""
         conv = "\n".join(self._recent_msgs[-8:])
-        if len(conv) < 30: return False
+        if len(conv) < 30: return "no"
         prompt = COORDINATOR_PROMPT.format(
             current_step=step.get("title", ""),
+            step_desc=step.get("description", ""),
             assignee=step.get("assignee") or "全员",
             conversation=conv[:2000],
         )
@@ -138,7 +153,9 @@ class PlanManager:
                 timeout=10.0,
             )
             text = (result.content if hasattr(result, "content") else str(result)).strip().upper()
-            return text.startswith("YES")
+            if text.startswith("DRIFT"): return "drift"
+            if text.startswith("YES"): return "yes"
+            return "no"
         except Exception as e:
             logger.debug(f"Coordinator: {e}")
-            return False
+            return "no"
