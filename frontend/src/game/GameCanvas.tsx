@@ -62,18 +62,14 @@ export default function GameCanvas({ mapId, agents }: Props) {
     prevMapRef.current = mapId;
 
     const mapScene = gameRef.current.scene.getScene("MapScene") as MapScene | null;
-    if (mapScene && mapScene.scene.isActive()) {
-      mapScene.loadMap(mapId);
-    }
+    if (mapScene) mapScene.loadMap(mapId);
   }, [mapId]);
 
-  // 同步 Agent 数据
+  // 同步 Agent 数据（去除 isActive 检查——MapScene 内部有 pendingAgents 兜底）
   useEffect(() => {
     if (!gameRef.current) return;
     const mapScene = gameRef.current.scene.getScene("MapScene") as MapScene | null;
-    if (mapScene && mapScene.scene.isActive()) {
-      mapScene.setAgents(agents);
-    }
+    if (mapScene) mapScene.setAgents(agents);
   }, [agents]);
 
   return (
