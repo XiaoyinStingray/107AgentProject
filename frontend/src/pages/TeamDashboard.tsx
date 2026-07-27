@@ -558,9 +558,13 @@ export default function TeamDashboard() {
                       </button>
                     )}
                     {team.status === "finished" && (
-                      <span className="text-xs font-mono text-text-secondary/60">
-                        ✓ 已完成
-                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTeamId(team.id)}
+                        className="text-xs font-mono text-accent-green hover:text-accent-green/80 transition-colors"
+                      >
+                        ✓ 已完成 — 查看
+                      </button>
                     )}
                     <button
                       type="button"
