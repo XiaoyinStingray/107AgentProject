@@ -1,0 +1,275 @@
+import Phaser from "phaser";
+import { ITEM_FRAME } from "../tileset";
+
+/**
+ * MapScene — Phaser 原生 tilemap 渲染。
+ *
+ * 图层（从底到顶）：
+ *   1. 地面层 — this.make.tilemap() 单层，数据 = ground + walls 合并
+ *   2. 物品阴影层 — 每个物品下方椭圆
+ *   3. 物品层 — items spritesheet 帧
+ *   4. 天气粒子层 — sakura 飘落
+ *   5. 场景标题 — 顶部半透明标签
+ *
+ * 切换场景：loadMap(mapId) → 销毁旧对象 → 动态 import JSON → 重建
+ */
+
+/* —— 类型 —— */
+
+interface MapData {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  indoor?: boolean;
+  weather?: "clear" | "sakura" | "rain";
+  ground: number[][];
+  items: MapItem[];
+  spawns: { x: number; y: number }[];
+}
+
+interface MapItem {
+  id: string;
+  type: string;
+  tileX: number;
+  tileY: number;
+  state?: "empty" | "occupied" | "active";
+}
+
+/* —— 墙壁 tile 索引（在 "tiles" spritesheet 中帧 6-9） —— */
+const WALL_TOP = 0;
+const WALL_BOTTOM = 1;
+const WALL_LEFT = 2;
+const WALL_RIGHT = 3;
+
+const TILE_S = 32; // 像素
+const WALL_OFFSET = 6; // 墙壁帧在 spritesheet 中的偏移
+
+export class MapScene extends Phaser.Scene {
+  /* —— 运行时状态 —— */
+  private mapData: MapData | null = null;
+  private tilemap: Phaser.Tilemaps.Tilemap | null = null;
+  private groundLayer: Phaser.Tilemaps.TilemapLayer | null = null;
+  private itemObjects: Phaser.GameObjects.GameObject[] = [];
+  private weatherTweens: Phaser.Tweens.Tween[] = [];
+  private ready = false;
+
+  constructor() {
+    super({ key: "MapScene" });
+  }
+
+  /* ================================================================
+   * 生命周期
+   * ================================================================ */
+
+  create(): void {
+    this.ready = true;
+    if (this.mapData) this.buildScene();
+    else this.loadMap("library");
+  }
+
+  shutdown(): void {
+    this.destroyScene();
+  }
+
+  /* ================================================================
+   * 场景加载
+   * ================================================================ */
+
+  loadMap(mapId: string): void {
+    this.destroyScene();
+
+    import(`../../data/scenes/${mapId}.json`)
+      .then((m) => {
+        this.mapData = (m.default ?? m) as MapData;
+        if (this.ready) this.buildScene();
+      })
+      .catch((err) => {
+        console.error(`[MapScene] 加载场景失败: ${mapId}`, err);
+      });
+  }
+
+  /* ================================================================
+   * 场景构建
+   * ================================================================ */
+
+  private buildScene(): void {
+    const d = this.mapData;
+    if (!d) return;
+
+    const W = d.width;
+    const H = d.height;
+
+    // 1. 生成合并图层数据（地面 0-5 + 墙壁 6-9）
+    const layerData = this.buildLayerData(d);
+
+    // 2. 创建 tilemap
+    this.tilemap = this.make.tilemap({
+      data: layerData,
+      tileWidth: TILE_S,
+      tileHeight: TILE_S,
+      width: W,
+      height: H,
+    });
+
+    const tileset = this.tilemap.addTilesetImage("tiles", "tiles", TILE_S, TILE_S, 0, 0);
+    if (!tileset) {
+      console.error("[MapScene] tileset 'tiles' 未找到——BootScene 可能未生成贴图");
+      return;
+    }
+
+    this.groundLayer = this.tilemap.createLayer(0, tileset, 0, 0);
+    if (!this.groundLayer) return;
+
+    // 3. 物品
+    this.placeItems(d);
+
+    // 4. 天气
+    if (d.weather === "sakura" || d.weather === "rain") {
+      this.startWeather(d.weather, W, H);
+    }
+
+    // 标题由 React GameScene 页的按钮选中态展示，不在此处覆盖
+  }
+
+  /* ================================================================
+   * 图层数据生成：ground + walls 合并
+   * ================================================================ */
+
+  private buildLayerData(d: MapData): number[][] {
+    const W = d.width;
+    const H = d.height;
+    const data: number[][] = [];
+
+    // 计算墙壁位置
+    const wallMap = this.computeWallMap(d);
+
+    for (let r = 0; r < H; r++) {
+      data[r] = [];
+      for (let c = 0; c < W; c++) {
+        const w = wallMap[r][c];
+        if (w >= 0) {
+          data[r][c] = WALL_OFFSET + w; // 6-9
+        } else {
+          data[r][c] = (d.ground[r]?.[c]) ?? 0;
+        }
+      }
+    }
+    return data;
+  }
+
+  /**
+   * 计算墙壁 map：-1 表示无墙，0-3 表示墙壁类型。
+   * 室内场景在四周边界生成墙壁，spawn 点留空作为门。
+   */
+  private computeWallMap(d: MapData): number[][] {
+    const W = d.width;
+    const H = d.height;
+    const wall: number[][] = Array.from({ length: H }, () => Array(W).fill(-1));
+
+    if (!d.indoor) return wall;
+
+    // 收集门位置
+    const doorSet = new Set<string>();
+    (d.spawns ?? []).forEach((s) => doorSet.add(`${s.x},${s.y}`));
+
+    const isDoor = (c: number, r: number): boolean => doorSet.has(`${c},${r}`);
+
+    for (let r = 0; r < H; r++) {
+      for (let c = 0; c < W; c++) {
+        if (isDoor(c, r)) continue;
+
+        if (r === 0 && c === 0)       wall[r][c] = WALL_TOP;    // 左上角
+        else if (r === 0 && c === W - 1) wall[r][c] = WALL_TOP; // 右上角
+        else if (r === H - 1 && c === 0) wall[r][c] = WALL_BOTTOM; // 左下角
+        else if (r === H - 1 && c === W - 1) wall[r][c] = WALL_BOTTOM; // 右下角
+        else if (r === 0)              wall[r][c] = WALL_TOP;
+        else if (r === H - 1)          wall[r][c] = WALL_BOTTOM;
+        else if (c === 0)              wall[r][c] = WALL_LEFT;
+        else if (c === W - 1)          wall[r][c] = WALL_RIGHT;
+      }
+    }
+
+    return wall;
+  }
+
+  /* ================================================================
+   * 物品放置
+   * ================================================================ */
+
+  private placeItems(d: MapData): void {
+    (d.items ?? []).forEach((item) => {
+      const cx = item.tileX * TILE_S + TILE_S / 2;
+      const cy = item.tileY * TILE_S + TILE_S / 2;
+      const frame = ITEM_FRAME[item.type];
+
+      // 阴影
+      const shadow = this.add.ellipse(cx + 1, cy + 3, TILE_S * 0.7, TILE_S * 0.25, 0x000000, 0.18);
+      shadow.setDepth(1);
+      this.itemObjects.push(shadow);
+
+      if (frame !== undefined && this.textures.exists("items")) {
+        const sprite = this.add.image(cx, cy, "items", frame).setDepth(2);
+        this.itemObjects.push(sprite);
+      }
+      // 若类型无对应帧，静默跳过（不渲染 emoji）
+    });
+  }
+
+  /* ================================================================
+   * 天气特效
+   * ================================================================ */
+
+  private startWeather(type: string, mapW: number, mapH: number): void {
+    const W = mapW * TILE_S;
+    const H = mapH * TILE_S;
+    const count = type === "rain" ? 35 : 20;
+
+    for (let i = 0; i < count; i++) {
+      const isRain = type === "rain";
+      const px = Math.random() * W;
+      const py = Math.random() * H * 0.6;
+
+      const particle = isRain
+        ? this.add.rectangle(px, py, 1, 6, 0x8899CC, 0.5).setDepth(10)
+        : this.add.circle(px, py, 2.5, 0xF8BBD0, 0.65).setDepth(10);
+
+      this.itemObjects.push(particle);
+
+      const tw = this.tweens.add({
+        targets: particle,
+        y: py + H * 0.8,
+        x: px + (Math.random() - 0.5) * (isRain ? 15 : 70),
+        alpha: isRain ? 0.15 : 0,
+        duration: isRain ? 1200 + Math.random() * 800 : 3500 + Math.random() * 2500,
+        repeat: -1,
+        delay: Math.random() * (isRain ? 1500 : 4000),
+      });
+      this.weatherTweens.push(tw);
+    }
+  }
+
+  /* ================================================================
+   * 清理
+   * ================================================================ */
+
+  private destroyScene(): void {
+    // 停止天气动画
+    this.weatherTweens.forEach((t) => t.stop());
+    this.weatherTweens = [];
+
+    // 销毁物品对象
+    this.itemObjects.forEach((o) => o.destroy());
+    this.itemObjects = [];
+
+    // 销毁 tilemap 图层
+    if (this.groundLayer) {
+      this.groundLayer.destroy();
+      this.groundLayer = null;
+    }
+    if (this.tilemap) {
+      this.tilemap.destroy();
+      this.tilemap = null;
+    }
+  }
+}

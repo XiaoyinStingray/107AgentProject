@@ -1,0 +1,39 @@
+{
+  "id": "library",
+  "name": "科大图书馆",
+  "width": 12,
+  "height": 8,
+  "tileSize": 32,
+  "weather": "clear",
+  "indoor": true,
+  "ground": [
+    [0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,1,1,0,0,0,0,0,0],
+    [0,0,0,0,1,1,0,0,0,0,0,0],
+    [0,0,0,0,1,1,0,0,0,0,0,0],
+    [0,0,0,0,1,1,0,0,0,0,0,0],
+    [0,0,1,1,1,1,1,1,0,0,0,0],
+    [0,0,1,1,1,1,1,1,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0]
+  ],
+  "items": [
+    {"id":"sh1","type":"shelf","tileX":1,"tileY":1,"state":"empty"},
+    {"id":"sh2","type":"shelf","tileX":1,"tileY":2,"state":"empty"},
+    {"id":"sh3","type":"shelf","tileX":1,"tileY":4,"state":"empty"},
+    {"id":"sh4","type":"shelf","tileX":10,"tileY":1,"state":"empty"},
+    {"id":"sh5","type":"shelf","tileX":10,"tileY":2,"state":"empty"},
+    {"id":"sh6","type":"shelf","tileX":10,"tileY":4,"state":"empty"},
+    {"id":"d1","type":"desk","tileX":3,"tileY":1,"state":"empty"},
+    {"id":"s1","type":"seat","tileX":3,"tileY":2,"state":"empty"},
+    {"id":"d2","type":"desk","tileX":7,"tileY":1,"state":"empty"},
+    {"id":"s2","type":"seat","tileX":7,"tileY":2,"state":"empty"},
+    {"id":"d3","type":"desk","tileX":3,"tileY":4,"state":"empty"},
+    {"id":"s3","type":"seat","tileX":3,"tileY":5,"state":"empty"},
+    {"id":"d4","type":"desk","tileX":7,"tileY":4,"state":"empty"},
+    {"id":"s4","type":"seat","tileX":7,"tileY":5,"state":"empty"},
+    {"id":"pc1","type":"pc","tileX":2,"tileY":5,"state":"empty"},
+    {"id":"pc2","type":"pc","tileX":9,"tileY":5,"state":"empty"},
+    {"id":"ct","type":"counter","tileX":6,"tileY":6,"state":"empty"}
+  ],
+  "spawns": [{"x":0,"y":3},{"x":11,"y":3}]
+}

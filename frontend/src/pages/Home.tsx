@@ -22,7 +22,7 @@ export default function Home() {
       </p>
 
       {/* 快捷入口 */}
-      <div className="grid grid-cols-5 gap-4 mb-8">
+      <div className="grid grid-cols-6 gap-4 mb-8">
         {QUICK_ENTRIES.map((entry) => (
           <Card
             key={entry.label}
@@ -104,4 +104,5 @@ const QUICK_ENTRIES = [
   { emoji: "📦", label: "M8 档案馆", desc: "市场·回放·导出", route: "/archive", tier: "P2" as const },
   { emoji: "👥", label: "M9 Agent Team", desc: "团队协作", route: "/team", tier: "P1" as const },
   { emoji: "🔬", label: "M10 LLM Bench", desc: "大模型评测", route: "/bench", tier: "P1" as const },
+  { emoji: "🎮", label: "M11 游戏化场景", desc: "RPG场景", route: "/scene", tier: "P1" as const },
 ];

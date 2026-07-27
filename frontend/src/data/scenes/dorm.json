@@ -1,0 +1,37 @@
+{
+  "id": "dorm",
+  "name": "学生宿舍",
+  "width": 12,
+  "height": 8,
+  "tileSize": 32,
+  "weather": "clear",
+  "indoor": true,
+  "ground": [
+    [1,1,1,1,1,1,1,1,1,1,1,1],
+    [1,1,1,1,0,0,0,0,1,1,1,1],
+    [1,1,1,1,0,0,0,0,1,1,1,1],
+    [1,1,1,1,0,0,0,0,1,1,1,1],
+    [1,1,1,1,0,0,0,0,1,1,1,1],
+    [1,1,1,1,0,0,0,0,1,1,1,1],
+    [1,1,1,1,0,0,0,0,1,1,1,1],
+    [1,1,1,1,1,1,1,1,1,1,1,1]
+  ],
+  "items": [
+    {"id":"b1","type":"bed","tileX":1,"tileY":2,"state":"empty"},
+    {"id":"b2","type":"bed","tileX":1,"tileY":5,"state":"empty"},
+    {"id":"b3","type":"bed","tileX":10,"tileY":2,"state":"empty"},
+    {"id":"b4","type":"bed","tileX":10,"tileY":5,"state":"empty"},
+    {"id":"d1","type":"desk","tileX":5,"tileY":2,"state":"empty"},
+    {"id":"d2","type":"desk","tileX":7,"tileY":2,"state":"empty"},
+    {"id":"pc1","type":"pc","tileX":5,"tileY":3,"state":"empty"},
+    {"id":"pc2","type":"pc","tileX":7,"tileY":3,"state":"empty"},
+    {"id":"d3","type":"desk","tileX":5,"tileY":5,"state":"empty"},
+    {"id":"d4","type":"desk","tileX":7,"tileY":5,"state":"empty"},
+    {"id":"pc3","type":"pc","tileX":5,"tileY":6,"state":"empty"},
+    {"id":"pc4","type":"pc","tileX":7,"tileY":6,"state":"empty"},
+    {"id":"sh1","type":"shelf","tileX":2,"tileY":1,"state":"empty"},
+    {"id":"sh2","type":"shelf","tileX":9,"tileY":1,"state":"empty"},
+    {"id":"w1","type":"window","tileX":6,"tileY":0,"state":"empty"}
+  ],
+  "spawns": [{"x":0,"y":4},{"x":11,"y":4}]
+}

@@ -1,0 +1,32 @@
+{
+  "id": "art",
+  "name": "艺术中心",
+  "width": 12,
+  "height": 8,
+  "tileSize": 32,
+  "weather": "clear",
+  "indoor": true,
+  "ground": [
+    [0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,4,4,4,4,4,4,4,4,0,0],
+    [0,0,4,4,4,4,4,4,4,4,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0]
+  ],
+  "items": [
+    {"id":"pn","type":"piano","tileX":2,"tileY":2,"state":"empty"},
+    {"id":"e1","type":"easel","tileX":6,"tileY":2,"state":"empty"},
+    {"id":"e2","type":"easel","tileX":8,"tileY":3,"state":"empty"},
+    {"id":"e3","type":"easel","tileX":4,"tileY":5,"state":"empty"},
+    {"id":"e4","type":"easel","tileX":9,"tileY":5,"state":"empty"},
+    {"id":"sh1","type":"shelf","tileX":1,"tileY":5,"state":"empty"},
+    {"id":"sh2","type":"shelf","tileX":10,"tileY":2,"state":"empty"},
+    {"id":"bd","type":"board","tileX":6,"tileY":6,"state":"empty"},
+    {"id":"d1","type":"desk","tileX":3,"tileY":6,"state":"empty"},
+    {"id":"ct","type":"counter","tileX":1,"tileY":1,"state":"empty"}
+  ],
+  "spawns": [{"x":0,"y":4},{"x":11,"y":4}]
+}

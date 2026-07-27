@@ -131,6 +131,11 @@ export const MENU_SECTIONS: MenuSection[] = [
     route: "/bench",
     items: [],
   },
+  {
+    title: "M11 游戏化场景",
+    route: "/scene",
+    items: [],
+  },
 ];
 
 /** 按 id 快速查找子项 */

@@ -1,0 +1,31 @@
+{
+  "id": "sakura",
+  "name": "樱花大道",
+  "width": 12,
+  "height": 8,
+  "tileSize": 32,
+  "weather": "sakura",
+  "indoor": false,
+  "ground": [
+    [3,3,3,3,5,5,5,5,3,3,3,3],
+    [3,3,3,5,5,5,5,5,5,3,3,3],
+    [3,3,5,5,5,5,5,5,5,5,3,3],
+    [3,3,5,5,5,5,5,5,5,5,3,3],
+    [3,3,5,5,5,5,5,5,5,5,3,3],
+    [3,3,3,5,5,5,5,5,5,3,3,3],
+    [3,3,3,3,5,5,5,5,3,3,3,3],
+    [3,3,3,3,3,3,3,3,3,3,3,3]
+  ],
+  "items": [
+    {"id":"t1","type":"tree","tileX":1,"tileY":1,"state":"empty"},
+    {"id":"t2","type":"tree","tileX":3,"tileY":7,"state":"empty"},
+    {"id":"t3","type":"tree","tileX":8,"tileY":7,"state":"empty"},
+    {"id":"t4","type":"tree","tileX":10,"tileY":2,"state":"empty"},
+    {"id":"t5","type":"tree","tileX":11,"tileY":5,"state":"empty"},
+    {"id":"t6","type":"tree","tileX":0,"tileY":5,"state":"empty"},
+    {"id":"bn1","type":"bench","tileX":2,"tileY":4,"state":"empty"},
+    {"id":"bn2","type":"bench","tileX":9,"tileY":4,"state":"empty"},
+    {"id":"bn3","type":"bench","tileX":6,"tileY":1,"state":"empty"}
+  ],
+  "spawns": [{"x":0,"y":4},{"x":11,"y":4}]
+}
