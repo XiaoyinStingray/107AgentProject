@@ -32,25 +32,24 @@
 | 61 | 15.4 | 开发 | 排行榜与趋势 | 60 | 多维排序 + 长期追踪 + 退化检测 | 3h |
 | T3 | — | 测试 | Phase 15 集成 + E2E | 58–61 | Bench 全链路（配置→27条评测→六边形→报告） | 3h |
 | T4 | — | 测试 | Phase 15 Bug 修补 | T3 | 并发调度 + 指标边界 + 前端性能 | 2h |
-| **🏗️ Phase 16: 游戏化** | | | | | | |
-| 62 | 16.1 | 开发 | 场景画布 | — | Canvas 渲染：场景背景 + Agent 放置 + 环境动态 | 5h |
-| 63 | 16.2 | 开发 | 头像与情绪 | 62 | AI 生成头像 + 情绪表情 + 名字标签 | 3h |
-| 64 | 16.3 | 开发 | 时间轴 | 62 | 拖拽回退 tick + 关键事件锚点 | 4h |
-| 65 | 16.4 | 开发 | 交互系统 | 62, 64 | 点击→面板；右键→耳语；拖拽→移动；人格篡改 | 4h |
-| 66 | 16.5 | 开发 | 分支探索 | 64, 65 | 决策点分叉 + 分支树 + 平行对比 | 5h |
-| T5 | — | 测试 | Phase 16 性能 + E2E | 62–66 | Canvas ≥30fps（5 Agent）；分叉全链路 | 3h |
-| T6 | — | 测试 | Phase 16 Bug 修补 | T5 | 渲染异常 + 时间轴 + 包体积 | 2h |
+| **🏗️ Phase 16: 游戏化场景** | | | | | | |
+| 62 | 16.1 | 开发 | 场景引擎 | — | TileMap 引擎 + 六场景 JSON 地图 + CSS Grid 渲染 | 5h |
+| 63 | 16.2 | 开发 | Agent 精灵 + 动作 | 62 | emoji 头像 + 动作动画（移动/坐下/对话/使用）+ 情绪表情 | 4h |
+| 64 | 16.3 | 开发 | 交互系统 | 62, 63 | 点击→面板；拖拽→移动；右键→耳语；双击→篡改 | 4h |
+| 65 | 16.4 | 开发 | 时间轴 + 快照 | 62 | 拖拽回退 tick + 每 tick 场景快照 + 状态还原 | 4h |
+| 66 | 16.5 | 开发 | 特效 + 导演 | 63, 64, 65 | 气泡/天气/情绪动画 + 剧本触发器 + 上帝之声 + 分支入口 | 5h |
+| T5 | — | 测试 | Phase 16 性能 + E2E | 62–66 | 6 场景渲染 + 5 Agent 同屏流畅 + 时间轴回退全链路 | 3h |
+| T6 | — | 测试 | Phase 16 Bug 修补 | T5 | 渲染异常 + 拖拽 + 快照还原 | 2h |
 | **🎯 Phase 17: 打磨交付** | | | | | | |
-| 67 | 17.1 | 开发 | 导演模式 | 65, 66 | 剧本触发器 + 上帝之声广播 | 3h |
-| 68 | 17.2 | 开发 | 叙事导出 | 67 | 微电影 + 连载 + 自画像 | 3h |
-| 69 | 17.3 | 开发 | P3 菜单清理 | — | 移除 17 个 P3 菜单项：已嵌入模块的隐藏、已砍的删除 | 0.5h |
-| 70 | — | 测试 | 全项目 Bug 清零 | 全 | bugs.md 关闭；TODO/FIXME 归零；11 页面 console 零 error | 4h |
-| 71 | — | 测试 | 覆盖率 + E2E 全链路 | 全 | 后端行覆盖 ≥90%；E2E ×5 | 4h |
-| 72 | — | 测试 | 演示排练 + 文档 | 全 | 3 条 Demo 含台词/时间轴；README；API 文档 | 4h |
-| 73 | 17.4 | 开发 | 科大主题 | 34-S | 5 场景 + 8 模板 + 彩蛋 + 首页 USTC 标识 | 4h |
+| 67 | 17.1 | 开发 | 叙事导出 | 66 | 微电影 + 连载 + 自画像 | 3h |
+| 68 | 17.2 | 开发 | P3 菜单清理 | — | 移除 17 个 P3 菜单项 | 0.5h |
+| 69 | — | 测试 | 全项目 Bug 清零 | 全 | bugs.md 关闭；TODO/FIXME 归零 | 4h |
+| 70 | — | 测试 | 覆盖率 + E2E 全链路 | 全 | 后端行覆盖 ≥90%；E2E ×5 | 4h |
+| 71 | — | 测试 | 演示排练 + 文档 | 全 | 3 条 Demo 含台词/时间轴；README | 4h |
+| 72 | 17.3 | 开发 | 科大主题 | 34-S | 6 场景内置 + 8 模板 + 彩蛋 + 首页 USTC 标识 | 4h |
 
-> **共 31 个 Step。** 开发 20 步，测试 11 步。Phase 14 已交付。联网功能已全部砍掉。
-> **总计估时：** ~95 小时（一人 + AI）
+> **共 28 个 Step。** 开发 18 步，测试 10 步。Phase 14–15 已交付。
+> **总计估时：** ~85 小时（一人 + AI）
 
 ---
 
@@ -66,17 +65,16 @@
   - [Step 58–61: B 线](#step-58--批量调度器)
   - [Step T3: 集成 + E2E](#step-t3--phase-15-集成测试--e2e)
   - [Step T4: Bug 修补](#step-t4--phase-15-bug-修补)
-- [Phase 16: Bench 收尾 + 游戏化启动](#phase-16-bench-收尾--游戏化启动)
-  - [Step 62–64: A 线](#step-62--盲测模式)
-  - [Step 65–68: B 线](#step-65--场景画布)
-  - [Step T5: 性能 + E2E](#step-t5--phase-16-性能测试--e2e)
-  - [Step T6: Bug 修补](#step-t6--phase-16-bug-修补)
-- [Phase 17: 游戏化收尾 + 打磨交付](#phase-17-游戏化收尾--打磨交付)
-  - [Step 69–71: 开发](#step-69--导演模式)
-  - [Step 72: Bug 清零](#step-72--全项目-bug-清零)
-  - [Step 73: 覆盖率 + E2E](#step-73--覆盖率--e2e-全链路)
-  - [Step 74: 演示排练](#step-74--演示排练--文档)
-  - [Step 75: 科大主题](#step-75--科大主题)
+- [Phase 16: 游戏化场景](#phase-16--游戏化场景rpg-maker-风格)
+  - [Step 62: 场景引擎](#step-62--场景引擎)
+  - [Step 63: Agent 精灵 + 动作](#step-63--agent-精灵--动作系统)
+  - [Step 64: 交互系统](#step-64--交互系统)
+  - [Step 65: 时间轴 + 快照](#step-65--时间轴--快照)
+  - [Step 66: 特效 + 导演](#step-66--特效--导演模式)
+- [Phase 17: 打磨交付](#phase-17--打磨交付)
+  - [Step 67: 叙事导出](#step-67--叙事导出)
+  - [Step 68: P3 菜单清理](#step-68--p3-菜单清理)
+  - [Step 69–72: 测试/演示/科大主题](#step-6972--测试演示科大主题)
 - [附录 A: 18 功能嵌入映射](#附录-a-18-功能嵌入映射)
 - [附录 B: 测试线详细指标](#附录-b-测试线详细指标)
 - [附录 C: 菜单架构演进](#附录-c-菜单架构演进)
@@ -673,568 +671,235 @@ POST /api/bench/runs {api_key, base_url, model}
 
 ---
 
-### 16a — Bench 收尾（A 线）
+## Phase 16 — 游戏化场景
 
-### Step 62 — 盲测模式
+> 技术选型：**Phaser 3**（60KB gzip + 可选模块），参考 [Sigil](https://github.com/gecko0307/sigil) RPG 引擎设计。
+> Phaser 提供 tilemap、sprite 动画、输入处理、camera——对这些需求来说是标准答案，不必重复造轮子。
+> Phaser 通过 `useRef` 挂载到 React，状态通过 event emitter 双向同步。
 
-> **目标：** 实现 #25。评测时 Agent 身份脱敏，揭盲仪式感。
-
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `backend/src/engines/bench/blind.py` | **新建** | 脱敏策略：Agent 名 → "Agent-A"；LLM → "模型-X" |
-| `frontend/src/pages/bench/BlindMode.tsx` | **新建** | 盲评 UI + 揭盲按钮 |
-
-**验收标准：** ① 盲测中所有身份信息隐藏 ② 揭盲需确认操作 ③ 揭盲前后评分可对比（检测偏差）
-
-### Step 63 — 长期追踪
-
-> **目标：** 实现 #41。同一 Agent 跨版本/跨场景趋势 + 退化检测。
-
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `backend/src/engines/bench/tracker.py` | **新建** | AgentTrendTracker：历史数据聚合 + 退化检测 |
-| `frontend/src/pages/bench/TrendView.tsx` | **新建** | 折线图趋势 + 退化标注 |
-
-**验收标准：** ① 同 Agent 跨 ≥3 次评测的趋势图 ② 连续下降自动标注 ③ 跨场景对比
-
-### Step 64 — Bench 报告
-
-> **目标：** 自动生成学术风格的评测报告（Markdown + 图表）。
-
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `backend/src/engines/bench/reporter.py` | **新建** | ReportGenerator：模板 + 数据注入 + 图表 |
-| `backend/src/api/bench.py` | 修改 | `GET /api/bench/runs/{id}/report` |
-| `frontend/src/pages/bench/ReportView.tsx` | **新建** | Markdown 渲染 + 下载 |
-
-**验收标准：** ① 报告含摘要/方法/结果/结论 ② 内嵌图表 ③ 可下载 Markdown + PDF
-
----
-
-### 16b — 游戏化启动（B 线）
-
-### Step 65 — 场景画布
-
-> **目标：** 2D Canvas 渲染场景背景 + Agent 精灵 + 基础动画。
-
-#### 设计
+### 架构
 
 ```
-┌──────────────────────────────────────────────┐
-│  🏛️ 科大图书馆 · Tick 12                      │
-│                                              │
-│    📚📚📚📚📚📚📚📚📚📚📚                     │
-│    📚              📚    🧑 小红              │
-│    📚  🧑 小明     📚    (ENFP, 社交中)       │
-│    📚  (INTJ, 自习)📚                        │
-│    📚              📚         🧑 小刚         │
-│    📚📚📚📚📚📚📚📚📚📚📚    (ESTJ, 走向座位)  │
-│                                              │
-│  ─────────────────────────────────────────── │
-│  ⏮ ⏪ ●━━━━━━━━○━━━━━━ ⏩ ⏭  Tick 12/50      │
-└──────────────────────────────────────────────┘
+React (state + UI panels)
+  ↕  event emitter
+Phaser 3 Canvas (tilemap + sprites + input)
+  ↕  REST + SSE
+Backend (WorldEngine + scene state)
 ```
 
-#### 涉及文件
+**Phaser 场景 = 我们的 GameScene。** Phaser 负责渲染和输入，React 负责面板 UI 和时间轴。
 
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `frontend/src/pages/scene/GameCanvas.tsx` | **新建** | HTML5 Canvas 主渲染循环 |
-| `frontend/src/pages/scene/AgentSprite.tsx` | **新建** | Agent 精灵组件（位置 + 朝向 + 动画帧） |
-| `frontend/src/pages/scene/SceneBackground.tsx` | **新建** | 场景背景渲染（静态 + 动态元素） |
-| `frontend/src/pages/GameScene.tsx` | **新建** | `/scene` 页面入口：Canvas + HUD 叠加层 |
-| `frontend/src/api/scenes.ts` | **新建** | useSceneState / useSceneTimeline |
-| `backend/src/api/scenes.py` | **新建** | `GET/POST /api/scenes` |
-| `backend/src/main.py` | 修改 | 注册 scenes router |
+### 数据模型（确定版）
 
-**技术选型：** Phase 16 初判用原生 Canvas API（零依赖，可控性最强），如性能不达标再评估 PixiJS。Agent 最多 10 个同屏，不需要游戏引擎级优化。
+```typescript
+// ===== 地图 =====
+interface TileMap {
+  id: string;                    // "library"
+  name: string;                  // "科大图书馆"
+  width: number;                 // 12 (tiles)
+  height: number;                // 8
+  tileSize: number;              // 48 (px)
+  tileset: string;               // "library" → 映射到 tilesets/library.png
+  layers: {
+    ground: number[][];          // [row][col] tile index
+    objects: number[][];         // 0 = empty, 非0 = 物品 tile index
+  };
+  items: SceneItem[];            // 可交互物品
+  spawns: {x: number; y: number}[];
+  weather: "clear" | "sakura" | "rain" | "sunset";
+}
 
-#### 验收标准
+interface SceneItem {
+  id: string;                    // "seat-3"
+  type: "seat" | "desk" | "pc" | "piano" | "easel" | "board" | "bed" | "tree" | "bench" | "vending";
+  tileX: number; tileY: number;
+  state: "empty" | "occupied" | "active";
+}
 
-- [ ] Canvas 渲染场景背景（至少 1 个内置场景）
-- [ ] Agent 以圆形头像 + 名字标签显示在场景中
-- [ ] Agent 位置随模拟事件移动（坐→走→站）
-- [ ] 基础动画：移动有缓动、社交有气泡
+// ===== Agent 精灵 =====
+interface AgentSprite {
+  agentId: string;
+  name: string;                  // "小明"
+  emoji: string;                 // "🧑" — LLM 生成的 Unicode
+  tileX: number; tileY: number;  // 当前 tile 坐标
+  facing: 0 | 1 | 2 | 3;        // 0=down 1=left 2=right 3=up
+  action: "idle" | "walk" | "sit" | "talk" | "use_item" | "emote";
+  emotion: "neutral" | "happy" | "anxious" | "angry" | "sad";
+  bubble: string | null;         // 对话/思考气泡文字
+  bubbleType: "speech" | "thought" | "emote" | null;
+}
 
----
-
-### Step 66 — 头像 + 情绪系统
-
-> **目标：** 实现 #35。AI 生成 Agent 头像，情绪变化反映在头像表情上。
-
-#### 设计
-
-```
-中性 😶 → 开心 😊 → 焦虑 😰 → 愤怒 😡
-每个情绪状态对应：头像底色变化 + 表情符号 + 微动画
-```
-
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `backend/src/engines/scene/avatar.py` | **新建** | AvatarGenerator：人格→头像参数（颜色/形状/装饰） |
-| `backend/src/api/scenes.py` | 修改 | `GET /api/scenes/{id}/sprites`（含情绪状态） |
-| `frontend/src/pages/scene/AgentSprite.tsx` | 修改 | 情绪表情渲染 + 过渡动画 |
-| `frontend/src/pages/scene/EmotionBubble.tsx` | **新建** | 情绪气泡弹出效果 |
-
-**验收标准：** ① 每个 Agent 有唯一头像（颜色/形状不同） ② 情绪变化时头像表情 500ms 过渡 ③ 极端情绪时触发特殊效果（愤怒→抖动/开心→跳动）
-
----
-
-### Step 67 — 时间轴
-
-> **目标：** 实现 #45。底部时间轴可拖拽回退到任意 tick，配合快照机制。
-
-#### 设计
-
-```
-TimeSlider:
-  ┌──────────────────────────────────────────────┐
-  │  ⏮    ⏪    ●━━━━━━○━━━━━━━━━━    ⏩    ⏭    │
-  │ tick 0     5    12(current)          50(end) │
-  │           ↑ 悬停显示：                         │
-  │           "T5: 小明离开座位 · 小红开始搭讪"     │
-  └──────────────────────────────────────────────┘
-
-回退行为：拖动滑块 → Canvas 回退到该 tick 的快照 → Agent 位置/情绪还原
+// ===== 快照 =====
+interface SceneSnapshot {
+  tick: number;
+  agents: AgentSprite[];
+  items: SceneItem[];
+  timestamp: string;
+}
 ```
 
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `backend/src/engines/scene/snapshot.py` | **新建** | SnapshotManager：每 tick 保存场景快照 |
-| `backend/src/api/scenes.py` | 修改 | `GET /api/scenes/{id}/timeline?tick=N` |
-| `frontend/src/pages/scene/Timeline.tsx` | **新建** | 可拖拽时间轴组件 |
-| `frontend/src/pages/scene/GameCanvas.tsx` | 修改 | 回退渲染逻辑 |
+### 精灵图生成方案（不做美术资源）
 
-**验收标准：** ① 拖动滑块 → Agent 位置/情绪/对话回退到该 tick ② 回退后 2s 内渲染完成 ③ 关键 tick 标注（决策点）
+不用传统 spritesheet。用 **Canvas 动态绘制 32×32 精灵帧**：
+- 身体 = emoji 缩小到 24px + CSS 圆形裁切
+- 名字 = 4px 字体在下方
+- 情绪 = 颜色叠加层（开心→绿、焦虑→黄、愤怒→红）
+- 朝向 = 简单箭头指示
+- 所有帧在初始化时生成到 Phaser texture cache
 
----
+每个 Agent 生成 5 种动作 × 4 个朝向 = 20 帧。5 个 Agent = 100 帧。全部程序化生成，零外部资源。
 
-### Step 68 — 交互系统
 
-> **目标：** 点击 Agent 弹面板；拖拽移动位置；右键发耳语。
+### Step 62 — 场景引擎 + Phaser 挂载
 
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `frontend/src/pages/scene/InteractionLayer.tsx` | **新建** | 点击/拖拽/右键事件处理 |
-| `frontend/src/pages/scene/AgentPanel.tsx` | **新建** | 弹出面板：人格/情绪/记忆/关系 |
-| `frontend/src/pages/scene/WhisperBox.tsx` | **新建** | 耳语输入框 |
-| `backend/src/api/scenes.py` | 修改 | `POST /api/scenes/{id}/interact`（移动/耳语） |
+**目标：** Phaser 3 挂载到 React → 加载六场景地图 → tilemap 渲染 → 物品层。
 
-**验收标准：** ① 点击 Agent → 面板从右侧滑入 ② 拖拽 Agent → 实时移动 + 路径预览 ③ 耳语 → Agent 在下一个 tick 有反应
+**实现细节：**
+1. `phaser` npm 包安装（phaser@3.80+）
+2. `GameCanvas` 组件：`useRef<HTMLDivElement>` → `new Phaser.Game({type: Phaser.AUTO, parent: ref})`
+3. 注册一个 `BootScene`（加载 tileset）+ 六个 `MapScene`（library/dorm/classroom/art/lab/sakura）
+4. 每场景加载 JSON 地图 → `this.make.tilemap({data: layers.ground, tileWidth: 48})`
+5. tileset 用 6 色 48×48 纯色块（木地板/地砖/水磨石/草地/石板/白地砖）→ 动态 Canvas 生成
+6. 物品层：tilemap 第二层 + `this.add.sprite()` 覆盖 emoji 图标
+7. React 侧：场景选择器 `<select>` → Phaser `this.scene.start(mapId)`
 
----
-
-### Step T5 — Phase 16 性能测试 + E2E
-
-> **目标：** A 线（Bench 收尾）+ B 线（游戏化启动）的测试，重点在**性能**——Canvas 帧率和批量并发是两个全新维度的测试挑战。
-
-#### 测试清单
-
-**Layer 1：性能测试（Phase 16 新增维度）**
-
-| 测试 | 工具/方法 | 通过标准 |
-|------|----------|---------|
-| Canvas 帧率 | Chrome DevTools Performance 录制 30s，统计 FPS | 5 Agent 同屏 ≥30fps；10 Agent ≥20fps |
-| Canvas 内存 | DevTools Memory → 录制 60s 模拟运行，观察堆曲线 | 无持续上升（无泄漏）；峰值 ≤200MB |
-| 批量调度并发 | `pytest --timeout=120`；30 tasks、Semaphore=3 | 全部在 120s 内完成；无超时失败 |
-| SSE 吞吐 | 5 个 World 同时跑 SSE stream | 前端不丢事件；后端 CPU ≤80% |
-| 前端 Bundle | `npx vite build` → 检查 chunk 大小 | 单 chunk ≤500KB；总 bundle ≤2MB |
-
-**Layer 2：A 线 — Bench 收尾**
-
-| 被测模块 | 测试文件 | 覆盖内容 |
-|---------|---------|---------|
-| `blind.py` | `tests/test_bench_blind.py` | 脱敏完整性、揭盲流程、偏差计算 |
-| `tracker.py` | `tests/test_bench_tracker.py` | 跨版本聚合、退化检测阈值、空历史兜底 |
-| `reporter.py` | `tests/test_bench_reporter.py` | Markdown 结构完整、图表数据正确 |
-| `BlindMode.tsx` | 新建测试 | 脱敏前后 UI 差异、揭盲确认弹窗 |
-| `TrendView.tsx` | 新建测试 | 折线图渲染、退化标注显示 |
-| `ReportView.tsx` | 新建测试 | Markdown 渲染、下载按钮 |
-
-**Layer 3：B 线 — 游戏化启动**
-
-| 被测模块 | 测试文件 | 覆盖内容 |
-|---------|---------|---------|
-| `GameCanvas.tsx` | **新建** `scene/__tests__/` | Canvas 渲染、Agent 位置更新、背景加载 |
-| `AgentSprite.tsx` | 同上 | 精灵渲染、缓动动画、名字标签 |
-| `EmotionBubble.tsx` | 同上 | 情绪气泡弹出/消失、过渡动画 |
-| `Timeline.tsx` | 同上 | 滑块拖拽、tick 标签、快照切换 |
-| `InteractionLayer.tsx` | 同上 | 点击命中检测、拖拽事件、右键菜单 |
-| `AgentPanel.tsx` | 同上 | 面板滑入/滑出、数据加载 |
-| `avatar.py` | `tests/test_scene_avatar.py` | 头像参数生成、情绪→颜色映射 |
-| `snapshot.py` | `tests/test_scene_snapshot.py` | 快照保存/恢复、序列化完整性 |
-| `scenes.py`（API） | `tests/test_scenes_api.py` | `GET state` / `GET timeline` / `POST interact` |
-
-**Layer 4：E2E 全链路**
-
-| 用例 | 步骤 | 验证点 |
-|------|------|--------|
-| `test_bench_blind_full_chain` | ① 创建盲测 run（A vs B） ② 查看脱敏结果 ③ 评分 ④ 揭盲 ⑤ 查看偏差分析 | 脱敏后身份不可见、揭盲有确认、偏差数据正确 |
-| `test_scene_full_chain` | ① 创建场景 ② 放入 3 Agent ③ 启动模拟 ④ 观察 Canvas 渲染 ⑤ 拖拽 Agent ⑥ 发送耳语 ⑦ 拖动时间轴回退 ⑧ 查看分支 | Canvas 不白屏、拖拽后位置更新、耳语后 Agent 响应、时间轴回退正确 |
-
-#### 涉及文件
+**涉及文件：**
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `backend/tests/test_bench_blind.py` | **新建** | 盲测引擎测试 |
-| `backend/tests/test_bench_tracker.py` | **新建** | 追踪器测试 |
-| `backend/tests/test_bench_reporter.py` | **新建** | 报告生成测试 |
-| `backend/tests/test_scene_avatar.py` | **新建** | 头像引擎测试 |
-| `backend/tests/test_scene_snapshot.py` | **新建** | 快照引擎测试 |
-| `backend/tests/test_scenes_api.py` | **新建** | 场景 API 测试 |
-| `frontend/src/pages/scene/__tests__/` | **新建目录** | Canvas + 精灵 + 交互组件测试 |
-| `frontend/src/pages/bench/__tests__/` | 追加 | 盲测/趋势/报告组件测试 |
-| `backend/tests/test_e2e_scene.py` | **新建** | 场景 E2E |
+| `package.json` | 修改 | `+ "phaser": "^3.80.0"` |
+| `frontend/src/data/scenes/*.json` | **新建×6** | 六场景地图 JSON（12×8 网格 + 物品列表） |
+| `frontend/src/game/GameCanvas.tsx` | **新建** | React 挂载 Phaser |
+| `frontend/src/game/scenes/BootScene.ts` | **新建** | 生成 tileset texture + 加载 |
+| `frontend/src/game/scenes/MapScene.ts` | **新建** | tilemap 渲染 + 物品层 |
+| `frontend/src/game/tileset.ts` | **新建** | 6 色 48×48 纯色块 Canvas 生成器 |
+| `frontend/src/pages/GameScene.tsx` | **新建** | `/scene` 页面：选择器 + GameCanvas |
 
-#### 验收标准
+**验收标准：** Phaser Canvas 显示、六场景切换无报错、tilemap 正确渲染、物品 emoji 显示在对应 tile。
 
-- [ ] Canvas ≥30fps（5 Agent 同屏）、内存无泄漏
-- [ ] 批量调度 30 tasks 在 120s 内全完成
-- [ ] A 线（Bench 收尾）引擎 + API + 前端测试全部通过
-- [ ] B 线（游戏化）引擎 + API + 前端测试全部通过
-- [ ] E2E：盲测全链路 + 场景全链路通过
-- [ ] 回归测试全量通过
+### Step 63 — Agent 精灵 + 动作动画
 
----
+**目标：** 5 个 Agent 显示在场景中 → map 同步位置 → 动作驱动精灵帧。
 
-### Step T6 — Phase 16 Bug 修补
+**实现细节：**
+1. `AgentSprite` 类（Phaser.GameObjects.Container）：
+   - 子元素：Circle(16px, color) + Text(emoji, 14px) + Text(name, 10px)
+   - 6 种动作 = 6 个 scale/tint 变化（sit→scale 0.85、emote→tint flash）
+2. 位置从 `AgentSprite.tileX/Y` 映射到 `(tileX*48+24, tileY*48+24)`
+3. 移动动画：`this.scene.tweens.add({targets: sprite, x: targetX, y: targetY, duration: 300})`
+4. 朝向：更新 Container 内箭头元素旋转角
+5. 情绪：Circle fillColor 切换（neutral=灰、happy=绿、anxious=黄、angry=红）
+6. 气泡：`Phaser.GameObjects.Container` 跟随 Agent，包含圆角矩形 + 文字，2s 后 fade out
+7. 状态同步：后端 `POST /api/scenes/{id}/state` 返回 `AgentSprite[]` → 前端 setState → Phaser 更新
 
-> **目标：** 修 Phase 16 新发现 bug——Canvas 渲染、性能瓶颈、Bench 边界 case。
-
-#### 重点排查区域
-
-| 区域 | 常见问题类型 | 排查方式 |
-|------|-------------|---------|
-| Canvas 渲染 | 白屏、精灵消失、动画卡顿、z-index 错乱 | 手动 5 Agent 跑 30s、切换场景 3 次 |
-| 时间轴回退 | 快照不完整、回退后状态不一致、回退后再前进错乱 | 回退→前进→再回退循环 5 次 |
-| 拖拽交互 | 拖出边界、快速双击、同时拖两个 Agent | 边界测试 case |
-| Bench 盲测 | 揭盲后数据泄露、偏差为 0（应该有小偏差） | 验证脱敏前后 JSON 差异 |
-| 长期追踪 | 数据不足（<3 次）时的兜底、退化误报 | 1/2/3/N 次数据的边界 |
-| 前端 Bundle | 新 Canvas 库引入的包体积增长 | `npx vite build --mode production` |
-
-#### 涉及文件
+**涉及文件：**
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `docs/bugs.md` | 修改 | Phase 16 bug 状态 |
-| 各修复源文件 | 修改 | — |
-| 各回归测试文件 | 修改 | — |
+| `frontend/src/game/sprites/AgentSprite.ts` | **新建** | Agent 精灵类（Container） |
+| `frontend/src/game/sprites/ActionBubble.ts` | **新建** | 气泡类 |
+| `frontend/src/game/scenes/MapScene.ts` | 修改 | 创建/更新 Agent 精灵 |
+| `frontend/src/game/GameCanvas.tsx` | 修改 | 接收 AgentSprite[] prop → 同步到 Phaser |
+| `backend/src/api/scenes.py` | **新建** | `POST /api/scenes/{id}/state` → AgentSprite[] |
 
-#### 验收标准
+**验收标准：** 5 Agent sprite 正确渲染、移动动画流畅 300ms、情绪变色、气泡弹出/消失。
 
-- [ ] `docs/bugs.md` 中 Phase 16 发现的 bug 全部 `✅ fixed` 或 `📝 wontfix`
-- [ ] Canvas 无渲染异常（白屏/撕裂/闪烁）
-- [ ] 时间轴回退→前进循环无状态错乱
-- [ ] Bundle size ≤2MB
+### Step 64 — 交互系统
 
-> **节奏：** 单线收束。游戏化完工（3 开发步）+ 全项目打磨（3 测试步）+ 科大主题（1 开发步）。
+**目标：** 点击→面板、拖拽→移动、右键→耳语、双击→篡改，全部通过 Phaser input。
 
----
+**实现细节：**
+1. 点击 Agent：`sprite.setInteractive()` → `pointerdown` → emit `agent-clicked` → React `AgentPanel` 滑出
+2. 拖拽 Agent：`this.input.setDraggable(sprite)` → `drag` 事件 → 更新 `tileX/Y` → 调 `POST /api/scenes/{id}/move`
+3. 右键 Agent：`sprite.on('pointerdown', (p) => { if (p.rightButtonDown()) emit('agent-rightclick') })`
+4. 双击 Agent：Phaser 无原生双击 → 手写 300ms 内两次点击检测
+5. `AgentPanel`（React 组件）：右侧滑出抽屉——人格/情绪条/记忆列表/目标进度
+6. `WhisperBox`：浮动输入框 → 回车发送 → `POST /api/scenes/{id}/interact {type: "whisper", target, message}`
+7. `PersonaTamper`：大五人格 5 个滑块 + 应用按钮
 
-### Step 69 — 导演模式
+**涉及文件：**
 
-> **目标：** 实现 #44、#47、#49。上帝之声 + 人格篡改 + 剧本触发器——三位一体导演工具。
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `frontend/src/components/scene/AgentPanel.tsx` | **新建** | 右侧信息面板 |
+| `frontend/src/components/scene/WhisperBox.tsx` | **新建** | 耳语输入 |
+| `frontend/src/components/scene/PersonaTamper.tsx` | **新建** | 人格滑块 |
+| `frontend/src/game/scenes/MapScene.ts` | 修改 | 输入事件注册 |
+| `frontend/src/game/GameCanvas.tsx` | 修改 | 事件 bridge → React |
+| `backend/src/api/scenes.py` | 修改 | `POST /api/scenes/{id}/interact` |
 
-#### 设计
-
+**拖拽 vs 点击区分逻辑：**
 ```
-┌─ 导演面板 ────────────────────────┐
-│  🎬 导演模式                       │
-│                                    │
-│  [🗣️ 上帝之声]                      │
-│  目标: [小明 ▼]                     │
-│  消息: "你喜欢的那个座位，现在去还   │
-│         来得及"                     │
-│  [发送]                             │
-│                                    │
-│  [⏰ 剧本触发器]                     │
-│  Tick 10: 图书馆广播"15分钟后闭馆"   │
-│  Tick 20: 小刚接到导师电话          │
-│  [+ 添加触发器]                     │
-│                                    │
-│  [🧬 人格篡改]                      │
-│  目标: [小红 ▼]                     │
-│  外倾性: ████░░ → ██████░ (+20)    │
-│  [应用]                             │
-└────────────────────────────────────┘
+pointerdown → 记录 startXY
+pointerup   → 计算 distance
+  if distance < 5px → 点击
+  if distance ≥ 5px → 拖拽结束 → 松手 tile = Math.round(x/48), 调 move API
 ```
 
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `frontend/src/pages/scene/DirectorPanel.tsx` | **新建** | 导演面板三合一套件 |
-| `backend/src/api/scenes.py` | 修改 | `POST /api/scenes/{id}/director/whisper` / `trigger` / `tamper` |
-| `backend/src/engines/scene/director.py` | **新建** | DirectorEngine：剧本调度 + 强制事件注入 |
+**验收标准：** 四种交互全部触发正确 API、面板正确展示 Agent 数据、拖拽后位置同步后端。
 
-**验收标准：** ① 上帝之声 → Agent 在 2 tick 内响应 ② 剧本触发器在指定 tick 准时执行 ③ 人格篡改后 Agent 行为即刻改变
+### Step 65 — 时间轴 + 快照
 
----
+**目标：** 底部滑块 → 拖拽回退 → 场景还原到该 tick 的状态。
 
-### Step 70 — 分支探索
+**实现细节：**
+1. 快照存储：`SceneSnapshot[]` 存 React state，每 tick 追加
+2. `Timeline` 组件（React）：`<input type="range" min=0 max=currentTick>` + SVG 事件锚点
+3. 回退逻辑：
+   ```
+   seekTo(tick):
+     快照 = snapshots[tick]
+     Phaser: 所有 Agent sprite → 更新位置/动作/情绪/气泡
+     物品层: 更新 state（occupied/empty）
+     React: 更新 AgentPanel（如果打开）
+   ```
+4. 关键事件锚点：遍历 `events`，选择 `type in (agent_action, agent_message, thought_stream)` 的 tick → SVG circle 标记
+5. 后端：SceneEngine 每 tick 存快照到内存 dict，`GET /api/scenes/{id}/timeline?tick=N` 返回
 
-> **目标：** 实现 #46。关键决策点自动分叉，可视化为分支树，平行对比不同分支。
-
-#### 设计
-
-```
-分支树:
-        T0 初始
-         /\
-        /  \
-    T5-A  T5-B
-   (去图书馆) (回宿舍)
-     /\        |
-    /  \       |
-T10-A T10-B T10-C
-(占座) (放弃) (偶遇)
-
-选中分支 T5-A → Canvas 渲染该分支的场景
-[并排对比 A vs B]
-```
+**涉及文件：**
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `backend/src/engines/scene/branch.py` | **新建** | BranchEngine：识别决策点 → 创建分叉 → 分别模拟 |
-| `backend/src/api/scenes.py` | 修改 | `GET /api/scenes/{id}/branches`；`POST /api/scenes/{id}/branches/{bid}/activate` |
-| `frontend/src/pages/scene/BranchTree.tsx` | **新建** | 分支树可视化（D3/自绘） |
-| `frontend/src/pages/scene/BranchCompare.tsx` | **新建** | 分支并排对比 |
+| `frontend/src/components/scene/Timeline.tsx` | **新建** | 滑块 + SVG 锚点 |
+| `frontend/src/game/GameCanvas.tsx` | 修改 | seekTo(tick) → 更新 Phaser |
+| `frontend/src/pages/GameScene.tsx` | 修改 | snapshots state + seekTo |
+| `backend/src/engines/scene/snapshot.py` | **新建** | 每 tick 存 SceneSnapshot |
 
-**验收标准：** ① 关键决策点自动创建分支（LLM 判断"这是否是分叉点"） ② 分支树可点击切换 ③ 两个分支可并排对比
+**验收标准：** 拖拽回退 Agent 位置正确、物品状态还原、关键事件有锚点、回退后再前进正常。
 
----
+### Step 66 — 特效 + 导演模式
 
-### Step 71 — 叙事导出
+**目标：** 天气特效、导演面板（剧本/上帝之声/分支）。
 
-> **目标：** 实现 #33、#34。场景模拟结束后，生成微电影分镜 + 连载小说。
+**实现细节：**
+1. 天气：Phaser particle emitter
+   - 樱花：粉色小圆点从顶部落下 + 摇摆 → `this.add.particles(x, y, 'sakura', config)`
+   - 雨滴：蓝色短线从顶部落下
+   - 日落：场景整体 `tint` 从白渐变到橙
+2. `DirectorPanel`（React 浮动侧栏）：
+   - 剧本触发器：`tick: number, event: string` → `POST /api/scenes/{id}/trigger`
+   - 上帝之声：`message: string` → `POST /api/scenes/{id}/broadcast`
+   - 分支入口：`branchName: string` → `POST /api/scenes/{id}/branch` → 返回 branchId
+3. 情绪粒子：Agent emotion 突变时 → 从 sprite 位置发射 3-5 个粒子（对应颜色）
 
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `backend/src/engines/scene/exporter.py` | **新建** | 微电影分镜生成器 + 连载章节生成器 |
-| `backend/src/api/scenes.py` | 修改 | `POST /api/scenes/{id}/export/storyboard` / `export/serial` |
-| `frontend/src/pages/scene/ExportPanel.tsx` | **新建** | 导出预览 + 格式选择 |
-
-**验收标准：** ① 微电影导出为 8-12 镜分镜脚本 ② 连载按 tick 分段，每段 300-500 字 ③ 可下载 Markdown
-
----
-
-### Step 72 — 全项目 Bug 清零
-
-> **目标：** bugs.md 全部关闭 + 代码中 TODO/FIXME/HACK 归零。Phase 17 是最后一道防线——之后就是演示。
-
-#### 工作流程
-
-```
-1. 读 docs/bugs.md → 列出全部 open bug（含 Phase 14/15/16 遗留）
-2. 按严重度排序：P0（崩溃/数据丢失）→ P1（功能错误）→ P2（体验）
-3. 逐一修复 → 写回归测试 → 验证 → 更新状态
-4. 全项目扫描 TODO/FIXME/HACK——要么修、要么转成 bugs.md 条目
-5. 前端 console 全量检查：每个页面打开 → F12 → 确认零警告零错误
-```
-
-#### 排查清单
-
-| 类别 | 排查方式 | 通过标准 |
-|------|---------|---------|
-| bugs.md | `cat docs/bugs.md` | 全部 `✅ fixed` 或 `📝 wontfix`（有注释） |
-| TODO/FIXME/HACK | `grep -rn "TODO\|FIXME\|HACK" backend/src frontend/src --include="*.py" --include="*.ts" --include="*.tsx"` | 0 结果（或全部转为 bugs.md 条目） |
-| 后端异常 | `grep -rn "except Exception\|except:" backend/src --include="*.py"` | 每处有 logger.error 或明确注释 |
-| 前端 console | 逐一打开 11 个页面（M1–M11），保持 10s，检查 console | 零 error、零 warning |
-| 类型安全 | `cd frontend && npx tsc --noEmit` | 零错误 |
-| Lint | `cd frontend && npx eslint src/`（如有配置） | 零新增告警 |
-
-#### 涉及文件
+**涉及文件：**
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `docs/bugs.md` | 修改 | 全量更新为 fixed/wontfix |
-| 各 bug 对应源文件 | 修改 | 修复代码 |
-| 各 bug 对应测试文件 | 修改 | 回归测试 |
+| `frontend/src/game/effects/Weather.ts` | **新建** | 樱花/雨滴/日落粒子配置 |
+| `frontend/src/game/effects/EmoteBurst.ts` | **新建** | 情绪粒子爆发 |
+| `frontend/src/components/scene/DirectorPanel.tsx` | **新建** | 导演工具栏 |
+| `backend/src/api/scenes.py` | 修改 | trigger/broadcast/branch 端点 |
 
-#### 验收标准
-
-- [ ] `docs/bugs.md` 零 open bug
-- [ ] `grep -r "TODO\|FIXME\|HACK"` 归零
-- [ ] 11 个页面 console 零 error/warning
-- [ ] `tsc --noEmit` 零错误
-- [ ] 全量回归测试通过
+**验收标准：** 樱花粒子流畅（60fps）、剧本按时触发、上帝之声全员收到、分支创建切换正常。<｜end▁of▁thinking｜>
 
 ---
 
-### Step 73 — 覆盖率 + E2E 全链路
+## Phase 17 — 打磨交付
 
-> **目标：** 后端行覆盖 ≥90%。5 条全链路 E2E 全部通过，覆盖 State 2 + State 3 所有关键路径。
-
-#### 覆盖率目标
-
-| 模块 | 当前覆盖（估） | 目标 | 差距补齐方式 |
-|------|-------------|------|-------------|
-| `engines/team/` | 0%（新） | ≥85% | T1/T3 已打底，本步补边界 case |
-| `engines/bench/` | 0%（新） | ≥85% | T3/T5 已打底，本步补并发/超时 |
-| `engines/scene/` | 0%（新） | ≥80% | T5 已打底，Canvas 层难测、降标 |
-| `api/teams.py` | 0%（新） | ≥90% | 集成测试覆盖全部端点 |
-| `api/bench.py` | 0%（新） | ≥90% | 同上 |
-| `api/scenes.py` | 0%（新） | ≥90% | 同上 |
-| State 2 全部模块 | ~75% | ≥90% | 补边界 case + 错误路径 |
-
-**覆盖率命令：**
-```bash
-cd backend
-PYTHONPATH=src python -m pytest tests/ \
-  --cov=src \
-  --cov-report=term \
-  --cov-report=html \
-  --cov-fail-under=90
-```
-
-#### 5 条 E2E 全链路
-
-| # | 名称 | 步骤 | 涉及模块 | 预期时长 |
-|---|------|------|---------|---------|
-| E2E-1 | 铸造→Team | 创建 3 Agent → 组队 → 分配任务 → 执行 10 tick → 暂停 → 查看健康分 → 结束 → 复盘报告 | M1 + M9 | ~60s |
-| E2E-2 | 铸造→Bench | 创建 5 Agent → 选 3 场景 × 2 LLM × 2 repeat → 批量运行 → 盲测 → 揭盲 → 对比 → 排行榜 | M1 + M4 + M10 | ~90s |
-| E2E-3 | 铸造→场景 | 创建 3 Agent → 选科大图书馆 → Canvas 渲染 → 跑 5 tick → 耳语 → 时间轴回退 → 分支创建 | M1 + M11 | ~45s |
-| E2E-4 | 竞技全链路 | 创建 2 Agent → 1v1 辩论（3 轮）→ 查看战报 → 复盘对比 | M1 + M4 | ~30s |
-| E2E-5 | 叙事全链路 | 跑完模拟 → 生成小说 → 生成日记 → 生成未来的信 → 生成播客脚本 | M2/M3 + M5 | ~40s |
-
-#### 涉及文件
-
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `backend/tests/test_e2e_all.py` | **新建** | 5 条 E2E 全链路（Mock LLM，真 DB） |
-| 各覆盖率不足的模块测试 | 修改/新建 | 补齐边界 case |
-
-#### 验收标准
-
-- [ ] `pytest --cov=src --cov-fail-under=90` 通过
-- [ ] 5 条 E2E 全部通过
-- [ ] E2E 运行总时长 ≤5 分钟
-- [ ] `htmlcov/index.html` 可查看逐行覆盖
-
----
-
-### Step 74 — 演示排练 + 文档
-
-> **目标：** 3 条 Demo 路径可独立演示 → README → API 文档补全。比赛评委 5 分钟能看懂项目是什么、怎么跑。
-
-#### 3 条 Demo 路径（含时间轴 + 台词）
-
-**Demo 1 · 协作之旅（目标 8 分钟）**
-
-| 时间 | 操作 | 讲解要点 | 屏幕 |
-|------|------|---------|------|
-| 0:00 | 打开铸造厂，自然语言创建"产品经理小红"和"全栈开发小明" | "只需要一句话描述，AI 自动生成完整人格" | M1 |
-| 1:30 | 进入 Agent Team，点击"新建 Team"，选两个 Agent | "Agent 角色由系统根据人格自动推荐" | M9 |
-| 2:30 | 输入任务"设计一个校园社交 App"，点击执行 | "AI 会自动分解任务并分配给合适的 Agent" | M9 |
-| 3:30 | Kanban 看板实时更新，对话流显示 Agent 在争论 | "你可以看到 Agent 在真实地讨论、分工、推进" | M9 |
-| 5:00 | 暂停 → 查看健康面板：协作分 87，无冲突 | "系统实时监控团队健康度" | M9 |
-| 6:00 | 结束任务 → 打开复盘报告 | "自动生成包含关键决策点的复盘报告" | M9 |
-| 7:00 | 展示报告内容：策略提取 + 决策回放 | "这就是 Agent 协作的完整可追溯记录" | M9 |
-
-**Demo 2 · 评测对决（目标 5 分钟）**
-
-| 时间 | 操作 | 讲解要点 | 屏幕 |
-|------|------|---------|------|
-| 0:00 | 打开 LLM Bench，拖拽 Agent 模板到实验设计器 | "像设计实验一样配置评测" | M10 |
-| 1:00 | 选 3 个场景 × 2 种 LLM × 5 次重复 = 30 个任务 | "批量并发评测，一次跑完所有组合" | M10 |
-| 2:00 | 点击启动 → 实时进度条 | "所有任务在后台排队并发的运行" | M10 |
-| 3:00 | 盲测模式：结果脱敏 | "评测者不知道哪个是哪个，消除偏见" | M10 |
-| 3:30 | 揭盲 → 并排对比 | "DeepSeek 在创造力上领先，GPT 在稳定性上更优" | M10 |
-| 4:30 | 排行榜 + 趋势图 | "我们追踪同一 Agent 的长期表现变化" | M10 |
-
-**Demo 3 · 图书馆的一天（目标 5 分钟）**
-
-| 时间 | 操作 | 讲解要点 | 屏幕 |
-|------|------|---------|------|
-| 0:00 | 打开游戏化场景，选科大图书馆 | "这不是终端，这是一个有画面的世界" | M11 |
-| 0:30 | 拖入 3 个 Agent → Canvas 显示头像和名字 | "每个 Agent 有唯一的 AI 生成头像" | M11 |
-| 1:30 | 启动模拟 → Agent 在 Canvas 上移动、对话气泡弹出 | "他们的位置、表情、动作都是模拟实时驱动的" | M11 |
-| 2:30 | Agent 情绪变化：小红从开心→焦虑（考试压力） | "情绪反映在头像的颜色和表情上" | M11 |
-| 3:30 | 导演模式：点击小明的头像 → 输入耳语 | "你可以以上帝视角介入场景" | M11 |
-| 4:00 | 拖拽时间轴回退到 T5 | "不满意？回到任意时刻重来，甚至分叉出平行世界" | M11 |
-| 4:30 | 导出微电影分镜 | "一整场模拟变成可分享的故事" | M11 |
-
-#### 文档交付
-
-| 文档 | 内容 | 通过标准 |
-|------|------|---------|
-| `README.md` | 项目简介 + 安装（Python 3.12 + Node 20） + 启动 3 行命令 + Demo 入口截图 + 架构图 | 新开发者 10 分钟能跑起来 |
-| API 文档（Swagger） | 每个端点补 `description` + `example` + `response_model` 注释 | `/docs` 页面可直接交互 |
-| `docs/demo-script.md` | 上面 3 条 Demo 的完整台词 + 备用方案（LLM 挂了怎么办） | 不依赖特定 LLM 也能演示 |
-
-#### 涉及文件
-
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `README.md` | 重写 | 安装→启动→Demo 入口 |
-| `docs/demo-script.md` | **新建** | 3 条 Demo 完整剧本 |
-| `backend/src/api/*.py` | 修改 | 补全 docstring + example |
-| `frontend/src/pages/Home.tsx` | 修改 | 首页展示 3 大模块入口卡片 |
-
-#### 验收标准
-
-- [ ] 3 条 Demo 各排练 ≥2 次，时间误差 ≤30s
-- [ ] README 被一个不懂项目的同事试跑通过
-- [ ] Swagger `/docs` 全部端点可交互
-- [ ] LLM 不可用时 Demo 1/2 仍可走通（Mock 降级方案）
-- [ ] 非功能性细节（像素/颜色/文案）不作为验收项
-
----
-
-### Step 75 — 科大主题
-
-> **目标：** 继承 Step 34-S 的场景自定义能力。5 个科大校园场景 + 8 个角色模板 + 彩蛋，让评委/观众有代入感。
-
-#### 5 个科大场景（通过 `POST /api/scenarios` 预置）
-
-| 场景 id | 名称 | 描述 | 环境参数 | 背景图 |
-|---------|------|------|---------|--------|
-| `ustc-library` | 科大图书馆 | 西区图书馆自习区，期末考试周座位紧张 | `seats_available`: 100→0（每 tick -3） | 自习区俯视图（CSS 绘制） |
-| `ustc-sakura` | 樱花大道 | 每年樱花季，游客涌入，学术与浪漫并存 | `tourist_count`: 逐渐增加；`photo_spots`: 热门打卡点 | 校园步道（CSS 绘制） |
-| `ustc-lab` | 实验室组会 | 课题组周例会，导师 push vs 学生划水 | `report_order`: Agent 排序；`advisor_pressure`: 递增强度 | 会议室（CSS 绘制） |
-| `ustc-course` | 选课大战 | 每学期选课系统崩溃，好课秒没 | `course_slots`: 递减；`server_health`: 随机波动 | 网页模拟（CSS 绘制） |
-| `ustc-gym` | 科大健身房 | 有限的器材，人多时得排队 | `equipment_slots`: 递减；`social_chance`: 随机触发社交 | 健身区（CSS 绘制） |
-
-#### 8 个科大角色模板（通过 `POST /api/templates` 添加）
-
-| Agent id | 姓名 | 人格 | 背景 | 标签 |
-|----------|------|------|------|------|
-| `ustc-scholar` | 理科学霸 | INTJ-T | 物院大三，GPA 4.0，每天泡图书馆，社恐但学术极强 | 学霸 |
-| `ustc-transfer` | 文科转码 | INFP-A | 从人文学院转到 CS，焦虑但努力，常怀疑自己是否来对地方 | 转码 |
-| `ustc-founder` | 创业达人 | ENTJ-A | 信院研究生，在创业园有工位，到处拉人组队，说话像路演 | 创业 |
-| `ustc-advisor` | 焦虑导师 | ESTJ-T | 刚拿 tenure 的青椒，push 学生发论文，自己也在焦虑中期考核 | 导师 |
-| `ustc-dorm` | 佛系宿管 | ISFJ-A | 西区宿舍楼管阿姨，看尽学生百态，偶尔点拨迷茫的年轻人 | 宿管 |
-| `ustc-senior` | 实验室师兄 | INTP-A | 博三老油条，对科研无热情但很会带师弟师妹，口头禅"慢慢来" | 师兄 |
-| `ustc-chair` | 学生会主席 | ENFJ-A | 管院大三，组织力强但被课业+学生工作压得喘不过气 | 主席 |
-| `ustc-foodie` | 吃货美食家 | ESFP-A | 对合肥小吃如数家珍，朋友圈全是美食评测，考前靠吃减压 | 吃货 |
-
-#### 彩蛋清单
-
-| 彩蛋 | 触发条件 | 效果 |
-|------|---------|------|
-| USTC 标识 | 首页加载 | 顶部"USTC × Life Lab" logo |
-| 教务系统没崩 | Agent 在选课场景抢课成功 | 弹出 toast："恭喜你，这次教务系统没崩 🎉" |
-| 天使路偶遇 | 樱花大道场景随机 | 两个 Agent 在"天使路"路牌下相遇 |
-| 郭沫若广场 | 场景描述随机插入 | 事件描述中偶现"路过郭沫若广场" |
-| 东活传说 | 科大健身房场景 | Agent 对话中提及"东活后面那家麻辣烫" |
-
-#### 涉及文件
-
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `backend/src/engines/world/scenarios.py` | 修改 | 追加 5 个科大场景（内置，不可删） |
-| `backend/src/data/templates.json` | 修改 | 追加 8 个科大模板 |
-| `frontend/src/pages/Home.tsx` | 修改 | 首页加 USTC 标识 |
-| `frontend/src/pages/scene/SceneBackground.tsx` | 修改 | CSS 绘制 5 个场景背景 |
-| `frontend/src/components/shared/Toast.tsx` | **新建** | 彩蛋 toast 通知组件 |
-
-#### 验收标准
-
-- [ ] 5 个科大场景在 SandboxSetup/SceneCanvas 可选
-- [ ] 8 个科大模板在 AgentFoundry 模板浏览器可见
-- [ ] 首页有 USTC × Life Lab 标识
-- [ ] 选课场景抢课成功触发 toast 彩蛋
-- [ ] 至少 1 个科大场景可在 Demo 3 完整跑通
-
----
+### Step 67 — 叙事导出
+### Step 68 — P3 菜单清理  
+### Step 69–72 — 测试/演示/科大主题
 
 ## 附录 A: 18 功能嵌入映射
 
