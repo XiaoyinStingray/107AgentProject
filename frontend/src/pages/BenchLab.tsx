@@ -239,9 +239,76 @@ export default function BenchLab() {
               ))}
             </div>
           )}
+
+          {/* 排行榜 */}
+          {doneRuns.length >= 2 && <LeaderboardTable runs={doneRuns} />}
+
+          {/* 趋势 */}
+          {doneRuns.length >= 2 && <TrendView runs={doneRuns} />}
         </div>
       )}
     </div>
+  );
+}
+
+const DIMS = ["人格一致性", "决策质量", "交互深度", "鲁棒性", "创造力", "适应性"] as const;
+
+function avgScore(s: Record<string, number> | null) {
+  if (!s) return 0;
+  const vals = DIMS.map((d) => s[d] ?? 0);
+  return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+}
+
+function LeaderboardTable({ runs }: { runs: { id: string; name: string; llm_model: string; scores: Record<string, number> | null; created_at: string }[] }) {
+  const [sortBy, setSortBy] = useState<string>("综合");
+  const [filterModel, setFilterModel] = useState<string>("");
+  const models = [...new Set(runs.map((r) => r.llm_model))];
+  const filtered = runs.filter((r) => !filterModel || r.llm_model === filterModel);
+  const sorted = [...filtered].sort((a, b) => (sortBy === "综合" ? avgScore(b.scores) - avgScore(a.scores) : (b.scores?.[sortBy] ?? 0) - (a.scores?.[sortBy] ?? 0)));
+
+  return (
+    <Card className="p-4 mt-6">
+      <h3 className="text-sm font-mono text-text-primary mb-3">🏆 排行榜</h3>
+      <div className="flex gap-2 mb-3">
+        <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="bg-bg-secondary border border-border rounded px-2 py-1 text-xs font-mono text-text-primary">
+          <option value="综合">综合分</option>
+          {DIMS.map((d) => <option key={d} value={d}>{d}</option>)}
+        </select>
+        <select value={filterModel} onChange={(e) => setFilterModel(e.target.value)} className="bg-bg-secondary border border-border rounded px-2 py-1 text-xs font-mono text-text-primary">
+          <option value="">全部模型</option>
+          {models.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+      </div>
+      <table className="w-full text-xs font-mono">
+        <thead><tr className="text-text-secondary/60 border-b border-border"><th className="text-left py-1 w-6">#</th><th className="text-left py-1">模型</th><th className="text-right py-1">综合</th>{DIMS.map((d) => <th key={d} className="text-right py-1">{d.slice(0, 2)}</th>)}</tr></thead>
+        <tbody>{sorted.map((r, i) => (<tr key={r.id} className="border-b border-border/20"><td className="py-1 text-text-secondary/50">{i + 1}</td><td className="py-1">{r.name}</td><td className="py-1 text-right text-accent-orange">{avgScore(r.scores)}</td>{DIMS.map((d) => <td key={d} className="py-1 text-right">{r.scores?.[d] ?? "-"}</td>)}</tr>))}</tbody>
+      </table>
+    </Card>
+  );
+}
+
+function TrendView({ runs }: { runs: { id: string; name: string; llm_model: string; scores: Record<string, number> | null; created_at: string }[] }) {
+  const [model, setModel] = useState<string>(runs[0]?.llm_model ?? "");
+  const [dim, setDim] = useState<string>("综合");
+  const models = [...new Set(runs.map((r) => r.llm_model))];
+  const data = runs.filter((r) => r.llm_model === model && r.scores).sort((a, b) => a.created_at.localeCompare(b.created_at)).map((r) => ({ date: r.created_at.slice(0, 10), score: dim === "综合" ? avgScore(r.scores) : (r.scores?.[dim] ?? 0) }));
+  if (data.length < 2) return null;
+  const maxS = Math.max(...data.map((d) => d.score), 1);
+  const h = 120, w = 400, pad = 30;
+  const pts = data.map((d, i) => `${pad + (i / Math.max(data.length - 1, 1)) * (w - pad * 2)},${h - pad - (d.score / maxS) * (h - pad * 2)}`).join(" ");
+  const declining = data.length >= 3 && data.slice(-3).every((d, i, arr) => i === 0 || d.score < arr[i - 1].score);
+
+  return (
+    <Card className="p-4 mt-6">
+      <h3 className="text-sm font-mono text-text-primary mb-3">📈 趋势</h3>
+      <div className="flex gap-2 mb-3">
+        <select value={model} onChange={(e) => setModel(e.target.value)} className="bg-bg-secondary border border-border rounded px-2 py-1 text-xs font-mono text-text-primary">{models.map((m) => <option key={m} value={m}>{m}</option>)}</select>
+        <select value={dim} onChange={(e) => setDim(e.target.value)} className="bg-bg-secondary border border-border rounded px-2 py-1 text-xs font-mono text-text-primary"><option value="综合">综合分</option>{DIMS.map((d) => <option key={d} value={d}>{d}</option>)}</select>
+      </div>
+      <svg width={w} height={h} className="select-none"><polyline points={pts} fill="none" stroke="rgb(249,115,22)" strokeWidth={2} />{data.map((d, i) => (<circle key={i} cx={pad + (i / Math.max(data.length - 1, 1)) * (w - pad * 2)} cy={h - pad - (d.score / maxS) * (h - pad * 2)} r={3} fill="rgb(249,115,22)" />))}</svg>
+      <div className="flex justify-between text-[10px] font-mono text-text-secondary/50 mt-1">{data.map((d, i) => <span key={i}>{d.date.slice(5)}</span>)}</div>
+      {declining && <p className="text-xs font-mono text-accent-red mt-2">⚠️ {dim}连续下降，可能退化</p>}
+    </Card>
   );
 }
 
