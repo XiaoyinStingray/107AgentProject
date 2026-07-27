@@ -32,24 +32,27 @@ const SPAWN_SLOTS: Record<string, { tileX: number; tileY: number }[]> = {
   sakura:     [{ tileX: 2, tileY: 2 }, { tileX: 5, tileY: 3 }, { tileX: 7, tileY: 4 }, { tileX: 9, tileY: 5 }, { tileX: 3, tileY: 6 }],
 };
 
-const STORAGE_KEY = "m11-deployed-agents";
 const SCENE_KEY = "m11-current-scene";
 
-function loadDeployed(): AgentSpriteData[] {
+function sceneStorageKey(sceneId: string): string {
+  return `m11-agents-${sceneId}`;
+}
+
+function loadAgents(sceneId: string): AgentSpriteData[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(sceneStorageKey(sceneId));
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
   }
 }
 
-function loadScene(): string {
-  return localStorage.getItem(SCENE_KEY) ?? "library";
+function saveAgents(sceneId: string, agents: AgentSpriteData[]): void {
+  localStorage.setItem(sceneStorageKey(sceneId), JSON.stringify(agents));
 }
 
-function saveDeployed(agents: AgentSpriteData[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(agents));
+function loadScene(): string {
+  return localStorage.getItem(SCENE_KEY) ?? "library";
 }
 
 function saveScene(id: string): void {
@@ -58,22 +61,13 @@ function saveScene(id: string): void {
 
 export default function GameScenePage() {
   const [mapId, setMapId] = useState<string>(() => loadScene());
-  const [agents, setAgents] = useState<AgentSpriteData[]>(() => loadDeployed());
+  const [agents, setAgents] = useState<AgentSpriteData[]>(() => loadAgents(loadScene()));
 
-  /** 切换场景 → 保留已投放 Agent，仅重设坐标 */
+  /** 切换场景 → 加载该场景独立配置 */
   const handleSceneChange = useCallback((id: string) => {
     saveScene(id);
     setMapId(id);
-    setAgents((prev) => {
-      if (prev.length === 0) return prev;
-      const slots = SPAWN_SLOTS[id] ?? SPAWN_SLOTS.library;
-      const next = prev.map((a, i) => {
-        const s = slots[i % slots.length];
-        return { ...a, tileX: s.tileX, tileY: s.tileY, action: "idle" as const };
-      });
-      saveDeployed(next);
-      return next;
-    });
+    setAgents(loadAgents(id));
   }, []);
 
   /** 投放单个 Agent */
@@ -96,7 +90,7 @@ export default function GameScenePage() {
             emotion: "neutral" as const,
           },
         ];
-        saveDeployed(next);
+        saveAgents(mapId, next);
         return next;
       });
     },
@@ -107,10 +101,10 @@ export default function GameScenePage() {
   const removeAgent = useCallback((agentId: string) => {
     setAgents((prev) => {
       const next = prev.filter((a) => a.agentId !== agentId);
-      saveDeployed(next);
+      saveAgents(mapId, next);
       return next;
     });
-  }, []);
+  }, [mapId]);
 
   /** 切换单个 Agent 的情绪 */
   const setAgentEmotion = useCallback(
@@ -119,11 +113,11 @@ export default function GameScenePage() {
         const next = prev.map((a) =>
           a.agentId === agentId ? { ...a, emotion } : a,
         );
-        saveDeployed(next);
+        saveAgents(mapId, next);
         return next;
       });
     },
-    [],
+    [mapId],
   );
 
   return (
