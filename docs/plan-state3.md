@@ -24,7 +24,7 @@
 | T1 | — | 测试 | Phase 14 单元 + 集成 + E2E | 51–55 | 后端 6 测试文件 + 前端 5 组件测试 + E2E | 3h |
 | T2 | — | 测试 | Phase 14 Bug 修补 | T1 | bugs.md 现存 bug 清零 + 回归测试 | 2h |
 | **🏗️ Phase 15: Team 收尾 + Bench 启动** | | | | | | |
-| 56 | 15.1 | A | Agent 市场 | 55 | 分享/下载 Team 配置 + 评价系统 | 3h |
+| 56 | 15.1 | A | Team 模板 | 55 | 本地保存/复用 Team 配置（降级为模板库，无联网） | ✅ |
 | 57 | 15.2 | A | API 开放 | 56 | REST API 远程控制 Team 任务 | 3h |
 | 58 | 15.3 | B | 批量调度器 | 33, 35 | N Agent × M 场景 → 并发队列 → 结果收集 | 4h |
 | 59 | 15.4 | B | 指标框架 | 58 | 4 维 metric + 评分 pipeline + 结果存储 | 4h |
@@ -490,17 +490,11 @@ Sidebar 新增 3 个顶级入口                  ├─ 批量调度器
 
 ### 15a — Team 收尾（A 线）
 
-### Step 56 — Agent 市场
+### Step 56 — Team 模板
 
-> **目标：** 实现 #50。Team 配置可分享/下载，带评价系统。
+> **目标：** 实现 #50。Team 配置本地保存为模板，可浏览和复用。降级为本地模板库（单机版无联网/评分）。
 
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `backend/src/models/market_orm.py` | **新建** | MarketItem 表（team_id, author, downloads, rating） |
-| `backend/src/api/market.py` | **新建** | `GET/POST /api/market`；`POST /api/market/{id}/rate` |
-| `frontend/src/pages/team/MarketPanel.tsx` | **新建** | 市场浏览 + 下载 |
-
-**验收标准：** ① Team 可发布到市场 ② 其他用户可下载 ③ 可评分/评论
+实际产出见 [done/step-56.md](done/step-56.md)。
 
 ### Step 57 — API 开放
 

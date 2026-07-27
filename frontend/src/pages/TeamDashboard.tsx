@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { useAgents } from "../api/agents";
 import { useTeams, useCreateTeam, useDeleteTeam, useSuggestRoles, useExecuteTeam, useTeamPlan, useEvaluateTeam } from "../api/teams";
+import { usePublishTeam } from "../api/market";
 import { usePauseWorld, useStartWorld } from "../api/worlds";
 import { useSSE } from "../hooks/useSSE";
 import type { TeamRole, SuggestedRole } from "../types/team";
@@ -9,6 +10,7 @@ import Badge from "../components/shared/Badge";
 import EmptyState from "../components/shared/EmptyState";
 import LiveChat from "./team/LiveChat";
 import HealthPanel from "./team/HealthPanel";
+import MarketPanel from "./team/MarketPanel";
 
 /* ================================================================
    Step 51–53 — M9 Agent Team 仪表盘
@@ -22,7 +24,10 @@ export default function TeamDashboard() {
   const deleteTeam = useDeleteTeam();
   const executeTeam = useExecuteTeam();
   const evaluateTeam = useEvaluateTeam();
+  const publishTeam = usePublishTeam();
   const [evaluation, setEvaluation] = useState<string | null>(null);
+  const [showMarket, setShowMarket] = useState(false);
+  const [publishMsg, setPublishMsg] = useState<string | null>(null);
 
   // 看板状态
   const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
@@ -354,6 +359,18 @@ export default function TeamDashboard() {
       <p className="text-sm text-text-secondary font-mono mb-6">
         把 Agent 组成团队，协作完成产品设计、市场调研、代码开发
       </p>
+      <button
+        type="button"
+        onClick={() => setShowMarket((v) => !v)}
+        className="mb-6 px-4 py-2 text-xs font-mono rounded-lg border border-border text-text-secondary hover:border-text-secondary/40"
+      >
+        {showMarket ? "← 返回列表" : "📦 Team 模板"}
+      </button>
+
+      {showMarket && <div className="mb-6"><MarketPanel /></div>}
+      {publishMsg && (
+        <div className="mb-3 px-3 py-2 rounded border border-accent-green/40 bg-accent-green/5 text-xs font-mono text-accent-green">{publishMsg}</div>
+      )}
 
       {/* 操作栏 */}
       <div className="mb-6">
@@ -566,6 +583,23 @@ export default function TeamDashboard() {
                         ✓ 已完成 — 查看
                       </button>
                     )}
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await publishTeam.mutateAsync({
+                            team_id: team.id,
+                            name: team.name,
+                            description: team.description,
+                          });
+                          setPublishMsg(`✅「${team.name}」已保存为模板`);
+                          setTimeout(() => setPublishMsg(null), 3000);
+                        } catch { setPublishMsg("保存失败"); }
+                      }}
+                      className="text-xs font-mono text-text-secondary hover:text-accent-orange transition-colors"
+                    >
+                      存模板
+                    </button>
                     <button
                       type="button"
                       onClick={() => handleDelete(team.id)}
