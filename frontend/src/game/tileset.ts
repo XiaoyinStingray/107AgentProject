@@ -9,7 +9,8 @@
  *   "items"  spritesheet → [0-13] 物品图标
  */
 
-const S = 32; // 单 tile 像素尺寸
+const S = 32;   // 逻辑 tile 尺寸（绘制坐标）
+const TS = 64;  // 物理 tile 尺寸（输出像素，2x 高清）
 
 // ─── 色板 ───────────────────────────────────────────────
 const C = {
@@ -574,20 +575,21 @@ function makeTexture(
   return new Promise((resolve) => {
     const count = drawers.length;
     const canvas = document.createElement("canvas");
-    canvas.width = count * S;
-    canvas.height = S;
+    canvas.width = count * TS;
+    canvas.height = TS;
     const ctx = canvas.getContext("2d")!;
 
     drawers.forEach((draw, i) => {
       ctx.save();
-      ctx.translate(i * S, 0);
+      ctx.translate(i * TS, 0);
+      ctx.scale(2, 2); // 逻辑 32px → 物理 64px
       draw(ctx);
       ctx.restore();
     });
 
     const img = new Image();
     img.onload = () => {
-      scene.textures.addSpriteSheet(key, img, { frameWidth: S, frameHeight: S });
+      scene.textures.addSpriteSheet(key, img, { frameWidth: TS, frameHeight: TS });
       resolve();
     };
     img.src = canvas.toDataURL();

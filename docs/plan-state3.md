@@ -33,11 +33,12 @@
 | T3 | — | 测试 | Phase 15 集成 + E2E | 58–61 | Bench 全链路（配置→27条评测→六边形→报告） | 3h |
 | T4 | — | 测试 | Phase 15 Bug 修补 | T3 | 并发调度 + 指标边界 + 前端性能 | 2h |
 | **🏗️ Phase 16: 游戏化场景** | | | | | | |
-| 62 | 16.1 | 开发 | 场景引擎 | — | TileMap 引擎 + 六场景 JSON 地图 + CSS Grid 渲染 | 5h |
-| 63 | 16.2 | 开发 | Agent 精灵 + 动作 | 62 | emoji 头像 + 动作动画（移动/坐下/对话/使用）+ 情绪表情 | 4h |
-| 64 | 16.3 | 开发 | 交互系统 | 62, 63 | 点击→面板；拖拽→移动；右键→耳语；双击→篡改 | 4h |
-| 65 | 16.4 | 开发 | 时间轴 + 快照 | 62 | 拖拽回退 tick + 每 tick 场景快照 + 状态还原 | 4h |
-| 66 | 16.5 | 开发 | 特效 + 导演 | 63, 64, 65 | 气泡/天气/情绪动画 + 剧本触发器 + 上帝之声 + 分支入口 | 5h |
+| 62 | 16.1 | 开发 | 场景引擎 | — | TileMap 引擎 + 六场景 JSON 地图 + 纯程序化纹理 | 5h |
+| 63a | 16.2 | 开发 | Agent 精灵 + 动作（前端） | 62 | AgentSprite 类 + ActionBubble + Mock 数据 + 4 动作 | 3h |
+| 63b | 16.2 | 开发 | 场景后端 API | 63a | `POST /api/scenes/{id}/state` + SceneEngine 基础 | 2h |
+| 64 | 16.3 | 开发 | 交互系统 | 62, 63a | 点击→面板；拖拽→移动；右键→耳语；双击→篡改 | 4h |
+| 65 | 16.4 | 开发 | 时间轴 + 快照 | 62, 63b | 拖拽回退 tick + 每 tick 场景快照 + 状态还原 | 4h |
+| 66 | 16.5 | 开发 | 特效 + 导演 | 63a, 64, 65 | 气泡/天气/情绪动画 + 剧本触发器 + 上帝之声 + 分支入口 | 5h |
 | T5 | — | 测试 | Phase 16 性能 + E2E | 62–66 | 6 场景渲染 + 5 Agent 同屏流畅 + 时间轴回退全链路 | 3h |
 | T6 | — | 测试 | Phase 16 Bug 修补 | T5 | 渲染异常 + 拖拽 + 快照还原 | 2h |
 | **🎯 Phase 17: 打磨交付** | | | | | | |
@@ -777,20 +778,19 @@ interface SceneSnapshot {
 
 **验收标准：** Phaser Canvas 显示、六场景切换无报错、tilemap 正确渲染、物品 emoji 显示在对应 tile。
 
-### Step 63 — Agent 精灵 + 动作动画
+### Step 63a — Agent 精灵 + 动作（前端）
 
-**目标：** 5 个 Agent 显示在场景中 → map 同步位置 → 动作驱动精灵帧。
+**目标：** 5 个 Agent 显示在场景中 → 动作驱动精灵帧。纯前端 + Mock 数据，后端 API 留给 63b。
 
 **实现细节：**
 1. `AgentSprite` 类（Phaser.GameObjects.Container）：
-   - 子元素：Circle(16px, color) + Text(emoji, 14px) + Text(name, 10px)
-   - 6 种动作 = 6 个 scale/tint 变化（sit→scale 0.85、emote→tint flash）
-2. 位置从 `AgentSprite.tileX/Y` 映射到 `(tileX*48+24, tileY*48+24)`
-3. 移动动画：`this.scene.tweens.add({targets: sprite, x: targetX, y: targetY, duration: 300})`
-4. 朝向：更新 Container 内箭头元素旋转角
-5. 情绪：Circle fillColor 切换（neutral=灰、happy=绿、anxious=黄、angry=红）
-6. 气泡：`Phaser.GameObjects.Container` 跟随 Agent，包含圆角矩形 + 文字，2s 后 fade out
-7. 状态同步：后端 `POST /api/scenes/{id}/state` 返回 `AgentSprite[]` → 前端 setState → Phaser 更新
+   - 子元素：Circle(r=18px, 个性色) + Text(emoji, 16px) + Text(name, 9px)
+   - 精灵 ~48px 整体高度，比 32px tile 大约 1.5 倍，名字清晰可读
+   - 4 种动作：idle（呼吸 scale）、walk（tween 移动 300ms）、sit（scale 0.8 + y 偏移）、talk（气泡弹出）
+   - 5 种情绪色：neutral=个性色、happy=绿、anxious=黄、angry=红、sad=蓝灰
+2. `ActionBubble` 类：跟随 Agent 的圆角矩形 + 文字，2.5s 后 fade out
+3. 位置映射：`(tileX*32+16, tileY*32+16)` — 对齐 Step 62 的 32px tile
+4. Mock 数据：5 Agent（小林/小红/小刚/小雪/阿杰），不同人格，不同初始位置
 
 **涉及文件：**
 
@@ -798,11 +798,27 @@ interface SceneSnapshot {
 |------|------|------|
 | `frontend/src/game/sprites/AgentSprite.ts` | **新建** | Agent 精灵类（Container） |
 | `frontend/src/game/sprites/ActionBubble.ts` | **新建** | 气泡类 |
-| `frontend/src/game/scenes/MapScene.ts` | 修改 | 创建/更新 Agent 精灵 |
-| `frontend/src/game/GameCanvas.tsx` | 修改 | 接收 AgentSprite[] prop → 同步到 Phaser |
-| `backend/src/api/scenes.py` | **新建** | `POST /api/scenes/{id}/state` → AgentSprite[] |
+| `frontend/src/game/scenes/MapScene.ts` | 修改 | 创建/更新 Agent 精灵层 |
+| `frontend/src/game/GameCanvas.tsx` | 修改 | 接收 agents prop → 同步到 MapScene |
+| `frontend/src/pages/GameScene.tsx` | 修改 | 提供 mock agent 数据 + 场景切换时重设位置 |
 
-**验收标准：** 5 Agent sprite 正确渲染、移动动画流畅 300ms、情绪变色、气泡弹出/消失。
+**验收标准：** 5 Agent sprite 正确渲染、walk 动画流畅 300ms、情绪变色、气泡弹出/消失。
+
+### Step 63b — 场景后端 API
+
+**目标：** `POST /api/scenes/{id}/state` 返回 `AgentSprite[]`，前端从 Mock 切换到真实 API。
+
+**涉及文件：**
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `backend/src/api/scenes.py` | **新建** | `POST /api/scenes/{id}/state` |
+| `backend/src/engines/scene/engine.py` | **新建** | SceneEngine 基础：创建场景、放置 Agent、返回状态 |
+| `backend/src/main.py` | 修改 | 注册 scenes router |
+| `frontend/src/api/scenes.ts` | **新建** | `useSceneState` hook |
+| `frontend/src/pages/GameScene.tsx` | 修改 | 从 Mock 切换到 API |
+
+**验收标准：** API 返回正确的 AgentSprite[]、前端通过 API 获取状态。
 
 ### Step 64 — 交互系统
 

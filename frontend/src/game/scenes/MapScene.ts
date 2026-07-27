@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { ITEM_FRAME } from "../tileset";
+import { AgentSprite, AgentSpriteData } from "../sprites/AgentSprite";
 
 /**
  * MapScene — Phaser 原生 tilemap 渲染。
@@ -9,7 +10,7 @@ import { ITEM_FRAME } from "../tileset";
  *   2. 物品阴影层 — 每个物品下方椭圆
  *   3. 物品层 — items spritesheet 帧
  *   4. 天气粒子层 — sakura 飘落
- *   5. 场景标题 — 顶部半透明标签
+ *   5. Agent 精灵层 — AgentSprite 容器（depth 15）
  *
  * 切换场景：loadMap(mapId) → 销毁旧对象 → 动态 import JSON → 重建
  */
@@ -42,7 +43,7 @@ const WALL_BOTTOM = 1;
 const WALL_LEFT = 2;
 const WALL_RIGHT = 3;
 
-const TILE_S = 32; // 像素
+const TILE_S = 64; // 像素（2x 高清）
 const WALL_OFFSET = 6; // 墙壁帧在 spritesheet 中的偏移
 
 export class MapScene extends Phaser.Scene {
@@ -52,6 +53,8 @@ export class MapScene extends Phaser.Scene {
   private groundLayer: Phaser.Tilemaps.TilemapLayer | null = null;
   private itemObjects: Phaser.GameObjects.GameObject[] = [];
   private weatherTweens: Phaser.Tweens.Tween[] = [];
+  private agentSprites: Map<string, AgentSprite> = new Map();
+  private pendingAgents: AgentSpriteData[] | null = null;
   private ready = false;
 
   constructor() {
@@ -129,7 +132,10 @@ export class MapScene extends Phaser.Scene {
       this.startWeather(d.weather, W, H);
     }
 
-    // 标题由 React GameScene 页的按钮选中态展示，不在此处覆盖
+    // 5. Agent 精灵（如有挂起数据）
+    if (this.pendingAgents) {
+      this.placeAgents(this.pendingAgents);
+    }
   }
 
   /* ================================================================
@@ -250,6 +256,46 @@ export class MapScene extends Phaser.Scene {
   }
 
   /* ================================================================
+   * Agent 精灵管理
+   * ================================================================ */
+
+  /** 设置/更新全部 Agent 精灵（从 React prop 同步） */
+  setAgents(data: AgentSpriteData[]): void {
+    if (!this.ready || !this.mapData) {
+      this.pendingAgents = data;
+      return;
+    }
+    this.placeAgents(data);
+  }
+
+  /** 获取指定 Agent 的精灵（供外部调用 showBubble 等） */
+  getAgentSprite(agentId: string): AgentSprite | undefined {
+    return this.agentSprites.get(agentId);
+  }
+
+  /** 显示 Agent 头顶气泡 */
+  showAgentBubble(agentId: string, message: string): void {
+    const sprite = this.agentSprites.get(agentId);
+    if (!sprite) return;
+    // 动态 import 避免循环依赖
+    import("../sprites/ActionBubble").then(({ ActionBubble }) => {
+      const bubble = new ActionBubble(this, message);
+      bubble.show(sprite);
+    });
+  }
+
+  private placeAgents(data: AgentSpriteData[]): void {
+    // 清除旧精灵
+    this.agentSprites.forEach((s) => s.destroy());
+    this.agentSprites.clear();
+
+    data.forEach((d) => {
+      const sprite = new AgentSprite(this, d);
+      this.agentSprites.set(d.agentId, sprite);
+    });
+  }
+
+  /* ================================================================
    * 清理
    * ================================================================ */
 
@@ -257,6 +303,10 @@ export class MapScene extends Phaser.Scene {
     // 停止天气动画
     this.weatherTweens.forEach((t) => t.stop());
     this.weatherTweens = [];
+
+    // 销毁 Agent 精灵
+    this.agentSprites.forEach((s) => s.destroy());
+    this.agentSprites.clear();
 
     // 销毁物品对象
     this.itemObjects.forEach((o) => o.destroy());
