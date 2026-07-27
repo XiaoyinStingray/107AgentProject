@@ -114,7 +114,13 @@ function renderArena(initialEntry = "/arena") {
   });
   const createTree = () => (
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[initialEntry]}>
+      <MemoryRouter
+        initialEntries={[initialEntry]}
+        future={{
+          v7_startTransition: true,
+          v7_relativeSplatPath: true,
+        }}
+      >
         <Arena />
       </MemoryRouter>
     </QueryClientProvider>

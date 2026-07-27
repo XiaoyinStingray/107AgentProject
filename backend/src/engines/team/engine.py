@@ -111,7 +111,7 @@ class TeamEngine:
 
     # ── Tick ──────────────────────────────────────────────────────
 
-    async def on_tick(self, tick: int, agent_messages: list[str]) -> list[dict]:
+    async def on_tick(self, tick: int, agent_messages: list[dict]) -> list[dict]:
         """每个 tick 结束时调用——更新 Plan 进度并同步 DB。
 
         返回: 本 tick 产生的 plan_updated 事件列表
@@ -123,7 +123,7 @@ class TeamEngine:
         events = list(self._sse_events)
         self._sse_events.clear()
 
-        self.plan.check_progress(tick, agent_messages)
+        await self.plan.check_progress(tick, agent_messages)
 
         # 同步 PlanRow 到 DB
         if self.plan_row:

@@ -413,8 +413,11 @@ async def evaluate_team(
         raise HTTPException(status_code=404, detail="该 Team 还没有执行记录")
 
     plan = plan_row.to_dict()
-    if plan_row.report:
-        plan["report"] = __import__("json").loads(plan_row.report)
+    report = plan.get("report") or {}
+    steps = plan.get("steps") or []
+    steps_total = len(steps)
+    steps_done = sum(1 for step in steps if step.get("status") == "done")
+    progress_pct = steps_done / steps_total if steps_total else 0.0
 
     # 获取 World 事件
     world_id = plan_row.world_id
@@ -437,10 +440,10 @@ async def evaluate_team(
     prompt = f"""你是一个团队协作评估专家。请根据以下团队任务执行记录，给出简洁的评估。
 
 任务：{plan.get('task', '')}
-步骤完成：{plan.get('completed_count', 0)}/{plan.get('steps_count', 0)}
+步骤完成：{steps_done}/{steps_total}
 
 各步骤产出：
-{plan.get('report', {}).get('content', '无')[:1500]}
+{report.get('content', '无')[:1500]}
 
 关键事件：
 {events_text[:2000]}
@@ -469,13 +472,10 @@ async def evaluate_team(
     except Exception as e:
         logger.warning(f"团队评估失败: {e}")
         # 兜底：基于数据的简单评估
-        pc = plan.get("progress_pct", 0)
-        steps_done = plan.get("completed_count", 0)
-        steps_total = plan.get("steps_count", 0)
         return {
             "evaluation": (
                 f"【自动评估】\n"
-                f"任务完成度：{steps_done}/{steps_total}（{int(pc * 100)}%）\n"
+                f"任务完成度：{steps_done}/{steps_total}（{int(progress_pct * 100)}%）\n"
                 f"协作质量：因 LLM 不可用，无法给出详细评估。"
             )
         }

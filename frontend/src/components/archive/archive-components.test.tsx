@@ -97,7 +97,12 @@ const testQueryClient = new QueryClient({
 function renderArchive() {
   return render(
     <QueryClientProvider client={testQueryClient}>
-      <MemoryRouter>
+      <MemoryRouter
+        future={{
+          v7_startTransition: true,
+          v7_relativeSplatPath: true,
+        }}
+      >
         <Archive />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -226,10 +231,10 @@ describe("Step 45 Archive — 实验模板面板", () => {
 describe("Step 45 Archive — 成就系统面板", () => {
   it("renders summary cards", () => {
     renderAndClickTab("成就系统");
-    expect(screen.getByText("Agent 数")).toBeInTheDocument();
-    expect(screen.getByText("模拟次数")).toBeInTheDocument();
-    expect(screen.getByText("总 Tick")).toBeInTheDocument();
-    expect(screen.getByText("叙事数")).toBeInTheDocument();
+    expect(screen.getByText("Agent 数").parentElement).toHaveTextContent("3");
+    expect(screen.getByText("模拟次数").parentElement).toHaveTextContent("3");
+    expect(screen.getByText("总 Tick").parentElement).toHaveTextContent("43");
+    expect(screen.getByText("叙事数").parentElement).toHaveTextContent("6");
   });
 
   it("renders all achievements", () => {

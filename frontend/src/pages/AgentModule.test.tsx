@@ -33,7 +33,13 @@ function renderModule(
     ? { pathname, hash: hashValue ? `#${hashValue}` : "", state }
     : path;
   return render(
-    <MemoryRouter initialEntries={[entry]}>
+    <MemoryRouter
+      initialEntries={[entry]}
+      future={{
+        v7_startTransition: true,
+        v7_relativeSplatPath: true,
+      }}
+    >
       <AgentModule />
     </MemoryRouter>,
   );

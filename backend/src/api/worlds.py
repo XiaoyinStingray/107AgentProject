@@ -364,11 +364,37 @@ async def inject_event(
                    f"只能在运行中或暂停的 World 中注入事件。",
         )
 
-    description = event.get("description", str(event))
+    description = event.get("description")
     injection_type = event.get("type", "world_event")
     target_agent_id = event.get("target_agent_id", None)
+    if not isinstance(description, str) or not description.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Intervention description cannot be empty",
+        )
+    description = description.strip()
+    allowed_types = {
+        "world_event",
+        "agent_message",
+        "agent_action",
+        "relationship_change",
+    }
+    if not isinstance(injection_type, str) or injection_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported intervention type: {injection_type!r}",
+        )
+    if target_agent_id is not None and not isinstance(target_agent_id, str):
+        raise HTTPException(
+            status_code=400,
+            detail="target_agent_id must be a string or null",
+        )
 
-    engine.inject_event(description)
+    injected_event = engine.inject_event(
+        description,
+        event_type=injection_type,
+        target_agent_ids=[target_agent_id] if target_agent_id else [],
+    )
 
     # 查询 target agent name
     target_agent_name = None
@@ -393,6 +419,7 @@ async def inject_event(
         target_agent_id=target_agent_id,
         description=description,
     )
+    db.add(Event.from_sim_event(injected_event))
     db.add(intervention)
     await db.commit()
 

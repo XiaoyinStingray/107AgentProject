@@ -307,3 +307,72 @@ class TestInjectEvent:
             "description": "天降暴雨",
         })
         assert resp.status_code == 400
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"description": ""},
+            {"description": "测试", "type": "unsupported"},
+            {"description": "测试", "target_agent_id": ["not-a-string"]},
+        ],
+    )
+    def test_inject_rejects_invalid_payload(self, client, payload):
+        import api.sse as sse_mod
+
+        world = client.post("/api/worlds", json={
+            "name": "干预边界测试",
+            "scenario": {"name": "期末周"},
+            "agent_ids": [],
+        }).json()
+        world_id = world["id"]
+        sse_mod._active_worlds[world_id] = SimpleNamespace(
+            world=SimpleNamespace(status="running"),
+            inject_event=lambda *args, **kwargs: None,
+        )
+
+        response = client.post(f"/api/worlds/{world_id}/inject", json=payload)
+
+        assert response.status_code == 400
+
+    def test_inject_persists_runtime_event_and_history(self, client):
+        """注入类型、目标和描述应同时进入运行时队列与 SQLite。"""
+        import api.sse as sse_mod
+
+        agent_id = _create_agent(client)
+        world = client.post("/api/worlds", json={
+            "name": "干预链路测试",
+            "scenario": {"name": "期末周"},
+            "agent_ids": [agent_id],
+        }).json()
+        world_id = world["id"]
+        assert client.post(f"/api/worlds/{world_id}/start").status_code == 200
+
+        response = client.post(f"/api/worlds/{world_id}/inject", json={
+            "type": "agent_action",
+            "target_agent_id": agent_id,
+            "description": "请立即离开图书馆",
+        })
+
+        assert response.status_code == 200
+        intervention = response.json()["intervention"]
+        assert intervention["type"] == "agent_action"
+        assert intervention["target_agent_id"] == agent_id
+
+        engine = sse_mod.get_world_engine(world_id)
+        pending = engine._pending_injects[-1]
+        assert pending.type == "agent_action"
+        assert pending.target_agent_ids == [agent_id]
+        assert pending.description == "请立即离开图书馆"
+
+        history = client.get(f"/api/worlds/{world_id}/interventions").json()
+        assert history[0]["id"] == intervention["id"]
+        assert history[0]["type"] == "agent_action"
+
+        persisted = client.get(f"/api/worlds/{world_id}/events").json()
+        injected = next(
+            event
+            for event in persisted
+            if event["description"] == "请立即离开图书馆"
+        )
+        assert injected["type"] == "agent_action"
+        assert injected["target_agent_ids"] == [agent_id]

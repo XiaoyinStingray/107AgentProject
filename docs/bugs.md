@@ -30,7 +30,7 @@
 
 ## BUG-001：React Router 加载页面时产生 Future Flag 控制台警告
 
-- **状态**：🔴 复测确认仍存在（2026-07-27）
+- **状态**：✅ 已修复并自动化验证（2026-07-27，State 3 T2）
 - **优先级**：P2（不阻塞功能，但污染测试控制台）
 - **发现日期**：2026-07-18
 - **环境**：前端 Vite，`http://127.0.0.1:5173/`
@@ -45,12 +45,17 @@
 - **2026-07-27 复测**：
   - 浏览器刷新后仍稳定出现 `v7_startTransition` 与 `v7_relativeSplatPath` 两条 warning。
   - 相关 Vitest 回归测试全部通过，但测试 stderr 同样输出上述 warning，确认记录仍有效。
+- **2026-07-27 修复**：
+  - `BrowserRouter` 显式启用 `v7_startTransition` 与 `v7_relativeSplatPath`。
+  - 所有前端测试使用的 `MemoryRouter` 同步启用 future flags，避免测试夹具继续污染 stderr。
+  - 新增 App 路由配置回归测试；全量前端 `239 passed`，不再输出这两条 warning。
+  - 浏览器访问 M5/M7/M8 后控制台 warning/error 为 0。
 
 ---
 
 ## BUG-003：M7 导演干预台注入事件与沙盒隔离
 
-- **状态**：🟡 已实现修复，待真实运行中 World E2E 验证（2026-07-27）
+- **状态**：✅ 已修复并完成自动化链路验证（2026-07-27，State 3 T2）
 - **优先级**：P1（注入是 M7 核心功能，但完全不影响模拟）
 - **发现日期**：2026-07-19
 - **环境**：前端 DirectorIntervention + GroupSandbox
@@ -68,6 +73,11 @@
   - World 引擎已通过 `_pending_injects` 将干预加入 SSE 流，群体沙盒使用真实 `useSSE`。
   - 后端注入相关测试 `2 passed`；前端干预组件测试 `37 passed`。
   - 当前数据库中的 World 为暂停状态，且本次后端进程未持有其运行时引擎，因此未执行一次会调用真实 LLM 的完整注入链路；完成该 E2E 后再标记为 verified。
+- **2026-07-27 修复与验证**：
+  - 注入类型、目标 Agent 和描述现会完整写入运行时 `SimEvent`，不再统一退化为 `world_event`。
+  - 注入事件与干预历史在同一 API 请求内持久化；页面重连后可通过 REST 事件重放恢复。
+  - 新增 API → 运行时 pending 队列 → SQLite events/interventions 的 Mock LLM 集成测试，以及 SSE 首事件顺序测试。
+  - 后端注入相关定向测试 `32 passed`；前端干预台、沙盒和 World 组件测试 `44 passed`。
 
 ---
 
@@ -80,7 +90,7 @@
   
 ## BUG-005：LLM API Key 无效时错误提示不友好
 
-- **状态**：🔴 复测确认仍存在（2026-07-27）
+- **状态**：✅ 已修复并自动化验证（2026-07-27，State 3 T2）
 - **优先级**：P2（不阻塞代码运行，但影响用户体验）
 - **发现日期**：2026-07-21
 - **环境**：后端 `POST /api/agents`，DeepSeek API
@@ -97,6 +107,11 @@
   - `frontend/src/api/client.ts` — 错误展示逻辑
 - **临时解决方案**：确保 `.env` 中的 `LLM_API_KEY` 有效。
 - **2026-07-27 复测**：为避免覆盖有效 Key 和产生真实 API 调用，本次未改 `.env`；代码审查确认后端创建接口仍只捕获 `ValueError`，未映射上游 401，前端统一客户端也只透传通用 `detail`，因此根因仍在。
+- **2026-07-27 修复**：
+  - 后端新增统一 LLM 错误边界，将认证失败、限流、超时和连接失败转换为安全的结构化响应。
+  - 无效 Key 返回 `401` 与 `{error: "invalid_api_key", message: "LLM API Key 无效，请检查 .env 配置并重启后端"}`。
+  - 前端统一客户端兼容结构化错误与既有 FastAPI `detail`，并将后端断连明确显示为“无法连接后端服务”。
+  - 使用模拟 DeepSeek `AuthenticationError` 验证 `/api/agents` 完整链路，未修改 `.env`、未调用真实 LLM。
 
 ---
 
@@ -287,22 +302,29 @@
 
 ### BUG-019：侧边栏导航跳转问题（预存）
 
-- **状态**：🟡 待产品确认（2026-07-27 复测）
+- **状态**：📝 wontfix（2026-07-27，产品确认保留）
 - **优先级**：P2
 - **发现日期**：2026-07-25
 - **环境**：前端侧边栏
 - **描述**：复测 10 个顶层入口均能进入正确模块；其中从其他模块点击 M5 时，URL 会自动变为 `/narratives#item-29`，而不是停留在 `/narratives`。根因是 NarrativeFactory 将默认「小说化叙事」主动同步为 `#item-29`。功能可用，需要团队确认这是预期的默认功能定位，还是应保持模块根路由。
+- **wontfix 原因**：`#item-29` 表示 M5 当前默认的「小说化叙事」子功能，可用于侧边栏定位和深链接；页面和顶层导航均正常。移除 hash 会削弱当前功能定位且没有功能收益，因此保留现状。
+- **2026-07-27 验证**：浏览器直接进入 `/narratives`，页面加载完成后稳定同步为 `/narratives#item-29`，默认风格为「小说化叙事」。
 - **不在 Step 45 范围内**
 
 ### BUG-022：档案馆成就系统 4 个统计数字不显示
 
-- **状态**：🔴 复测确认仍存在（2026-07-27）
+- **状态**：✅ 已修复并自动化验证（2026-07-27，State 3 T2）
 - **优先级**：P2
 - **发现日期**：2026-07-26
 - **环境**：M8 档案馆 → 成就 tab
 - **实际结果**：成就页面的 Agent 总数/World 总数/模拟次数/竞技场次数字显示为空或 0
 - **关联位置**：`frontend/src/pages/Archive.tsx` AchievementsPanel、`backend/src/api/achievements.py`
 - **2026-07-27 复测**：成就页四个标签均正常出现，但数字为空。后端响应使用 `total_agents` / `total_simulations` / `total_ticks` / `total_narratives`，前端读取 `totalAgents` / `totalSimulations` / `totalTicks` / `totalNarratives`，字段命名未转换。
+- **2026-07-27 修复**：
+  - 在 `frontend/src/api/achievements.ts` 的 API 边界统一将后端 snake_case 转为现有 camelCase 共享类型，并同步转换 `unlocked_at`。
+  - 未修改后端响应和 `frontend/src/types/archive.ts` 共享类型。
+  - 新增字段映射测试，并加强成就面板测试以断言四个实际数字；相关测试 `33 passed`。
+  - 浏览器使用本地真实数据库验证四项统计均显示数值（`6 / 1 / 0 / 2`），不再为空。
 
 ### BUG-021：群体动力学报告生成后无下载按钮 ✅
 

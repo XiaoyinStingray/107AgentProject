@@ -45,7 +45,13 @@ function LocationProbe() {
 
 function renderBrowser() {
   return render(
-    <MemoryRouter initialEntries={["/agents#item-7"]}>
+    <MemoryRouter
+      initialEntries={["/agents#item-7"]}
+      future={{
+        v7_startTransition: true,
+        v7_relativeSplatPath: true,
+      }}
+    >
       <TemplateBrowser />
       <LocationProbe />
     </MemoryRouter>,

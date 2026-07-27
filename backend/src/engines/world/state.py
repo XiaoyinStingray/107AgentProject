@@ -285,23 +285,43 @@ class WorldStateMixin:
             self._db.add(Event.from_sim_event(event))
         await self._db.commit()
 
-    def inject_event(self, description: str):
-        """Inject one external world_event for the intervention console.
+    def inject_event(
+        self,
+        description: str,
+        event_type: str = "world_event",
+        target_agent_ids: list[str] | None = None,
+    ) -> SimEvent:
+        """Queue one external event for the intervention console.
 
-        The event is appended to the engine's event list, persisted,
-        and queued for SSE delivery at the start of the next tick.
+        The API layer persists the returned event in the same transaction as
+        the intervention history record. The engine keeps it in context and
+        emits it through SSE at the start of the next running tick.
         """
+        targets = list(target_agent_ids or [])
+        data: dict[str, Any] = {}
+        if event_type == "agent_message":
+            data["message"] = description
+        elif event_type == "agent_action":
+            data.update({"action": "导演干预", "description": description})
         event = SimEvent(
             id=str(uuid.uuid4()),
             world_id=self.world.id,
             tick=self.current_tick,
-            type="world_event",
+            type=event_type,
             source_agent_id=None,
+            target_agent_ids=targets,
             description=description,
+            data=data,
             created_at=datetime.now(timezone.utc).isoformat(),
         )
         self.events.append(event)
         if not hasattr(self, "_pending_injects"):
             self._pending_injects: list[SimEvent] = []
         self._pending_injects.append(event)
-        logger.info(f"WorldEngine.inject_event: {description[:80]}")
+        logger.info(
+            "WorldEngine.inject_event: type={}, targets={}, description={}",
+            event_type,
+            targets,
+            description[:80],
+        )
+        return event

@@ -85,7 +85,12 @@ def _setup_db():
 # =============================================================================
 
 @pytest.fixture
-def app():
+def app(monkeypatch):
+    import api.agents
+
+    # Team 路由部分端点在函数内部直接获取 factory，不经过 FastAPI Depends。
+    # 显式替换模块属性，确保整个测试文件不会访问真实 LLM。
+    monkeypatch.setattr(api.agents, "get_agent_factory", _mock_factory)
     app = FastAPI(lifespan=_test_lifespan)
     app.include_router(agents_router)
     app.include_router(teams_router)
@@ -369,3 +374,72 @@ class TestExecuteTeam:
         plan_id_2 = second.json()["id"]
 
         assert plan_id_1 == plan_id_2  # 同一个 Plan
+
+
+class TestEvaluateTeam:
+
+    def test_evaluate_without_report_uses_actual_step_count(
+        self, client, monkeypatch
+    ):
+        """报告尚未生成时也应可评估，且提示词不能错误显示 0/0。"""
+        aid = _create_agent(client)
+        team = client.post("/api/teams", json={
+            "name": "评估测试团队",
+            "description": "完成一项测试任务",
+            "agent_ids": [aid],
+        }).json()
+        plan = client.post(f"/api/teams/{team['id']}/execute").json()
+        prompts = []
+
+        class RecordingModelClient:
+            async def create(self, messages, **kwargs):
+                prompts.append(messages[0].content)
+                return _FakeCreateResult("协作质量：7/10")
+
+        class RecordingFactory:
+            model_client = RecordingModelClient()
+
+        import api.agents
+
+        monkeypatch.setattr(
+            api.agents,
+            "get_agent_factory",
+            lambda: RecordingFactory(),
+        )
+
+        response = client.post(f"/api/teams/{team['id']}/evaluate")
+
+        assert response.status_code == 200
+        assert response.json() == {"evaluation": "协作质量：7/10"}
+        assert prompts
+        assert f"步骤完成：0/{len(plan['steps'])}" in prompts[0]
+        assert "步骤完成：0/0" not in prompts[0]
+
+    def test_evaluate_fallback_uses_actual_step_count(self, client, monkeypatch):
+        """LLM 不可用时，兜底评估仍应显示真实步骤总数。"""
+        aid = _create_agent(client)
+        team = client.post("/api/teams", json={
+            "name": "兜底评估团队",
+            "description": "完成一项测试任务",
+            "agent_ids": [aid],
+        }).json()
+        plan = client.post(f"/api/teams/{team['id']}/execute").json()
+
+        import api.agents
+
+        def unavailable_factory():
+            raise RuntimeError("LLM unavailable")
+
+        monkeypatch.setattr(
+            api.agents,
+            "get_agent_factory",
+            unavailable_factory,
+        )
+
+        response = client.post(f"/api/teams/{team['id']}/evaluate")
+
+        assert response.status_code == 200
+        assert (
+            f"任务完成度：0/{len(plan['steps'])}（0%）"
+            in response.json()["evaluation"]
+        )

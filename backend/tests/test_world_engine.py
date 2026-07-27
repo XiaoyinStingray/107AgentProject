@@ -1,5 +1,7 @@
 """WorldEngine construction, context, and event conversion tests."""
 
+import pytest
+
 from tests.world_engine_fixtures import (
     FakeMessage,
     db_session,
@@ -107,7 +109,38 @@ class TestInjectEvent:
         from engines.world.engine import WorldEngine
 
         engine = WorldEngine(make_world(), [], db_session)
-        engine.inject_event("天降暴雨")
+        event = engine.inject_event("天降暴雨")
         assert len(engine.events) == 1
+        assert event is engine.events[0]
         assert engine.events[0].type == "world_event"
         assert "暴雨" in engine.events[0].description
+
+    def test_inject_preserves_type_and_target(self, db_session):
+        from engines.world.engine import WorldEngine
+
+        engine = WorldEngine(make_world(), [], db_session)
+        event = engine.inject_event(
+            "请陈默立即离开图书馆",
+            event_type="agent_action",
+            target_agent_ids=["agent-1"],
+        )
+
+        assert event.type == "agent_action"
+        assert event.target_agent_ids == ["agent-1"]
+        assert event.data == {
+            "action": "导演干预",
+            "description": "请陈默立即离开图书馆",
+        }
+
+    @pytest.mark.asyncio
+    async def test_pending_injection_is_first_streamed_event(self, db_session):
+        from engines.world.engine import WorldEngine
+
+        engine = WorldEngine(make_world(), [], db_session)
+        injected = engine.inject_event("天降暴雨")
+
+        streamed = [event async for event in engine.tick_stream()]
+
+        assert streamed[0] is injected
+        assert sum(event.id == injected.id for event in streamed) == 1
+        assert sum(event.id == injected.id for event in engine.events) == 1

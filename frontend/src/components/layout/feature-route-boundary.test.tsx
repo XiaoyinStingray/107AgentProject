@@ -23,7 +23,13 @@ function BoundaryLayout() {
 
 function renderBoundary(initialEntry: string) {
   return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
+    <MemoryRouter
+      initialEntries={[initialEntry]}
+      future={{
+        v7_startTransition: true,
+        v7_relativeSplatPath: true,
+      }}
+    >
       <Routes>
         <Route path="/" element={<BoundaryLayout />}>
           <Route path="agents" element={<div>铸造厂正文</div>} />

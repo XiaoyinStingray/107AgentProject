@@ -132,7 +132,12 @@ const testQueryClient = new QueryClient({
 function renderPage() {
   return render(
     <QueryClientProvider client={testQueryClient}>
-      <MemoryRouter>
+      <MemoryRouter
+        future={{
+          v7_startTransition: true,
+          v7_relativeSplatPath: true,
+        }}
+      >
         <GroupSandbox />
       </MemoryRouter>
     </QueryClientProvider>,

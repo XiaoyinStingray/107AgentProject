@@ -22,6 +22,7 @@ from api.worlds import router as worlds_router
 from api.achievements import router as achievements_router
 from api.teams import router as teams_router
 from api.market import router as market_router
+from llm.errors import register_llm_error_middleware
 
 
 @asynccontextmanager
@@ -41,6 +42,8 @@ app = FastAPI(
     description="Agent 社会实验平台 — 后端 API",
     lifespan=lifespan,
 )
+
+register_llm_error_middleware(app)
 
 app.add_middleware(
     CORSMiddleware,

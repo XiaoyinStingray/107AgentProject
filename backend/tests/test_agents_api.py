@@ -5,13 +5,16 @@ Agent API 路由 单元测试 — Mock LLM + SQLite 持久化。
 import json
 import tempfile
 
+import httpx
 import pytest
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from openai import AuthenticationError
 from sqlalchemy import create_engine, text
 
 from api.agents import get_agent_factory, router
+from llm.errors import register_llm_error_middleware
 
 
 # =============================================================================
@@ -93,6 +96,7 @@ def _setup_db():
 @pytest.fixture
 def app():
     app = FastAPI(lifespan=_test_lifespan)
+    register_llm_error_middleware(app)
     app.include_router(router)
     app.dependency_overrides[get_agent_factory] = _mock_factory
     return app
@@ -123,6 +127,31 @@ class TestCreateAgent:
     def test_create_too_short_description(self, client):
         resp = client.post("/api/agents/", json={"description": "ab"})
         assert resp.status_code == 422
+
+    def test_invalid_llm_key_returns_structured_error(self, app, client):
+        """上游 401 应转换为前端可识别的安全错误。"""
+        request = httpx.Request(
+            "POST",
+            "https://api.deepseek.com/v1/chat/completions",
+        )
+        response = httpx.Response(401, request=request)
+
+        def invalid_factory():
+            raise AuthenticationError(
+                "Authentication Fails",
+                response=response,
+                body={"error": "invalid key"},
+            )
+
+        app.dependency_overrides[get_agent_factory] = invalid_factory
+
+        resp = client.post("/api/agents/", json={"description": "测试角色"})
+
+        assert resp.status_code == 401
+        assert resp.json() == {
+            "error": "invalid_api_key",
+            "message": "LLM API Key 无效，请检查 .env 配置并重启后端",
+        }
 
 
 # =============================================================================
