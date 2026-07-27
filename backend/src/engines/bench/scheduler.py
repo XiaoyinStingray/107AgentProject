@@ -1,0 +1,222 @@
+"""
+BatchScheduler — 标准化套件批量评测。
+Step 58: 3 Agent × 3 场景 × 3 重复 = 27 条评测记录。
+"""
+
+import asyncio
+import json
+import uuid
+from datetime import datetime, timezone
+
+from loguru import logger
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from models.bench_orm import BenchRun, BenchResult
+from models.world import Scenario, WorldResponse
+from models.agent import Persona, Background, Goal
+from engines.bench.metrics import calculate_metrics, aggregate_scores
+
+
+# 标准 Agent 模板
+STD_AGENTS = [
+    {
+        "id": "intj-scholar",
+        "name": "学霸小明",
+        "mbti": "INTJ-T",
+        "big_five": {"openness": 0.75, "conscientiousness": 0.90, "extraversion": 0.25, "agreeableness": 0.40, "neuroticism": 0.45},
+        "narrative": "物院大三学生，GPA 4.0，每天泡图书馆，社恐但学术极强。",
+        "decision_style": "理性分析型",
+    },
+    {
+        "id": "enfp-social",
+        "name": "社交小红",
+        "mbti": "ENFP-A",
+        "big_five": {"openness": 0.85, "conscientiousness": 0.40, "extraversion": 0.90, "agreeableness": 0.80, "neuroticism": 0.35},
+        "narrative": "人文学院大二学生，外向热情，喜欢组织和社交，但对学术不太上心。",
+        "decision_style": "直觉感性型",
+    },
+    {
+        "id": "estj-leader",
+        "name": "领导者小刚",
+        "mbti": "ESTJ-A",
+        "big_five": {"openness": 0.50, "conscientiousness": 0.85, "extraversion": 0.70, "agreeableness": 0.45, "neuroticism": 0.25},
+        "narrative": "管院大三学生会主席，果断务实，组织力强但有时独断。",
+        "decision_style": "目标导向型",
+    },
+]
+
+# 标准场景
+STD_SCENARIOS = [
+    Scenario(name="期末周", description="期末考试周，图书馆座位紧张，压力山大",
+             time_span="一周", initial_events=["图书馆7点开门"], environment_params={"stress_level": "high"}),
+    Scenario(name="新生报到", description="开学第一天，新生涌入校园，机会与混乱并存",
+             time_span="一天", initial_events=["校车到达"], environment_params={"social_chance": "high"}),
+    Scenario(name="毕业选择", description="大四下学期，每个人都面临人生关键决策",
+             time_span="一个月", initial_events=["招聘会开始"], environment_params={"decision_pressure": "high"}),
+]
+
+REPEAT_COUNT = 3
+
+
+async def run_bench_suite(run_id: str, db: AsyncSession, model_client_factory) -> dict:
+    """执行完整评测套件。
+
+    model_client_factory: callable(api_key, base_url, model) → model_client
+
+    返回: 聚合后的 scores dict
+    """
+    result = await db.execute(select(BenchRun).where(BenchRun.id == run_id))
+    bench_run = result.scalar_one_or_none()
+    if not bench_run:
+        raise ValueError(f"BenchRun {run_id} not found")
+
+    all_scores = []
+    bench_run.total_tasks = len(STD_AGENTS) * len(STD_SCENARIOS) * REPEAT_COUNT
+    bench_run.completed_tasks = 0
+    await db.commit()
+
+    try:
+        model_client = model_client_factory(
+            bench_run.llm_api_key, bench_run.llm_base_url, bench_run.llm_model
+        )
+    except Exception as e:
+        bench_run.status = "failed"
+        bench_run.report = f"LLM 连接失败: {e}"
+        bench_run.llm_api_key = ""
+        await db.commit()
+        return {}
+
+    # 并发控制：最多 6 个任务同时跑
+    sem = asyncio.Semaphore(6)
+
+    async def _run_one(agent_tpl, scenario, rep):
+        async with sem:
+            result_id = str(uuid.uuid4())
+            try:
+                scores = await _run_single_test(agent_tpl, scenario, rep, model_client, db)
+                return (result_id, scores, None)
+            except Exception as e:
+                return (result_id, {}, str(e)[:500])
+
+    # 构建任务列表 + 元数据
+    task_specs = [
+        (a, s, r) for a in STD_AGENTS for s in STD_SCENARIOS for r in range(REPEAT_COUNT)
+    ]
+
+    async def _run_with_meta(agent_tpl, scenario, rep):
+        result_id, scores, error = await _run_one(agent_tpl, scenario, rep)
+        return (agent_tpl, scenario, rep, result_id, scores, error)
+
+    pending = [_run_with_meta(a, s, r) for a, s, r in task_specs]
+
+    for coro in asyncio.as_completed(pending):
+        agent_tpl, scenario, rep, result_id, scores, error = await coro
+        br = BenchResult(
+            id=result_id, run_id=run_id,
+            agent_template=agent_tpl["name"], scenario=scenario.name, repeat_index=rep,
+            scores_json=json.dumps(scores, ensure_ascii=False),
+            status="done" if not error else "failed",
+            error=error,
+        )
+        if not error:
+            all_scores.append(scores)
+        db.add(br)
+        bench_run.completed_tasks += 1
+        await db.commit()  # 每完成一个立即提交——前端实时轮询
+
+    # 聚合 + 报告
+    agg = aggregate_scores(all_scores)
+    bench_run.scores_json = json.dumps(agg, ensure_ascii=False)
+
+    try:
+        from engines.bench.reporter import generate_report
+        report = await generate_report(agg, bench_run.completed_tasks)
+        bench_run.report = report
+    except Exception as e:
+        bench_run.report = f"报告生成失败: {e}"
+
+    bench_run.status = "done"
+    bench_run.llm_api_key = ""  # 安全：跑完即清除 API Key
+    await db.commit()
+    logger.info(f"Bench run {run_id}: completed {bench_run.completed_tasks}/{bench_run.total_tasks}")
+    return agg
+
+
+async def _run_single_test(agent_tpl: dict, scenario, rep: int,
+                           model_client, db: AsyncSession) -> dict:
+    """运行一条评测：创建 Agent → 创建 World → run 8 ticks → 计算指标。"""
+    from engines.agent_factory.factory import AgentFactory, LifeAgent
+
+    # 用模板创建 Agent
+    persona = Persona(
+        name=agent_tpl["name"], mbti=agent_tpl["mbti"],
+        big_five=agent_tpl["big_five"], narrative=agent_tpl["narrative"],
+    )
+    background = Background(narrative=agent_tpl["narrative"], decision_style=agent_tpl["decision_style"])
+    factory = AgentFactory(model_client)
+    agent = factory.create_from_persona(
+        agent_id=f"bench-{str(uuid.uuid4())[:8]}",
+        persona=persona, background=background, goals=[],
+    )
+
+    # 创建 World
+    world_id = str(uuid.uuid4())
+    world = WorldResponse(
+        id=world_id, name=f"Bench: {agent_tpl['name']} × {scenario.name}",
+        world_type="solo", scenario=scenario, agent_ids=[agent.id],
+        current_tick=0, status="idle",
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+    import sys
+    print(f"[BENCH] START {agent_tpl['name']} x {scenario.name} #{rep}", flush=True)
+    events: list[dict] = []
+    for tick in range(8):
+        context = (
+            f"⏰ 第 {tick} 个时间段\n📍 地点: {scenario.name}\n"
+            + (f"🌤️ 天气: 晴\n" if scenario.name != "期末周" else "📊 资源状态: 图书馆剩余座位 {max(0, 80 - tick * 10)} 个\n")
+        )
+        agent.inject_context(context)
+        start = __import__("time").time()
+        try:
+            from autogen_agentchat.messages import TextMessage
+            from autogen_core import CancellationToken
+            result = await asyncio.wait_for(
+                agent.autogen_agent.on_messages(
+                    [TextMessage(content="请根据场景自然地行动、思考或说话。", source="world")],
+                    cancellation_token=CancellationToken(),
+                ),
+                timeout=30.0,
+            )
+            # 从 AutoGen Response 提取所有消息（兼容 v0.4/v0.7）
+            for msg in getattr(result, "inner_messages", []) or []:
+                content = str(getattr(msg, "content", ""))
+                if content:
+                    events.append({"type": "thought_stream", "content": content, "tick": tick})
+            # v0.7: messages 属性
+            for msg in getattr(result, "messages", []) or []:
+                content = str(getattr(msg, "content", ""))
+                if content:
+                    events.append({"type": "agent_message", "content": content, "tick": tick})
+            # 兜底: chat_message
+            chat = getattr(result, "chat_message", None)
+            if chat and getattr(chat, "content", ""):
+                events.append({"type": "agent_message", "content": str(chat.content), "tick": tick})
+            # 兜底: result 本身就有 content
+            content = getattr(result, "content", None)
+            if content and isinstance(content, str):
+                events.append({"type": "agent_message", "content": content, "tick": tick})
+        except asyncio.TimeoutError:
+            events.append({"type": "error", "content": "timeout", "tick": tick})
+        except Exception as exc:
+            events.append({"type": "error", "content": str(exc)[:100], "tick": tick})
+        elapsed = __import__("time").time() - start
+        if tick == 0:
+            logger.info(f"  tick {tick}: {len(events)} events in {elapsed:.1f}s")
+
+    scores = calculate_metrics(events, {"mbti": agent_tpl["mbti"], "big_five": agent_tpl["big_five"]})
+    # 强制输出——后台任务日志可能被缓冲
+    import sys
+    print(f"[BENCH] {agent_tpl['name']} x {scenario.name} #{rep}: {len(events)} events, scores={scores}", flush=True)
+    return scores

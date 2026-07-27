@@ -124,7 +124,12 @@ export const MENU_SECTIONS: MenuSection[] = [
   {
     title: "M9 Agent Team",
     route: "/team",
-    items: [],  // State 3 大模块，子能力在页面内部 Tab 切换
+    items: [],
+  },
+  {
+    title: "M10 LLM Bench",
+    route: "/bench",
+    items: [],
   },
 ];
 

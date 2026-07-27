@@ -32,6 +32,7 @@ const SECTION_ICONS: Record<string, React.ReactNode> = {
   "M7 干预台": <Wand2 size={16} />,
   "M8 档案馆": <Archive size={16} />,
   "M9 Agent Team": <Users size={16} />,
+  "M10 LLM Bench": <BarChart3 size={16} />,
 };
 
 export default function Sidebar() {

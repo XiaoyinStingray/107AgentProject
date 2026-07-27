@@ -26,8 +26,8 @@
 | **🏗️ Phase 15: LLM Bench** | | | | | | |
 | 56 | — | 开发 | Team 模板 | 55 | 本地保存/复用 Team 配置（#50 降级，Phase 14 收尾） | ✅ |
 | 57 | — | — | ~~API 开放~~ | — | 已砍——单机版无外部程序场景 | 🗑️ |
-| 58 | 15.1 | 开发 | 批量评测调度 + 指标 | 33, 35 | 标准化套件（3 Agent × 3 场景 × 3 重复=27条）+ 六维评分（一致性/决策/交互/鲁棒性/创造力/适应性）+ 聚合报告 | 6h |
-| 59 | 15.2 | 开发 | 六边形图 + 报告 | 58 | `/bench` 页面：LLM 配置 → 一键评测 → 六边形雷达图 + 分析报告 + 详细结果表 | 5h |
+| 58 | 15.1 | 开发 | 批量评测调度 + 指标 | 33, 35 | 标准化套件 27 条 + 六维评分 + 六边形图 + 报告（59 合并交付） | ✅ |
+| 59 | 15.2 | 开发 | 六边形图 + 报告 | — | 已合并到 Step 58 | ✅ |
 | 60 | 15.3 | 开发 | 对比与盲测 | 59 | 多次评测并排对比 + 身份脱敏 + 揭盲 + 差异可视化 | 4h |
 | 61 | 15.4 | 开发 | 排行榜与趋势 | 60 | 多维排序 + 长期追踪 + 退化检测 | 3h |
 | T3 | — | 测试 | Phase 15 集成 + E2E | 58–61 | Bench 全链路（配置→27条评测→六边形→报告） | 3h |
@@ -522,9 +522,11 @@ ESTJ 领导者（果断、务实）        毕业选择（道德困境）       
 
 ### Step 57 — ~~API 开放~~ 🗑️ 已砍
 
-### Step 58 — 批量评测调度 + 指标
+### Step 58 — 批量评测调度 + 指标 ✅
 
-> **目标：** 标准化套件一键运行 + 六维评分采集 + 聚合报告。
+> **实际产出（含 Step 59 合并）见 [done/step-58.md](done/step-58.md)。**
+
+<details><summary>原设计（点击展开）</summary>
 
 #### 设计
 
@@ -562,19 +564,11 @@ POST /api/bench/runs {api_key, base_url, model}
 - [ ] LLM 分析报告写入 BenchRun.report
 - [ ] 超时/失败 task 的 metric 有兜底值（0 分）
 
+</details>
+
 ### Step 59 — 六边形图 + 报告 UI
 
-> **目标：** `/bench` 页面——配置 LLM → 一键评测 → 六边形雷达图 + 报告。
-
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `frontend/src/types/bench.ts` | **新建** | BenchRun / BenchResult / HexagonScores 类型 |
-| `frontend/src/api/bench.ts` | **新建** | useBenchRuns / useCreateRun / useBenchReport |
-| `frontend/src/pages/BenchLab.tsx` | **新建** | `/bench` 页面：LLM 配置表单 + 进度条 + 六边形图 + 报告 |
-| `frontend/src/components/bench/HexagonChart.tsx` | **新建** | SVG 六边形雷达图组件 |
-| `frontend/src/App.tsx` | 修改 | +`/bench` 路由 |
-
-**验收标准：** ① 配置 LLM → 一键启动评测 ② 运行中显示进度条 ③ 完成后显示六边形雷达图 ④ 分析报告可读、可下载
+> **实际与 Step 58 合并交付。** 详见 [done/step-58.md](done/step-58.md)。
 
 ### Step 60 — 对比与盲测
 

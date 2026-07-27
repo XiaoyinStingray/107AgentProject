@@ -17,6 +17,7 @@ const ControlPanel = lazy(() => import("./pages/ControlPanel"));
 const DirectorIntervention = lazy(() => import("./pages/DirectorIntervention"));
 const Archive = lazy(() => import("./pages/Archive"));
 const TeamDashboard = lazy(() => import("./pages/TeamDashboard"));
+const BenchLab = lazy(() => import("./pages/BenchLab"));
 
 /** Suspense 占位——加载中显示 */
 function PageFallback() {
@@ -174,6 +175,16 @@ export default function App() {
             element={
               <Suspense fallback={<PageFallback />}>
                 <TeamDashboard />
+              </Suspense>
+            }
+          />
+
+          {/* M10 LLM Bench */}
+          <Route
+            path="bench"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <BenchLab />
               </Suspense>
             }
           />
