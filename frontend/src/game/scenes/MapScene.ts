@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { ITEM_FRAME } from "../tileset";
 import { AgentSprite, AgentSpriteData } from "../sprites/AgentSprite";
+import { getDialogue } from "../dialogue";
 
 /**
  * MapScene — Phaser 原生 tilemap 渲染。
@@ -56,6 +57,8 @@ export class MapScene extends Phaser.Scene {
   private agentSprites: Map<string, AgentSprite> = new Map();
   private pendingAgents: AgentSpriteData[] | null = null;
   private wallMap: number[][] = [];  // 墙壁占位 map，0=可通行
+  private dialogueCooldowns: Map<string, number> = new Map(); // "aId|bId" → lastDialogueTime
+  private dialogueTimer: Phaser.Time.TimerEvent | null = null;
   private ready = false;
 
   constructor() {
@@ -77,12 +80,15 @@ export class MapScene extends Phaser.Scene {
         targets: sprite, alpha: 0.5, duration: 120, yoyo: true, repeat: 2,
       });
     });
+    this.startDialogueScanner();
     if (this.mapData) this.buildScene();
     else this.loadMap("library");
   }
 
   shutdown(): void {
     this.game.events.off("agent-whisper");
+    this.dialogueTimer?.destroy();
+    this.dialogueCooldowns.clear();
     this.destroyScene();
   }
 
@@ -306,6 +312,7 @@ export class MapScene extends Phaser.Scene {
 
     data.forEach((d) => {
       const sprite = new AgentSprite(this, d);
+      sprite.setData("name", d.name); // for dialogue lookup
       this.agentSprites.set(d.agentId, sprite);
 
       // 交互区域 = 圆半径
@@ -377,6 +384,66 @@ export class MapScene extends Phaser.Scene {
         this.game.events.emit("agent-moved", d.agentId, tx, ty);
       });
     });
+  }
+
+  /* ================================================================
+   * Agent 对话引擎（Mock — 64c）
+   * ================================================================ */
+
+  private static readonly SCAN_INTERVAL = 4000;  // 扫描间隔 ms
+  private static readonly PROXIMITY = 2;         // 触发对话的 tile 距离
+  private static readonly COOLDOWN = 8000;       // 同对冷却 ms
+
+  private startDialogueScanner(): void {
+    this.dialogueTimer?.destroy();
+    this.dialogueTimer = this.time.addEvent({
+      delay: MapScene.SCAN_INTERVAL,
+      loop: true,
+      callback: () => this.scanAndDialogue(),
+    });
+  }
+
+  private scanAndDialogue(): void {
+    const agents = [...this.agentSprites.values()];
+    if (agents.length < 2) return;
+    const now = Date.now();
+
+    for (let i = 0; i < agents.length; i++) {
+      for (let j = i + 1; j < agents.length; j++) {
+        const a = agents[i];
+        const b = agents[j];
+        const dist = Math.abs(a.tileX - b.tileX) + Math.abs(a.tileY - b.tileY);
+        if (dist > MapScene.PROXIMITY) continue;
+
+        const pairKey = [a.agentId, b.agentId].sort().join("|");
+        const last = this.dialogueCooldowns.get(pairKey) ?? 0;
+        if (now - last < MapScene.COOLDOWN) continue;
+        this.dialogueCooldowns.set(pairKey, now);
+
+        // 随机选 speaker
+        const [speaker, listener] = Math.random() < 0.5 ? [a, b] : [b, a];
+        const line = getDialogue(
+          speaker.getData("name") ?? "",
+          listener.getData("name") ?? "",
+          this.mapData?.id ?? "library",
+        );
+
+        // speaker 说话
+        this.showAgentBubble(speaker.agentId, line);
+
+        // 对方 1.2s 后回复
+        const replyLine = getDialogue(
+          listener.getData("name") ?? "",
+          speaker.getData("name") ?? "",
+          this.mapData?.id ?? "library",
+        );
+        this.time.delayedCall(1200, () => {
+          this.showAgentBubble(listener.agentId, replyLine);
+        });
+
+        return; // 每次扫描只触发一对对话
+      }
+    }
   }
 
   /* ================================================================

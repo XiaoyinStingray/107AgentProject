@@ -103,3 +103,43 @@ async def remove_scene_agent(scene_id: str, agent_id: str):
         sceneId=scene_id,
         agents=[_to_schema(a) for a in result],
     )
+
+
+# ── 交互端点（Step 64c Mock → 66-S LLM）──
+
+class InteractRequest(BaseModel):
+    """Agent 间互动请求"""
+    from_agent: str = Field(alias="from")
+    to_agent: str = Field(alias="to")
+    scene: str
+    message: str = ""
+
+
+class InteractResponse(BaseModel):
+    from_agent: str
+    to_agent: str
+    message: str
+
+    class Config:
+        populate_by_name = True
+
+
+@router.post("/{scene_id}/interact", response_model=InteractResponse)
+async def scene_interact(scene_id: str, body: InteractRequest):
+    """
+    Agent 间互动端点（当前 Mock，66-S 切换 LLM）。
+    返回一句符合性格×场景的对话。
+    """
+    mock_replies = {
+        "library": "这里好安静…",
+        "dorm": "外卖什么时候到？",
+        "classroom": "这题你会吗？",
+        "art": "你也在创作吗？",
+        "lab": "数据跑完了吗？",
+        "sakura": "花好美啊…",
+    }
+    return InteractResponse(
+        from_agent=body.from_agent,
+        to_agent=body.to_agent,
+        message=mock_replies.get(body.scene, "嗯…"),
+    )
