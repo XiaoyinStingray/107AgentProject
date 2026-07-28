@@ -1,7 +1,8 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import GameCanvas from "../game/GameCanvas";
 import type { AgentSpriteData } from "../game/sprites/AgentSprite";
 import Card from "../components/shared/Card";
+import { useSyncSceneState } from "../api/scenes";
 
 /* —— 场景列表 —— */
 const SCENES = [
@@ -62,6 +63,17 @@ function saveScene(id: string): void {
 export default function GameScenePage() {
   const [mapId, setMapId] = useState<string>(() => loadScene());
   const [agents, setAgents] = useState<AgentSpriteData[]>(() => loadAgents(loadScene()));
+  const syncMutation = useSyncSceneState();
+  const mountedRef = useRef(false);
+
+  // 后台同步到后端 API（localStorage 仍为主存储）
+  useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      return;
+    }
+    syncMutation.mutate({ sceneId: mapId, agents });
+  }, [mapId, agents]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   /** 切换场景 → 加载该场景独立配置 */
   const handleSceneChange = useCallback((id: string) => {

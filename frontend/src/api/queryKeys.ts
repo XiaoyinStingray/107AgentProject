@@ -38,6 +38,10 @@ export const simulationKeys = {
   detail: (id: string) => ["simulations", id] as const,
 };
 
+export const sceneKeys = {
+  state: (sceneId: string) => ["scenes", sceneId, "state"] as const,
+};
+
 export const achievementKeys = {
   all: ["achievements"] as const,
 };

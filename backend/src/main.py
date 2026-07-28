@@ -23,6 +23,7 @@ from api.achievements import router as achievements_router
 from api.teams import router as teams_router
 from api.market import router as market_router
 from api.bench import router as bench_router
+from api.scenes import router as scenes_router
 from llm.errors import register_llm_error_middleware
 
 
@@ -67,6 +68,7 @@ app.include_router(achievements_router)
 app.include_router(teams_router)
 app.include_router(market_router)
 app.include_router(bench_router)
+app.include_router(scenes_router)
 
 
 @app.get("/health")
