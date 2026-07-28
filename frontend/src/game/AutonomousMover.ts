@@ -59,6 +59,7 @@ export class AutonomousMover {
     scene: Phaser.Scene,
     profile?: MovementProfile,
     private isWalkable: (tx: number, ty: number) => boolean = () => true,
+    private isOccupied: (tx: number, ty: number) => boolean = () => false,
     private mapBounds: { w: number; h: number } = { w: 12, h: 8 },
   ) {
     this.sprite = sprite;
@@ -142,6 +143,7 @@ export class AutonomousMover {
       if (tx < 0 || tx >= w || ty < 0 || ty >= h) continue;
       if (tx === ox && ty === oy) continue;
       if (!this.isWalkable(tx, ty)) continue;
+      if (this.isOccupied(tx, ty)) continue;
       return { tx, ty };
     }
     return null;

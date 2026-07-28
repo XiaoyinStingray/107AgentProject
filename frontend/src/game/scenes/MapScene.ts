@@ -323,6 +323,7 @@ export class MapScene extends Phaser.Scene {
         this,
         undefined,
         (tx, ty) => this.isWalkable(tx, ty),
+        (tx, ty) => this.isOccupiedByOther(d.agentId, tx, ty),
         { w: this.mapData?.width ?? 12, h: this.mapData?.height ?? 8 },
       );
       mover.start();
