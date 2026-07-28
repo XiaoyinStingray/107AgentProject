@@ -78,14 +78,14 @@ export default function AgentPanel({ agent, onClose, onEmotionChange, onWhisper 
       {/* 耳语输入 */}
       {onWhisper && (
         <div className="px-4 py-2 border-t border-border">
-          <p className="text-[10px] font-mono text-text-secondary mb-1.5">耳语</p>
+          <p className="text-[10px] font-mono text-text-secondary mb-1.5">对 {agent.name} 耳语</p>
           <div className="flex gap-1.5">
             <input
               type="text"
               value={whisper}
               onChange={(e) => setWhisper(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") handleWhisperSubmit(); }}
-              placeholder="说点什么…"
+              placeholder="悄悄告诉TA…"
               className="flex-1 bg-bg-primary border border-border rounded px-2 py-1 text-[11px] font-mono text-text-primary placeholder-text-secondary/40 focus:outline-none focus:border-accent-orange/50"
             />
             <button

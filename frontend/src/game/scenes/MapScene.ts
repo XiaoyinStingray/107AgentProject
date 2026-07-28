@@ -69,9 +69,13 @@ export class MapScene extends Phaser.Scene {
   create(): void {
     this.input.dragDistanceThreshold = 8; // 防止点击时误触发拖拽
     this.ready = true;
-    // 监听来自 React 的耳语事件
-    this.game.events.on("agent-whisper", (agentId: string, message: string) => {
-      this.showAgentBubble(agentId, message);
+    // 监听来自 React 的耳语事件 → Agent 短暂闪烁
+    this.game.events.on("agent-whisper", (agentId: string) => {
+      const sprite = this.agentSprites.get(agentId);
+      if (!sprite) return;
+      this.tweens.add({
+        targets: sprite, alpha: 0.5, duration: 120, yoyo: true, repeat: 2,
+      });
     });
     if (this.mapData) this.buildScene();
     else this.loadMap("library");
