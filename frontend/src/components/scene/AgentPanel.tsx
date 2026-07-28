@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import type { AgentSpriteData, Emotion } from "../../game/sprites/AgentSprite";
 
 interface Props {
@@ -15,6 +15,28 @@ const EMOTION_LABELS: Record<Emotion, string> = {
 
 export default function AgentPanel({ agent, onClose, onEmotionChange, onWhisper }: Props) {
   const [whisper, setWhisper] = useState("");
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const dragRef = useRef({ dragging: false, sx: 0, sy: 0, px: 0, py: 0 });
+
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    dragRef.current = { dragging: true, sx: e.clientX, sy: e.clientY, px: pos.x, py: pos.y };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  }, [pos]);
+
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!dragRef.current.dragging) return;
+    setPos({
+      x: dragRef.current.px + e.clientX - dragRef.current.sx,
+      y: dragRef.current.py + e.clientY - dragRef.current.sy,
+    });
+  }, []);
+
+  const onPointerUp = useCallback(() => {
+    dragRef.current.dragging = false;
+  }, []);
+
+  // 切换 agent 时重置位置
+  useEffect(() => { setPos({ x: 0, y: 0 }); }, [agent?.agentId]);
 
   if (!agent) return null;
 
@@ -26,9 +48,17 @@ export default function AgentPanel({ agent, onClose, onEmotionChange, onWhisper 
   };
 
   return (
-    <div className="fixed right-4 top-24 w-64 bg-bg-secondary border border-border rounded-lg shadow-lg z-50 animate-slide-in">
-      {/* 头部 */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+    <div
+      className="fixed w-64 bg-bg-secondary border border-border rounded-lg shadow-lg z-50 animate-slide-in select-none"
+      style={{ right: 16 - pos.x, top: 96 + pos.y }}
+    >
+      {/* 头部（拖拽把手） */}
+      <div
+        className="flex items-center justify-between px-4 py-3 border-b border-border cursor-grab active:cursor-grabbing"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+      >
         <div className="flex items-center gap-2">
           <span className="inline-block w-4 h-4 rounded-full" style={{ backgroundColor: agent.color }} />
           <span className="text-sm font-mono text-text-primary">{agent.name}</span>
