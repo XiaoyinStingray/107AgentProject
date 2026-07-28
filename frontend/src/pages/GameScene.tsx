@@ -229,8 +229,11 @@ export default function GameScenePage() {
     ms?.broadcastGodVoice(message);
   }, []);
 
-  /** 导演: 全员氛围 */
+  const moodAllTimer = useRef(0);
+  /** 导演: 全员氛围（1s 冷却防粒子风暴） */
   const handleMoodAll = useCallback((emotion: string) => {
+    if (Date.now() - moodAllTimer.current < 1000) return;
+    moodAllTimer.current = Date.now();
     setAgents((prev) => {
       const next = prev.map((a) => ({ ...a, emotion: emotion as Emotion }));
       saveAgents(mapId, next);

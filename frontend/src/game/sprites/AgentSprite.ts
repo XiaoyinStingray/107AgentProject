@@ -208,7 +208,7 @@ export class AgentSprite extends Phaser.GameObjects.Container {
     this.startEmotionPopup();
     // 粒子爆发（非 neutral）
     if (emotion !== "neutral" && this.scene) {
-      emoteBurst(this.scene, this.x, this.y, emotion);
+      emoteBurst(this.scene, this.x, this.y, emotion, this.agentId);
     }
   }
 

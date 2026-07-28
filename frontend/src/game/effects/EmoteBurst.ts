@@ -16,9 +16,15 @@ const COLORS: Record<string, number> = {
   excited: 0xFF88CC,
 };
 
-export function emoteBurst(scene: Phaser.Scene, x: number, y: number, emotion: string): void {
+const lastBurst: Record<string, number> = {};
+
+export function emoteBurst(scene: Phaser.Scene, x: number, y: number, emotion: string, agentId?: string): void {
   const color = COLORS[emotion];
   if (color === undefined) return;
+  // 同 Agent 1s 内不重复爆发
+  const key = agentId ?? "global";
+  if (Date.now() - (lastBurst[key] ?? 0) < 1000) return;
+  lastBurst[key] = Date.now();
 
   const count = emotion === "angry" || emotion === "excited" ? 14 : 8;
   const particles: Phaser.GameObjects.Arc[] = [];
