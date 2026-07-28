@@ -299,6 +299,13 @@ export class MapScene extends Phaser.Scene {
 
   getWeather(): string { return this.mapData?.weather ?? "clear"; }
 
+  /** 全员氛围 — 直接改现存精灵，不重建 */
+  setAllEmotions(emotion: string): void {
+    this.agentSprites.forEach((s) => {
+      if (s.emotion !== emotion) s.setEmotion(emotion as any);
+    });
+  }
+
   broadcastGodVoice(message: string): void {
     this.agentSprites.forEach((sprite) => {
       import("../sprites/ActionBubble").then(({ ActionBubble }) => {

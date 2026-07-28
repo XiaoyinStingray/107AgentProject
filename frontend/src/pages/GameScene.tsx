@@ -229,11 +229,11 @@ export default function GameScenePage() {
     ms?.broadcastGodVoice(message);
   }, []);
 
-  const moodAllTimer = useRef(0);
-  /** 导演: 全员氛围（1s 冷却防粒子风暴） */
+  /** 导演: 全员氛围 — 直改 sprite 避免重建 */
   const handleMoodAll = useCallback((emotion: string) => {
-    if (Date.now() - moodAllTimer.current < 1000) return;
-    moodAllTimer.current = Date.now();
+    const ms = gameRef.current?.scene.getScene("MapScene") as any;
+    ms?.setAllEmotions(emotion);
+    // 同步 React state（低频，仅用于持久化）
     setAgents((prev) => {
       const next = prev.map((a) => ({ ...a, emotion: emotion as Emotion }));
       saveAgents(mapId, next);
@@ -297,14 +297,13 @@ export default function GameScenePage() {
   );
 
   return (
-    <div className="h-full overflow-y-auto p-6 animate-fade-in">
-      <h1 className="text-2xl font-mono text-accent-orange mb-1">M11 游戏化场景</h1>
-      <p className="text-sm text-text-secondary font-mono mb-4">
-        Phaser 3 · tilemap · Agent 精灵投放 · 六场景
-      </p>
+    <div className="h-full flex animate-fade-in">
+      {/* ── 左侧控制栏 ── */}
+      <div className="w-72 shrink-0 overflow-y-auto p-4 space-y-3 border-r border-border">
+        <h1 className="text-lg font-mono text-accent-orange">M11 游戏化场景</h1>
 
-      {/* 场景选择器 */}
-      <Card className="mb-4 p-3">
+        {/* 场景选择器 */}
+        <Card className="p-3">
         <div className="flex flex-wrap gap-2 items-center">
           <span className="text-xs font-mono text-text-secondary mr-2">场景：</span>
           {SCENES.map((s) => (
@@ -324,16 +323,21 @@ export default function GameScenePage() {
         </div>
       </Card>
 
-      {/* Phaser Canvas */}
-      <GameCanvas
-        mapId={mapId}
-        agents={agents}
-        onAgentClick={handleAgentClick}
-        onAgentMove={handleAgentMove}
-        onAgentDoubleClick={handleAgentDoubleClick}
-        onGameReady={(g) => { gameRef.current = g; }}
-      />
+      </div>
 
+      {/* ── 右侧画布区 ── */}
+      <div className="flex-1 flex items-center justify-center p-4">
+        <GameCanvas
+          mapId={mapId}
+          agents={agents}
+          onAgentClick={handleAgentClick}
+          onAgentMove={handleAgentMove}
+          onAgentDoubleClick={handleAgentDoubleClick}
+          onGameReady={(g) => { gameRef.current = g; }}
+        />
+      </div>
+
+      {/* ── 浮动面板（独立于布局）── */}
       {/* Agent 详情面板 */}
       <AgentPanel
         agent={selectedAgent}
@@ -387,7 +391,7 @@ export default function GameScenePage() {
       </Card>
 
       {/* 导演面板 (Step 66) */}
-      <Card className="mt-4 p-3">
+      <Card className="p-3">
         <p className="text-xs font-mono text-text-secondary mb-2">导演模式</p>
         <DirectorPanel
           weather={weather}
@@ -399,7 +403,7 @@ export default function GameScenePage() {
       </Card>
 
       {/* 存档面板 */}
-      <Card className="mt-4 p-3">
+      <Card className="p-3">
         <p className="text-xs font-mono text-text-secondary mb-2">存档管理</p>
         <CheckpointPanel
           checkpoints={checkpoints}
@@ -449,9 +453,6 @@ export default function GameScenePage() {
         </Card>
       )}
 
-      <p className="text-[10px] text-text-secondary/40 font-mono text-center mt-3">
-        Agent 精灵 72px · 2x 高清贴图 · zero external assets
-      </p>
     </div>
   );
 }
