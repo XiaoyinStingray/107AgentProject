@@ -229,17 +229,14 @@ export default function GameScenePage() {
     ms?.broadcastGodVoice(message);
   }, []);
 
-  /** 导演: 全员氛围 — 直改 sprite 避免重建 */
+  /** 导演: 全员氛围 — 直改 sprite + localStorage，不触发 setAgents */
   const handleMoodAll = useCallback((emotion: string) => {
     const ms = gameRef.current?.scene.getScene("MapScene") as any;
     ms?.setAllEmotions(emotion);
-    // 同步 React state（低频，仅用于持久化）
-    setAgents((prev) => {
-      const next = prev.map((a) => ({ ...a, emotion: emotion as Emotion }));
-      saveAgents(mapId, next);
-      return next;
-    });
-  }, [mapId]);
+    // 仅持久化，不触发 React 重渲染
+    const updated = agents.map((a) => ({ ...a, emotion: emotion as Emotion }));
+    saveAgents(mapId, updated);
+  }, [mapId, agents]);
 
   /** 删除存档 */
   const handleDeleteCheckpoint = useCallback(
@@ -304,8 +301,8 @@ export default function GameScenePage() {
 
         {/* 场景选择器 */}
         <Card className="p-3">
-        <div className="flex flex-wrap gap-2 items-center">
-          <span className="text-xs font-mono text-text-secondary mr-2">场景：</span>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-mono text-text-secondary">场景</span>
           {SCENES.map((s) => (
             <button
               key={s.id}
