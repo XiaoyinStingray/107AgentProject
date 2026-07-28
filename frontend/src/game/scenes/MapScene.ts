@@ -55,6 +55,7 @@ export class MapScene extends Phaser.Scene {
   private weatherTweens: Phaser.Tweens.Tween[] = [];
   private agentSprites: Map<string, AgentSprite> = new Map();
   private pendingAgents: AgentSpriteData[] | null = null;
+  private wallMap: number[][] = [];  // 墙壁占位 map，0=可通行
   private ready = false;
 
   constructor() {
@@ -148,13 +149,13 @@ export class MapScene extends Phaser.Scene {
     const H = d.height;
     const data: number[][] = [];
 
-    // 计算墙壁位置
-    const wallMap = this.computeWallMap(d);
+    // 计算墙壁位置（存下来给拖拽判定用）
+    this.wallMap = this.computeWallMap(d);
 
     for (let r = 0; r < H; r++) {
       data[r] = [];
       for (let c = 0; c < W; c++) {
-        const w = wallMap[r][c];
+        const w = this.wallMap[r][c];
         if (w >= 0) {
           data[r][c] = WALL_OFFSET + w; // 6-9
         } else {
@@ -330,19 +331,58 @@ export class MapScene extends Phaser.Scene {
         sprite.y = Math.max(TILE_S / 2, Math.min(dragY, MH - TILE_S / 2));
       });
 
-      // 拖拽结束 → 吸附到最近 tile + 通知 React
+      // 拖拽结束 → 吸附到最近可通行 tile + 通知 React
       sprite.on("dragend", () => {
-        const tx = Math.round(sprite.x / TILE_S);
-        const ty = Math.round(sprite.y / TILE_S);
-        // 限定在场景范围内
         const W = this.mapData?.width ?? 12;
         const H = this.mapData?.height ?? 8;
-        const cx = Math.max(0, Math.min(tx, W - 1));
-        const cy = Math.max(0, Math.min(ty, H - 1));
-        sprite.setTile(cx, cy);
-        this.game.events.emit("agent-moved", d.agentId, cx, cy);
+        let tx = Math.round(sprite.x / TILE_S);
+        let ty = Math.round(sprite.y / TILE_S);
+        tx = Math.max(0, Math.min(tx, W - 1));
+        ty = Math.max(0, Math.min(ty, H - 1));
+        if (!this.isWalkable(tx, ty)) {
+          [tx, ty] = this.nearestWalkable(tx, ty, W, H);
+        }
+        sprite.setTile(tx, ty);
+        this.game.events.emit("agent-moved", d.agentId, tx, ty);
       });
     });
+  }
+
+  /* ================================================================
+   * 可通行判定
+   * ================================================================ */
+
+  /** 某 tile 是否可放置 Agent（非墙壁/非门） */
+  private isWalkable(tx: number, ty: number): boolean {
+    if (!this.wallMap.length) return true; // 无墙壁数据（室外场景）
+    const row = this.wallMap[ty];
+    if (!row) return true;
+    return row[tx] < 0; // -1 = 无墙壁
+  }
+
+  /** 从不可通行的 (tx,ty) 向外搜索最近的可通行 tile */
+  private nearestWalkable(tx: number, ty: number, W: number, H: number): [number, number] {
+    for (let d = 1; d < Math.max(W, H); d++) {
+      for (let dx = -d; dx <= d; dx++) {
+        for (const dy of [-d, d]) {
+          const nx = tx + dx;
+          const ny = ty + dy;
+          if (nx >= 0 && nx < W && ny >= 0 && ny < H && this.isWalkable(nx, ny)) {
+            return [nx, ny];
+          }
+        }
+      }
+      for (let dy = -d + 1; dy <= d - 1; dy++) {
+        for (const dx of [-d, d]) {
+          const nx = tx + dx;
+          const ny = ty + dy;
+          if (nx >= 0 && nx < W && ny >= 0 && ny < H && this.isWalkable(nx, ny)) {
+            return [nx, ny];
+          }
+        }
+      }
+    }
+    return [tx, ty]; // fallback
   }
 
   /* ================================================================
