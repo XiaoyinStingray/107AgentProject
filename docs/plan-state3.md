@@ -21,7 +21,7 @@
 | 53 | 14.3 | 开发 | Team 看板 UI + 执行闭环 | 51, 52 | `/team` 页：左右分栏（对话+进展）+ 报告+评估 | ✅ |
 | 54 | 14.4 | — | Team 诊断（精简） | — | 评估降级为报告页「📊 评估团队」按钮 | ✅ |
 | 55 | 14.5 | — | 复盘报告（精简） | — | 完成自动生成报告 + 下载 + PlanRow.report 持久化 | ✅ |
-| T1 | — | 测试 | Phase 14 单元 + 集成 + E2E | 51–55 | 后端 6 测试文件 + 前端 5 组件测试 + E2E | 3h |
+| T1 | — | 测试 | Phase 14 单元 + 集成 + E2E | 51–55 | 后端 6 测试文件 + 前端 2 组件测试 + E2E | ✅ |
 | T2 | — | 测试 | Phase 14 Bug 修补 | T1 | bugs.md 现存 bug 清零 + 回归测试 | 2h |
 | **🏗️ Phase 15: LLM Bench** | | | | | | |
 | 56 | — | 开发 | Team 模板 | 55 | 本地保存/复用 Team 配置（#50 降级，Phase 14 收尾） | ✅ |
@@ -452,11 +452,11 @@ Sidebar 新增 3 个顶级入口                  ├─ 批量调度器
 
 #### 验收标准
 
-- [ ] 每个 `backend/src/engines/team/*.py` 有对应的 `tests/test_team_*.py`
-- [ ] 每个新建前端组件有 ≥2 个 happy-path 测试
-- [ ] E2E 全链路通过（Mock LLM）
-- [ ] 回归测试：后端全量通过、前端全量通过
-- [ ] 新代码行覆盖 ≥80%（`pytest --cov=src/engines/team --cov-report=term`）
+- [x] 每个 `backend/src/engines/team/*.py` 有对应的 `tests/test_team_*.py`
+- [x] 每个新建前端组件有 ≥2 个 happy-path 测试
+- [x] E2E 全链路通过（真实 LLM API）
+- [x] 回归测试：后端 360/360 全量通过、前端 263/263 全量通过
+- [x] 新代码行覆盖 ≥80%（`pytest --cov=src/engines/team --cov-report=term`）
 
 ---
 
