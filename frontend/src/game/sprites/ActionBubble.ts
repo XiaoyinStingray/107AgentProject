@@ -57,8 +57,8 @@ export class ActionBubble extends Phaser.GameObjects.Container {
     this.x = parent.x;
     this.y = parent.y + ActionBubble.OFFSET_Y;
 
-    // 如果还没加入场景，先加入
-    if (!this.scene) {
+    // 加入场景显示列表（Phaser Container 构造时已设 this.scene，但未自动加入显示树）
+    if (!this.parentContainer) {
       parent.scene.add.existing(this);
     }
 
