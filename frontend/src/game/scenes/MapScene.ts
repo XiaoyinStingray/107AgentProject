@@ -299,11 +299,50 @@ export class MapScene extends Phaser.Scene {
 
   getWeather(): string { return this.mapData?.weather ?? "clear"; }
 
-  /** 全员氛围 — 直接改现存精灵，不重建 */
+  private _lastMoodAll = 0;
+  /** 全员氛围 — 直改 sprite + 500ms 防抖 */
   setAllEmotions(emotion: string): void {
-    this.agentSprites.forEach((s) => {
-      if (s.emotion !== emotion) s.setEmotion(emotion as any);
-    });
+    if (Date.now() - this._lastMoodAll < 500) return;
+    this._lastMoodAll = Date.now();
+    this.agentSprites.forEach((s) => s.setEmotion(emotion as any));
+  }
+
+  /**
+   * 增量更新 Agent 精灵（不销毁未变化的 sprite）。
+   * 与 placeAgents（全量重建）互补——placeAgents 用于初始化/场景切换，
+   * 此方法用于 React state 同步时避免重建卡顿。
+   */
+  syncAgentsInPlace(data: AgentSpriteData[]): void {
+    const incoming = new Map(data.map((d) => [d.agentId, d]));
+    // 移除不在新数据中的 sprite
+    for (const [id, sprite] of this.agentSprites) {
+      if (!incoming.has(id)) {
+        sprite.destroy();
+        this.agentSprites.delete(id);
+        this.movers.get(id)?.destroy();
+        this.movers.delete(id);
+      }
+    }
+    // 更新/新增
+    for (const d of data) {
+      const existing = this.agentSprites.get(d.agentId);
+      if (existing) {
+        // sprite 位置是实时真值，不从 React state 覆写
+        if (existing.emotion !== d.emotion) existing.setEmotion(d.emotion as any);
+        if (existing.action !== d.action) existing.setAction(d.action as any);
+      } else {
+        const sprite = new AgentSprite(this, d);
+        sprite.setData("name", d.name);
+        this.agentSprites.set(d.agentId, sprite);
+        const mover = new AutonomousMover(sprite, this, undefined,
+          (tx, ty) => this.isWalkable(tx, ty),
+          (tx, ty) => this.isOccupiedByOther(d.agentId, tx, ty),
+          { w: this.mapData?.width ?? 12, h: this.mapData?.height ?? 8 },
+        );
+        if (!this.paused) mover.start();
+        this.movers.set(d.agentId, mover);
+      }
+    }
   }
 
   broadcastGodVoice(message: string): void {
@@ -347,7 +386,12 @@ export class MapScene extends Phaser.Scene {
   setAgents(data: AgentSpriteData[]): void {
     this.pendingAgents = data;
     if (this.ready && this.groundLayer) {
-      this.placeAgents(data);
+      // 已有精灵 → 增量更新；首次 → 全量创建
+      if (this.agentSprites.size > 0) {
+        this.syncAgentsInPlace(data);
+      } else {
+        this.placeAgents(data);
+      }
     }
   }
 

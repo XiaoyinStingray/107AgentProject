@@ -123,6 +123,7 @@ export class AutonomousMover {
         this.sprite.tileX = target.tx;
         this.sprite.tileY = target.ty;
         this.sprite.setAction("idle");
+        this.scene.game.events.emit("agent-moved", this.sprite.agentId, target.tx, target.ty);
       },
     });
   }

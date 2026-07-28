@@ -229,14 +229,16 @@ export default function GameScenePage() {
     ms?.broadcastGodVoice(message);
   }, []);
 
-  /** 导演: 全员氛围 — 直改 sprite + localStorage，不触发 setAgents */
+  /** 导演: 全员氛围 — 直改 sprite + 同步 React（增量更新不卡） */
   const handleMoodAll = useCallback((emotion: string) => {
     const ms = gameRef.current?.scene.getScene("MapScene") as any;
     ms?.setAllEmotions(emotion);
-    // 仅持久化，不触发 React 重渲染
-    const updated = agents.map((a) => ({ ...a, emotion: emotion as Emotion }));
-    saveAgents(mapId, updated);
-  }, [mapId, agents]);
+    setAgents((prev) => {
+      const next = prev.map((a) => ({ ...a, emotion: emotion as Emotion }));
+      saveAgents(mapId, next);
+      return next;
+    });
+  }, [mapId]);
 
   /** 删除存档 */
   const handleDeleteCheckpoint = useCallback(

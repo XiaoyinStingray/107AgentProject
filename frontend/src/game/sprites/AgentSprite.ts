@@ -204,10 +204,10 @@ export class AgentSprite extends Phaser.GameObjects.Container {
    * 情绪 → 表情参数
    * ================================================================ */
   setEmotion(emotion: Emotion): void {
+    if (this.emotion === emotion) return; // 去重
     this.emotion = emotion;
     this.applyEmotion(emotion);
     this.startEmotionPopup();
-    // 粒子爆发（非 neutral）
     if (emotion !== "neutral" && this.scene) {
       emoteBurst(this.scene, this.x, this.y, emotion, this.agentId);
     }
@@ -236,7 +236,10 @@ export class AgentSprite extends Phaser.GameObjects.Container {
   /* ================================================================
    * 情绪 emoji 弹窗
    * ================================================================ */
+  private _popupEmotion = "";
   private startEmotionPopup(): void {
+    if (this.emotion === this._popupEmotion) return;
+    this._popupEmotion = this.emotion;
     this.popupTimer?.destroy();
     if (!this.emotionPopup) return;
     const emoji = EMOTION_EMOJI[this.emotion];
