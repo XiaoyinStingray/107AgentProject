@@ -1,8 +1,8 @@
 import Phaser from "phaser";
+import { AVATAR_FRAME } from "../avatars";
 
 /**
  * Agent 精灵数据（从 React → Phaser 的单向流）。
- * tileX/tileY 使用 Step 62 统一 32px 坐标系统。
  */
 export interface AgentSpriteData {
   agentId: string;
@@ -17,7 +17,7 @@ export interface AgentSpriteData {
 
 /* —— 常量 —— */
 const TILE = 64;
-const CIRCLE_R = 36; // 精灵圆半径
+const CIRCLE_R = 36;
 const EMOTION_COLORS: Record<string, number> = {
   neutral: 0xCCCCCC,
   happy: 0x66CC66,
@@ -26,17 +26,20 @@ const EMOTION_COLORS: Record<string, number> = {
   sad: 0x8899BB,
 };
 
+/** 情绪 → 弹窗 emoji */
+const EMOTION_EMOJI: Record<string, string> = {
+  neutral: "",
+  happy: "😊",
+  anxious: "😰",
+  angry: "😡",
+  sad: "😢",
+};
+
 /**
  * Agent 精灵 — Phaser Container 封装。
  *
  * 视觉层级（从底到顶）：
- *   阴影椭圆 → 个性色圆 → emoji 文字 → 情绪光环 → 名字标签
- *
- * 动作效果：
- *   idle  — 微呼吸 scale (1.0 ↔ 1.04)
- *   walk  — 正常大小（移动 tween 由 MapScene 驱动）
- *   sit   — scale 0.78 + 向下偏移 4px
- *   talk  — 无自身变化（气泡由 ActionBubble 负责）
+ *   阴影椭圆 → 自制头像 → 情绪光环 → 情绪 emoji 弹窗 → 名字标签
  */
 export class AgentSprite extends Phaser.GameObjects.Container {
   public agentId: string;
@@ -45,13 +48,14 @@ export class AgentSprite extends Phaser.GameObjects.Container {
   public action: AgentSpriteData["action"];
   public emotion: AgentSpriteData["emotion"];
 
-  private circle: Phaser.GameObjects.Arc;
-  private emojiText: Phaser.GameObjects.Text;
+  private avatar: Phaser.GameObjects.Image | null = null;
   private nameText: Phaser.GameObjects.Text;
   private emotionRing: Phaser.GameObjects.Arc;
+  private emotionPopup: Phaser.GameObjects.Text | null = null;
   private shadow: Phaser.GameObjects.Ellipse;
   private colorHex: string;
   private breathTween: Phaser.Tweens.Tween | null = null;
+  private popupTimer: Phaser.Time.TimerEvent | null = null;
 
   constructor(scene: Phaser.Scene, data: AgentSpriteData) {
     const px = data.tileX * TILE + TILE / 2;
@@ -69,23 +73,25 @@ export class AgentSprite extends Phaser.GameObjects.Container {
     this.shadow = scene.add.ellipse(0, CIRCLE_R - 8, CIRCLE_R * 2, 18, 0x000000, 0.22);
     this.add(this.shadow);
 
-    // 主体圆
-    this.circle = scene.add.circle(0, 0, CIRCLE_R, Phaser.Display.Color.HexStringToColor(data.color).color);
-    this.circle.setStrokeStyle(3, 0xffffff, 0.3);
-    this.add(this.circle);
+    // 自制头像纹理（替代 emoji）
+    const frame = AVATAR_FRAME[data.agentId] ?? 0;
+    if (scene.textures.exists("avatars")) {
+      this.avatar = scene.add.image(0, 0, "avatars", frame).setDisplaySize(CIRCLE_R * 2, CIRCLE_R * 2);
+      this.add(this.avatar);
+    }
 
-    // 情绪光环（外圈，初始透明）
+    // 情绪光环（外圈）
     this.emotionRing = scene.add.circle(0, 0, CIRCLE_R + 5);
     this.emotionRing.setStrokeStyle(3, EMOTION_COLORS.neutral, 0);
     this.emotionRing.setFillStyle(0xffffff, 0);
     this.add(this.emotionRing);
 
-    // emoji
-    this.emojiText = scene.add.text(0, 2, data.emoji, {
-      fontSize: "28px",
+    // 情绪 emoji 弹窗（初始隐藏）
+    this.emotionPopup = scene.add.text(CIRCLE_R - 8, -CIRCLE_R + 6, "", {
+      fontSize: "20px",
       fontFamily: "sans-serif",
-    }).setOrigin(0.5);
-    this.add(this.emojiText);
+    }).setOrigin(0.5).setAlpha(0).setScale(0);
+    this.add(this.emotionPopup);
 
     // 名字
     this.nameText = scene.add.text(0, CIRCLE_R + 10, data.name, {
@@ -97,19 +103,19 @@ export class AgentSprite extends Phaser.GameObjects.Container {
     }).setOrigin(0.5, 0);
     this.add(this.nameText);
 
-    // 初始动作
+    // 初始动作 + 情绪
     this.applyAction(data.action);
     this.applyEmotion(data.emotion);
+    this.startEmotionPopup();
 
     scene.add.existing(this);
-    this.setDepth(15); // 高于物品层 (2) 和天气层 (10)
+    this.setDepth(15);
   }
 
   /* ================================================================
    * 位置
    * ================================================================ */
 
-  /** 设置 tile 坐标（不带动画），立即更新像素位置 */
   setTile(tx: number, ty: number): void {
     this.tileX = tx;
     this.tileY = ty;
@@ -117,7 +123,6 @@ export class AgentSprite extends Phaser.GameObjects.Container {
     this.y = ty * TILE + TILE / 2;
   }
 
-  /** 带动画的 tile 移动 */
   moveToTile(tx: number, ty: number, duration = 300): Promise<void> {
     return new Promise((resolve) => {
       this.tileX = tx;
@@ -143,7 +148,6 @@ export class AgentSprite extends Phaser.GameObjects.Container {
   }
 
   private applyAction(action: AgentSpriteData["action"]): void {
-    // 停止呼吸
     this.breathTween?.stop();
     this.breathTween = null;
 
@@ -151,17 +155,17 @@ export class AgentSprite extends Phaser.GameObjects.Container {
       case "idle":
         this.setScale(1);
         this.setAlpha(1);
-        this.emojiText.setY(1);
+        this.nameText.setVisible(true);
         this.startBreath();
         break;
       case "walk":
         this.setScale(1);
         this.setAlpha(1);
-        this.emojiText.setY(1);
-        // walk 时轻微上下弹跳
+        this.nameText.setVisible(true);
+        // walk 时轻微弹跳
         this.breathTween = this.scene.tweens.add({
-          targets: this.emojiText,
-          y: -1,
+          targets: this,
+          scaleY: 0.96,
           duration: 150,
           yoyo: true,
           repeat: -1,
@@ -171,18 +175,17 @@ export class AgentSprite extends Phaser.GameObjects.Container {
       case "sit":
         this.setScale(0.78);
         this.y += 8;
-        this.emojiText.setY(0);
+        this.nameText.setVisible(true);
         break;
       case "talk":
         this.setScale(1);
         this.setAlpha(1);
-        this.emojiText.setY(1);
+        this.nameText.setVisible(true);
         this.startBreath();
         break;
     }
   }
 
-  /** idle 呼吸动画 */
   private startBreath(): void {
     this.breathTween = this.scene.tweens.add({
       targets: this,
@@ -202,14 +205,14 @@ export class AgentSprite extends Phaser.GameObjects.Container {
   setEmotion(emotion: AgentSpriteData["emotion"]): void {
     this.emotion = emotion;
     this.applyEmotion(emotion);
+    this.startEmotionPopup();
   }
 
   private applyEmotion(emotion: AgentSpriteData["emotion"]): void {
     const color = EMOTION_COLORS[emotion] ?? EMOTION_COLORS.neutral;
     const alpha = emotion === "neutral" ? 0 : 0.7;
-    this.emotionRing.setStrokeStyle(2, color, alpha);
+    this.emotionRing.setStrokeStyle(3, color, alpha);
 
-    // 强烈情绪时脉冲光环
     if (emotion === "angry" || emotion === "happy") {
       this.scene.tweens.add({
         targets: this.emotionRing,
@@ -224,11 +227,57 @@ export class AgentSprite extends Phaser.GameObjects.Container {
   }
 
   /* ================================================================
+   * 情绪 emoji 弹窗
+   * ================================================================ */
+
+  private startEmotionPopup(): void {
+    this.popupTimer?.destroy();
+    if (!this.emotionPopup) return;
+
+    const emoji = EMOTION_EMOJI[this.emotion];
+    if (!emoji) {
+      this.emotionPopup.setAlpha(0).setScale(0);
+      return;
+    }
+
+    this.emotionPopup.setText(emoji);
+
+    const show = () => {
+      if (!this.emotionPopup || !this.scene) return;
+      this.emotionPopup.setAlpha(1).setScale(0.3);
+      this.scene.tweens.add({
+        targets: this.emotionPopup,
+        scaleX: 1.2,
+        scaleY: 1.2,
+        duration: 300,
+        ease: "Back.easeOut",
+        onComplete: () => {
+          this.scene.tweens.add({
+            targets: this.emotionPopup,
+            alpha: 0,
+            duration: 800,
+            delay: 600,
+          });
+        },
+      });
+    };
+
+    // 立即弹一次，然后每 5-8 秒循环
+    show();
+    this.popupTimer = this.scene.time.addEvent({
+      delay: 5000 + Math.random() * 3000,
+      loop: true,
+      callback: show,
+    });
+  }
+
+  /* ================================================================
    * 清理
    * ================================================================ */
 
   destroy(fromScene?: boolean): void {
     this.breathTween?.stop();
+    this.popupTimer?.destroy();
     super.destroy(fromScene);
   }
 }

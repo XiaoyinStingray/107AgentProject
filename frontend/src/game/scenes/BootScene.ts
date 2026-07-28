@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { generateAllTextures } from "../tileset";
+import { generateAvatarTexture } from "../avatars";
 
 /**
  * BootScene — 生成所有程序化贴图 → 跳转 MapScene。
@@ -11,7 +12,10 @@ export class BootScene extends Phaser.Scene {
   }
 
   async create(): Promise<void> {
-    await generateAllTextures(this);
+    await Promise.all([
+      generateAllTextures(this),
+      generateAvatarTexture(this),
+    ]);
     this.scene.start("MapScene", { mapId: "library" });
   }
 }
