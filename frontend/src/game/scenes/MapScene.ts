@@ -61,7 +61,6 @@ export class MapScene extends Phaser.Scene {
   private dialogueCooldowns: Map<string, number> = new Map();
   private dialogueTimer: Phaser.Time.TimerEvent | null = null;
   private movers: Map<string, AutonomousMover> = new Map();
-  private _loadingMap = false;
   private ready = false;
 
   constructor() {
@@ -84,8 +83,14 @@ export class MapScene extends Phaser.Scene {
       });
     });
     this.startDialogueScanner();
-    if (this.mapData) this.buildScene();
-    else this.loadMap("library");
+    if (this.mapData) {
+      this.buildScene();
+    } else {
+      // 由 React mapId effect 负责首次加载；延迟 200ms 兜底
+      this.time.delayedCall(200, () => {
+        if (!this.mapData) this.loadMap("library");
+      });
+    }
   }
 
   shutdown(): void {
@@ -100,19 +105,15 @@ export class MapScene extends Phaser.Scene {
    * ================================================================ */
 
   loadMap(mapId: string): void {
-    if (this._loadingMap) return;
-    this._loadingMap = true;
     this.destroyScene();
 
     import(`../../data/scenes/${mapId}.json`)
       .then((m) => {
         this.mapData = (m.default ?? m) as MapData;
         if (this.ready) this.buildScene();
-        this._loadingMap = false;
       })
       .catch((err) => {
         console.error(`[MapScene] 加载场景失败: ${mapId}`, err);
-        this._loadingMap = false;
       });
   }
 
@@ -121,6 +122,7 @@ export class MapScene extends Phaser.Scene {
    * ================================================================ */
 
   private buildScene(): void {
+    if (this.groundLayer) return; // 防止 buildScene 被重复调用（React loadMap + create fallback）
     const d = this.mapData;
     if (!d) return;
 

@@ -85,6 +85,7 @@ export default function GameScenePage() {
   const syncMutation = useSyncSceneState();
   const mountedRef = useRef(false);
   const gameRef = useRef<Phaser.Game | null>(null);
+  const [gameReady, setGameReady] = useState(false);
 
   // 存档 API
   const { data: checkpoints = [] } = useCheckpoints(mapId);
