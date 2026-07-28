@@ -36,9 +36,10 @@
 | 62 | 16.1 | 开发 | 场景引擎 | — | TileMap 引擎 + 六场景 JSON 地图 + 纯程序化纹理 | 5h |
 | 63a | 16.2 | 开发 | Agent 精灵 + 动作（前端） | 62 | AgentSprite 类 + ActionBubble + Mock 数据 + 4 动作 | 3h |
 | 63b | 16.2 | 开发 | 场景后端 API | 63a | `POST /api/scenes/{id}/state` + SceneEngine 基础 | 2h |
-| 64 | 16.3 | 开发 | 交互系统 | 62, 63a | 点击→面板；拖拽→移动；右键→耳语；双击→篡改 | 4h |
+| 64a | 16.3 | 开发 | 点击 + 拖拽交互（前端） | 63a | Agent 点击→面板；拖拽→移动；Phaser↔React 事件 bridge | 3h |
+| 64b | 16.3 | 开发 | 右键耳语 + 双击篡改 | 64a, 63b | 右键→WhisperBox；双击→PersonaTamper；需真实 Agent 数据 | 3h |
 | 65 | 16.4 | 开发 | 时间轴 + 快照 | 62, 63b | 拖拽回退 tick + 每 tick 场景快照 + 状态还原 | 4h |
-| 66 | 16.5 | 开发 | 特效 + 导演 | 63a, 64, 65 | 气泡/天气/情绪动画 + 剧本触发器 + 上帝之声 + 分支入口 | 5h |
+| 66 | 16.5 | 开发 | 特效 + 导演 | 63a, 64a | 气泡/天气/情绪动画 + 剧本触发器 + 上帝之声 + 分支入口 | 5h |
 | T5 | — | 测试 | Phase 16 性能 + E2E | 62–66 | 6 场景渲染 + 5 Agent 同屏流畅 + 时间轴回退全链路 | 3h |
 | T6 | — | 测试 | Phase 16 Bug 修补 | T5 | 渲染异常 + 拖拽 + 快照还原 | 2h |
 | **🎯 Phase 17: 打磨交付** | | | | | | |
@@ -820,39 +821,43 @@ interface SceneSnapshot {
 
 **验收标准：** API 返回正确的 AgentSprite[]、前端通过 API 获取状态。
 
-### Step 64 — 交互系统
+### Step 64a — 点击 + 拖拽交互
 
-**目标：** 点击→面板、拖拽→移动、右键→耳语、双击→篡改，全部通过 Phaser input。
+**目标：** 点击 Agent → 右侧面板；拖拽 Agent → 移动位置。Phaser↔React 事件 bridge。
 
 **实现细节：**
-1. 点击 Agent：`sprite.setInteractive()` → `pointerdown` → emit `agent-clicked` → React `AgentPanel` 滑出
-2. 拖拽 Agent：`this.input.setDraggable(sprite)` → `drag` 事件 → 更新 `tileX/Y` → 调 `POST /api/scenes/{id}/move`
-3. 右键 Agent：`sprite.on('pointerdown', (p) => { if (p.rightButtonDown()) emit('agent-rightclick') })`
-4. 双击 Agent：Phaser 无原生双击 → 手写 300ms 内两次点击检测
-5. `AgentPanel`（React 组件）：右侧滑出抽屉——人格/情绪条/记忆列表/目标进度
-6. `WhisperBox`：浮动输入框 → 回车发送 → `POST /api/scenes/{id}/interact {type: "whisper", target, message}`
-7. `PersonaTamper`：大五人格 5 个滑块 + 应用按钮
+1. 重新启用 Phaser input（之前 `input: false`）
+2. 点击 Agent：`sprite.setInteractive()` → `pointerdown` → emit `agent-clicked` → React `AgentPanel` 滑出
+3. 拖拽 Agent：`this.input.setDraggable(sprite)` → `drag` 事件 → 更新 `tileX/Y` → 同步 localStorage + API
+4. 拖拽 vs 点击区分：`pointerdown→pointerup` 距离 < 8px = 点击，≥ 8px = 拖拽
+5. 拖拽松手 tile 坐标：`Math.round(x/64)`（64px tile）
+6. `AgentPanel`（React 组件）：右侧抽屉——名字/emoji/颜色/情绪/动作/坐标（基于当前 mock 数据）
 
 **涉及文件：**
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
 | `frontend/src/components/scene/AgentPanel.tsx` | **新建** | 右侧信息面板 |
+| `frontend/src/game/scenes/MapScene.ts` | 修改 | sprite 交互注册 + 拖拽处理 |
+| `frontend/src/game/GameCanvas.tsx` | 修改 | 启用 input + 事件 callback → React |
+| `frontend/src/pages/GameScene.tsx` | 修改 | AgentPanel 状态管理 |
+
+**验收标准：** 点击 Agent 弹出面板、拖拽 Agent 移动、松手吸附到最近 tile、位置持久化。
+
+### Step 64b — 右键耳语 + 双击篡改
+
+**目标：** 右键→WhisperBox 输入耳语；双击→PersonaTamper 修改人格。依赖真实 Agent 数据。
+
+**涉及文件：**
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
 | `frontend/src/components/scene/WhisperBox.tsx` | **新建** | 耳语输入 |
 | `frontend/src/components/scene/PersonaTamper.tsx` | **新建** | 人格滑块 |
-| `frontend/src/game/scenes/MapScene.ts` | 修改 | 输入事件注册 |
-| `frontend/src/game/GameCanvas.tsx` | 修改 | 事件 bridge → React |
+| `frontend/src/game/scenes/MapScene.ts` | 修改 | 右键/双击事件注册 |
 | `backend/src/api/scenes.py` | 修改 | `POST /api/scenes/{id}/interact` |
 
-**拖拽 vs 点击区分逻辑：**
-```
-pointerdown → 记录 startXY
-pointerup   → 计算 distance
-  if distance < 5px → 点击
-  if distance ≥ 5px → 拖拽结束 → 松手 tile = Math.round(x/48), 调 move API
-```
-
-**验收标准：** 四种交互全部触发正确 API、面板正确展示 Agent 数据、拖拽后位置同步后端。
+**验收标准：** 右键弹出输入框、耳语注入成功、双击弹出人格滑块、修改生效。
 
 ### Step 65 — 时间轴 + 快照
 
