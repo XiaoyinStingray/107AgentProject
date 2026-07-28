@@ -13,17 +13,21 @@ const H = ROWS * TILE; // 512
 interface Props {
   mapId: string;
   agents: AgentSpriteData[];
+  onAgentClick?: (agentId: string) => void;
+  onAgentMove?: (agentId: string, tileX: number, tileY: number) => void;
 }
 
 /**
  * React-Phaser 桥接组件。
- * Phaser Scale.FIT 自动填满容器，pixelArt 保证清晰缩放。
- * agents prop 变更时同步到 MapScene。
+ * agents prop 变更 → MapScene.setAgents()
+ * Phaser 交互事件 → onAgentClick / onAgentMove → React
  */
-export default function GameCanvas({ mapId, agents }: Props) {
+export default function GameCanvas({ mapId, agents, onAgentClick, onAgentMove }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<Phaser.Game | null>(null);
   const prevMapRef = useRef<string>("");
+  const cbRef = useRef({ onAgentClick, onAgentMove });
+  cbRef.current = { onAgentClick, onAgentMove };
 
   // 初始化 Phaser（仅一次）
   useEffect(() => {
@@ -44,11 +48,23 @@ export default function GameCanvas({ mapId, agents }: Props) {
         pixelArt: false,
         antialias: true,
       },
-      input: false as unknown as Phaser.Types.Core.InputConfig,
+      input: {
+        keyboard: false,
+        mouse: true,
+        touch: true,
+      },
     };
 
     const game = new Phaser.Game(config);
     gameRef.current = game;
+
+    // 监听 MapScene 发出的交互事件
+    game.events.on("agent-clicked", (agentId: string) => {
+      cbRef.current.onAgentClick?.(agentId);
+    });
+    game.events.on("agent-moved", (agentId: string, tx: number, ty: number) => {
+      cbRef.current.onAgentMove?.(agentId, tx, ty);
+    });
 
     return () => {
       game.destroy(true);
@@ -65,7 +81,7 @@ export default function GameCanvas({ mapId, agents }: Props) {
     if (mapScene) mapScene.loadMap(mapId);
   }, [mapId]);
 
-  // 同步 Agent 数据（去除 isActive 检查——MapScene 内部有 pendingAgents 兜底）
+  // 同步 Agent 数据
   useEffect(() => {
     if (!gameRef.current) return;
     const mapScene = gameRef.current.scene.getScene("MapScene") as MapScene | null;

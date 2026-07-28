@@ -1,7 +1,8 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import GameCanvas from "../game/GameCanvas";
 import type { AgentSpriteData } from "../game/sprites/AgentSprite";
 import Card from "../components/shared/Card";
+import AgentPanel from "../components/scene/AgentPanel";
 import { useSyncSceneState } from "../api/scenes";
 
 /* —— 场景列表 —— */
@@ -63,8 +64,14 @@ function saveScene(id: string): void {
 export default function GameScenePage() {
   const [mapId, setMapId] = useState<string>(() => loadScene());
   const [agents, setAgents] = useState<AgentSpriteData[]>(() => loadAgents(loadScene()));
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const syncMutation = useSyncSceneState();
   const mountedRef = useRef(false);
+
+  const selectedAgent = useMemo(
+    () => agents.find((a) => a.agentId === selectedAgentId) ?? null,
+    [agents, selectedAgentId],
+  );
 
   // 后台同步到后端 API（localStorage 仍为主存储）
   useEffect(() => {
@@ -132,6 +139,34 @@ export default function GameScenePage() {
     [mapId],
   );
 
+  /** 点击 Agent → 选中/取消选中 */
+  const handleAgentClick = useCallback((agentId: string) => {
+    setSelectedAgentId((prev) => (prev === agentId ? null : agentId));
+  }, []);
+
+  /** 拖拽 Agent → 更新位置 */
+  const handleAgentMove = useCallback(
+    (agentId: string, tileX: number, tileY: number) => {
+      setAgents((prev) => {
+        const next = prev.map((a) =>
+          a.agentId === agentId ? { ...a, tileX, tileY } : a,
+        );
+        saveAgents(mapId, next);
+        return next;
+      });
+    },
+    [mapId],
+  );
+
+  /** AgentPanel 情绪切换 */
+  const handlePanelEmotion = useCallback(
+    (emotion: AgentSpriteData["emotion"]) => {
+      if (!selectedAgentId) return;
+      setAgentEmotion(selectedAgentId, emotion);
+    },
+    [selectedAgentId, setAgentEmotion],
+  );
+
   return (
     <div className="h-full overflow-y-auto p-6 animate-fade-in">
       <h1 className="text-2xl font-mono text-accent-orange mb-1">M11 游戏化场景</h1>
@@ -161,7 +196,19 @@ export default function GameScenePage() {
       </Card>
 
       {/* Phaser Canvas */}
-      <GameCanvas mapId={mapId} agents={agents} />
+      <GameCanvas
+        mapId={mapId}
+        agents={agents}
+        onAgentClick={handleAgentClick}
+        onAgentMove={handleAgentMove}
+      />
+
+      {/* Agent 详情面板 */}
+      <AgentPanel
+        agent={selectedAgent}
+        onClose={() => setSelectedAgentId(null)}
+        onEmotionChange={handlePanelEmotion}
+      />
 
       {/* Agent 投放面板 */}
       <Card className="mt-4 p-3">

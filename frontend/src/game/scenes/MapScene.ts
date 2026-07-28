@@ -284,6 +284,10 @@ export class MapScene extends Phaser.Scene {
     });
   }
 
+  private dragStartX = 0;
+  private dragStartY = 0;
+  private readonly DRAG_THRESHOLD = 8; // px，小于此值=点击，大于=拖拽
+
   private placeAgents(data: AgentSpriteData[]): void {
     // 清除旧精灵
     this.agentSprites.forEach((s) => s.destroy());
@@ -292,6 +296,48 @@ export class MapScene extends Phaser.Scene {
     data.forEach((d) => {
       const sprite = new AgentSprite(this, d);
       this.agentSprites.set(d.agentId, sprite);
+
+      // 交互区域 = 圆半径
+      const r = 36;
+      sprite.setInteractive(
+        new Phaser.Geom.Circle(0, 0, r),
+        Phaser.Geom.Circle.Contains,
+      );
+      this.input.setDraggable(sprite);
+
+      // pointerdown → 记录起始位置
+      sprite.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+        this.dragStartX = pointer.x;
+        this.dragStartY = pointer.y;
+      });
+
+      // pointerup → 判断点击 vs 拖拽
+      sprite.on("pointerup", (pointer: Phaser.Input.Pointer) => {
+        const dx = pointer.x - this.dragStartX;
+        const dy = pointer.y - this.dragStartY;
+        if (Math.abs(dx) < this.DRAG_THRESHOLD && Math.abs(dy) < this.DRAG_THRESHOLD) {
+          this.game.events.emit("agent-clicked", d.agentId);
+        }
+      });
+
+      // 拖拽中 → 跟随指针
+      sprite.on("drag", (_ptr: Phaser.Input.Pointer, dragX: number, dragY: number) => {
+        sprite.x = dragX;
+        sprite.y = dragY;
+      });
+
+      // 拖拽结束 → 吸附到最近 tile + 通知 React
+      sprite.on("dragend", () => {
+        const tx = Math.round(sprite.x / TILE_S);
+        const ty = Math.round(sprite.y / TILE_S);
+        // 限定在场景范围内
+        const W = this.mapData?.width ?? 12;
+        const H = this.mapData?.height ?? 8;
+        const cx = Math.max(0, Math.min(tx, W - 1));
+        const cy = Math.max(0, Math.min(ty, H - 1));
+        sprite.setTile(cx, cy);
+        this.game.events.emit("agent-moved", d.agentId, cx, cy);
+      });
     });
   }
 
