@@ -1,9 +1,6 @@
 import Phaser from "phaser";
 import { AVATAR_FRAME } from "../avatars";
 
-/**
- * Agent 精灵数据（从 React → Phaser 的单向流）。
- */
 export interface AgentSpriteData {
   agentId: string;
   name: string;
@@ -15,16 +12,8 @@ export interface AgentSpriteData {
   emotion: "neutral" | "happy" | "anxious" | "angry" | "sad";
 }
 
-/* —— 常量 —— */
 const TILE = 64;
 const CIRCLE_R = 36;
-const EMOTION_COLORS: Record<string, number> = {
-  neutral: 0xCCCCCC,
-  happy: 0x66CC66,
-  anxious: 0xDDCC44,
-  angry: 0xEE5555,
-  sad: 0x8899BB,
-};
 
 /** 情绪 → 弹窗 emoji */
 const EMOTION_EMOJI: Record<string, string> = {
@@ -35,12 +24,7 @@ const EMOTION_EMOJI: Record<string, string> = {
   sad: "😢",
 };
 
-/**
- * Agent 精灵 — Phaser Container 封装。
- *
- * 视觉层级（从底到顶）：
- *   阴影椭圆 → 自制头像 → 情绪光环 → 情绪 emoji 弹窗 → 名字标签
- */
+/** 波兰球风格 — Agent 精灵。纯色球 + 白椭圆眼 + 情绪弹窗。 */
 export class AgentSprite extends Phaser.GameObjects.Container {
   public agentId: string;
   public tileX: number;
@@ -49,13 +33,19 @@ export class AgentSprite extends Phaser.GameObjects.Container {
   public emotion: AgentSpriteData["emotion"];
 
   private avatar: Phaser.GameObjects.Image | null = null;
+  private leftEye: Phaser.GameObjects.Ellipse;
+  private rightEye: Phaser.GameObjects.Ellipse;
+  private leftBrow: Phaser.GameObjects.Rectangle | null = null;
+  private rightBrow: Phaser.GameObjects.Rectangle | null = null;
   private nameText: Phaser.GameObjects.Text;
-  private emotionRing: Phaser.GameObjects.Arc;
   private emotionPopup: Phaser.GameObjects.Text | null = null;
   private shadow: Phaser.GameObjects.Ellipse;
-  private colorHex: string;
   private breathTween: Phaser.Tweens.Tween | null = null;
   private popupTimer: Phaser.Time.TimerEvent | null = null;
+
+  /* —— 眼睛常量 —— */
+  private static readonly EYE_Y = -6;
+  private static readonly EYE_GAP = 8; // 中心到中心的 x 距离之半
 
   constructor(scene: Phaser.Scene, data: AgentSpriteData) {
     const px = data.tileX * TILE + TILE / 2;
@@ -67,26 +57,31 @@ export class AgentSprite extends Phaser.GameObjects.Container {
     this.tileY = data.tileY;
     this.action = data.action;
     this.emotion = data.emotion;
-    this.colorHex = data.color;
 
     // 阴影
     this.shadow = scene.add.ellipse(0, CIRCLE_R - 8, CIRCLE_R * 2, 18, 0x000000, 0.22);
     this.add(this.shadow);
 
-    // 自制头像纹理（替代 emoji）
+    // 波兰球（72×72 纹理，displaySize 填满 72px 圆区域）
     const frame = AVATAR_FRAME[data.agentId] ?? 0;
     if (scene.textures.exists("avatars")) {
       this.avatar = scene.add.image(0, 0, "avatars", frame).setDisplaySize(CIRCLE_R * 2, CIRCLE_R * 2);
       this.add(this.avatar);
     }
 
-    // 情绪光环（外圈）
-    this.emotionRing = scene.add.circle(0, 0, CIRCLE_R + 5);
-    this.emotionRing.setStrokeStyle(3, EMOTION_COLORS.neutral, 0);
-    this.emotionRing.setFillStyle(0xffffff, 0);
-    this.add(this.emotionRing);
+    // 左眼
+    this.leftEye = scene.add.ellipse(
+      -AgentSprite.EYE_GAP, AgentSprite.EYE_Y, 12, 8, 0xffffff,
+    );
+    this.add(this.leftEye);
 
-    // 情绪 emoji 弹窗（初始隐藏）
+    // 右眼
+    this.rightEye = scene.add.ellipse(
+      AgentSprite.EYE_GAP, AgentSprite.EYE_Y, 12, 8, 0xffffff,
+    );
+    this.add(this.rightEye);
+
+    // 情绪 emoji 弹窗
     this.emotionPopup = scene.add.text(CIRCLE_R - 8, -CIRCLE_R + 6, "", {
       fontSize: "20px",
       fontFamily: "sans-serif",
@@ -103,7 +98,6 @@ export class AgentSprite extends Phaser.GameObjects.Container {
     }).setOrigin(0.5, 0);
     this.add(this.nameText);
 
-    // 初始动作 + 情绪
     this.applyAction(data.action);
     this.applyEmotion(data.emotion);
     this.startEmotionPopup();
@@ -162,14 +156,9 @@ export class AgentSprite extends Phaser.GameObjects.Container {
         this.setScale(1);
         this.setAlpha(1);
         this.nameText.setVisible(true);
-        // walk 时轻微弹跳
         this.breathTween = this.scene.tweens.add({
-          targets: this,
-          scaleY: 0.96,
-          duration: 150,
-          yoyo: true,
-          repeat: -1,
-          ease: "Sine.easeInOut",
+          targets: this, scaleY: 0.96, duration: 150,
+          yoyo: true, repeat: -1, ease: "Sine.easeInOut",
         });
         break;
       case "sit":
@@ -188,18 +177,13 @@ export class AgentSprite extends Phaser.GameObjects.Container {
 
   private startBreath(): void {
     this.breathTween = this.scene.tweens.add({
-      targets: this,
-      scaleX: 1.04,
-      scaleY: 1.04,
-      duration: 1200,
-      yoyo: true,
-      repeat: -1,
-      ease: "Sine.easeInOut",
+      targets: this, scaleX: 1.04, scaleY: 1.04,
+      duration: 1200, yoyo: true, repeat: -1, ease: "Sine.easeInOut",
     });
   }
 
   /* ================================================================
-   * 情绪
+   * 情绪 → 波兰球眼形
    * ================================================================ */
 
   setEmotion(emotion: AgentSpriteData["emotion"]): void {
@@ -209,21 +193,54 @@ export class AgentSprite extends Phaser.GameObjects.Container {
   }
 
   private applyEmotion(emotion: AgentSpriteData["emotion"]): void {
-    const color = EMOTION_COLORS[emotion] ?? EMOTION_COLORS.neutral;
-    const alpha = emotion === "neutral" ? 0 : 0.7;
-    this.emotionRing.setStrokeStyle(3, color, alpha);
+    const ey = AgentSprite.EYE_Y;
+    const gap = AgentSprite.EYE_GAP;
+    const l = this.leftEye;
+    const r = this.rightEye;
 
-    if (emotion === "angry" || emotion === "happy") {
-      this.scene.tweens.add({
-        targets: this.emotionRing,
-        alpha: 1,
-        scaleX: 1.3,
-        scaleY: 1.3,
-        duration: 400,
-        yoyo: true,
-        repeat: 2,
-      });
+    // 清除旧眉毛
+    this.leftBrow?.destroy();
+    this.rightBrow?.destroy();
+    this.leftBrow = null;
+    this.rightBrow = null;
+
+    switch (emotion) {
+      case "neutral":
+        l.setPosition(-gap, ey).setSize(12, 8).setRotation(0).setAlpha(1);
+        r.setPosition(gap, ey).setSize(12, 8).setRotation(0).setAlpha(1);
+        break;
+      case "happy":
+        // 向上弯的眼睛：用两个小弧线（压扁 + 上移）
+        l.setPosition(-gap, ey - 2).setSize(11, 5).setRotation(0).setAlpha(1);
+        r.setPosition(gap, ey - 2).setSize(11, 5).setRotation(0).setAlpha(1);
+        break;
+      case "anxious":
+        // 小圆点 + 靠近
+        l.setPosition(-gap + 2, ey).setSize(5, 5).setRotation(0).setAlpha(1);
+        r.setPosition(gap - 2, ey).setSize(5, 5).setRotation(0).setAlpha(1);
+        break;
+      case "angry":
+        // 内斜眼 + 眉毛
+        l.setPosition(-gap, ey).setSize(11, 7).setRotation(-0.3).setAlpha(1);
+        r.setPosition(gap, ey).setSize(11, 7).setRotation(0.3).setAlpha(1);
+        this.addBrows("angry");
+        break;
+      case "sad":
+        // 向下弯 + 稍低
+        l.setPosition(-gap, ey + 3).setSize(11, 5).setRotation(0).setAlpha(0.8);
+        r.setPosition(gap, ey + 3).setSize(11, 5).setRotation(0).setAlpha(0.8);
+        break;
     }
+  }
+
+  /** 画眉毛（angry 时用） */
+  private addBrows(_style: string): void {
+    const by = AgentSprite.EYE_Y - 9;
+    const bg = AgentSprite.EYE_GAP;
+    this.leftBrow = this.scene.add.rectangle(-bg - 1, by, 12, 3, 0xffffff).setRotation(-0.4);
+    this.rightBrow = this.scene.add.rectangle(bg + 1, by, 12, 3, 0xffffff).setRotation(0.4);
+    this.add(this.leftBrow);
+    this.add(this.rightBrow);
   }
 
   /* ================================================================
@@ -247,22 +264,17 @@ export class AgentSprite extends Phaser.GameObjects.Container {
       this.emotionPopup.setAlpha(1).setScale(0.3);
       this.scene.tweens.add({
         targets: this.emotionPopup,
-        scaleX: 1.2,
-        scaleY: 1.2,
-        duration: 300,
-        ease: "Back.easeOut",
+        scaleX: 1.2, scaleY: 1.2,
+        duration: 300, ease: "Back.easeOut",
         onComplete: () => {
           this.scene.tweens.add({
             targets: this.emotionPopup,
-            alpha: 0,
-            duration: 800,
-            delay: 600,
+            alpha: 0, duration: 800, delay: 600,
           });
         },
       });
     };
 
-    // 立即弹一次，然后每 5-8 秒循环
     show();
     this.popupTimer = this.scene.time.addEvent({
       delay: 5000 + Math.random() * 3000,
