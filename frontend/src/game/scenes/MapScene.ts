@@ -308,10 +308,12 @@ export class MapScene extends Phaser.Scene {
       sprite.input!.cursor = "pointer";
       this.input.setDraggable(sprite);
 
-      // pointerdown → 记录起始位置
+      // pointerdown → 记录起始位置 + 起始 tile（用于重叠回弹）
       sprite.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
         this.dragStartX = pointer.x;
         this.dragStartY = pointer.y;
+        sprite.setData("startTileX", d.tileX);
+        sprite.setData("startTileY", d.tileY);
       });
 
       // pointerup → 判断点击 vs 拖拽
@@ -331,7 +333,7 @@ export class MapScene extends Phaser.Scene {
         sprite.y = Math.max(TILE_S / 2, Math.min(dragY, MH - TILE_S / 2));
       });
 
-      // 拖拽结束 → 吸附到最近可通行 tile + 通知 React
+      // 拖拽结束 → 吸附到最近可通行 tile + 重叠检查 + 通知 React
       sprite.on("dragend", () => {
         const W = this.mapData?.width ?? 12;
         const H = this.mapData?.height ?? 8;
@@ -339,8 +341,10 @@ export class MapScene extends Phaser.Scene {
         let ty = Math.round(sprite.y / TILE_S);
         tx = Math.max(0, Math.min(tx, W - 1));
         ty = Math.max(0, Math.min(ty, H - 1));
-        if (!this.isWalkable(tx, ty)) {
-          [tx, ty] = this.nearestWalkable(tx, ty, W, H);
+        // 墙壁/重叠 → 弹回起始 tile
+        if (!this.isWalkable(tx, ty) || this.isOccupiedByOther(d.agentId, tx, ty)) {
+          tx = sprite.getData("startTileX") ?? d.tileX;
+          ty = sprite.getData("startTileY") ?? d.tileY;
         }
         sprite.setTile(tx, ty);
         this.game.events.emit("agent-moved", d.agentId, tx, ty);
@@ -351,6 +355,15 @@ export class MapScene extends Phaser.Scene {
   /* ================================================================
    * 可通行判定
    * ================================================================ */
+
+  /** 某 tile 是否已被其他 Agent 占据 */
+  private isOccupiedByOther(selfId: string, tx: number, ty: number): boolean {
+    for (const [id, sprite] of this.agentSprites) {
+      if (id === selfId) continue;
+      if (sprite.tileX === tx && sprite.tileY === ty) return true;
+    }
+    return false;
+  }
 
   /** 某 tile 是否可放置 Agent（非墙壁/非门） */
   private isWalkable(tx: number, ty: number): boolean {

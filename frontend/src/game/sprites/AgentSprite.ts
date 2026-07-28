@@ -37,15 +37,17 @@ export class AgentSprite extends Phaser.GameObjects.Container {
   private rightEye: Phaser.GameObjects.Ellipse;
   private leftBrow: Phaser.GameObjects.Rectangle | null = null;
   private rightBrow: Phaser.GameObjects.Rectangle | null = null;
+  private mouth: Phaser.GameObjects.Ellipse;
   private nameText: Phaser.GameObjects.Text;
   private emotionPopup: Phaser.GameObjects.Text | null = null;
   private shadow: Phaser.GameObjects.Ellipse;
   private breathTween: Phaser.Tweens.Tween | null = null;
   private popupTimer: Phaser.Time.TimerEvent | null = null;
 
-  /* —— 眼睛常量 —— */
+  /* —— 五官常量 —— */
   private static readonly EYE_Y = -6;
-  private static readonly EYE_GAP = 8; // 中心到中心的 x 距离之半
+  private static readonly EYE_GAP = 8;
+  private static readonly MOUTH_Y = 10;
 
   constructor(scene: Phaser.Scene, data: AgentSpriteData) {
     const px = data.tileX * TILE + TILE / 2;
@@ -80,6 +82,10 @@ export class AgentSprite extends Phaser.GameObjects.Container {
       AgentSprite.EYE_GAP, AgentSprite.EYE_Y, 12, 8, 0xffffff,
     );
     this.add(this.rightEye);
+
+    // 嘴
+    this.mouth = scene.add.ellipse(0, AgentSprite.MOUTH_Y, 10, 2, 0xffffff, 0.85);
+    this.add(this.mouth);
 
     // 情绪 emoji 弹窗
     this.emotionPopup = scene.add.text(CIRCLE_R - 8, -CIRCLE_R + 6, "", {
@@ -197,6 +203,7 @@ export class AgentSprite extends Phaser.GameObjects.Container {
     const gap = AgentSprite.EYE_GAP;
     const l = this.leftEye;
     const r = this.rightEye;
+    const m = this.mouth;
 
     // 清除旧眉毛
     this.leftBrow?.destroy();
@@ -208,27 +215,32 @@ export class AgentSprite extends Phaser.GameObjects.Container {
       case "neutral":
         l.setPosition(-gap, ey).setSize(12, 8).setRotation(0).setAlpha(1);
         r.setPosition(gap, ey).setSize(12, 8).setRotation(0).setAlpha(1);
+        m.setPosition(0, AgentSprite.MOUTH_Y).setSize(10, 2).setAlpha(0.85);
         break;
       case "happy":
-        // 向上弯的眼睛：用两个小弧线（压扁 + 上移）
         l.setPosition(-gap, ey - 2).setSize(11, 5).setRotation(0).setAlpha(1);
         r.setPosition(gap, ey - 2).setSize(11, 5).setRotation(0).setAlpha(1);
+        // 大弧线笑嘴
+        m.setPosition(0, AgentSprite.MOUTH_Y - 2).setSize(16, 5).setAlpha(0.9);
         break;
       case "anxious":
-        // 小圆点 + 靠近
         l.setPosition(-gap + 2, ey).setSize(5, 5).setRotation(0).setAlpha(1);
         r.setPosition(gap - 2, ey).setSize(5, 5).setRotation(0).setAlpha(1);
+        // 小圆张嘴
+        m.setPosition(0, AgentSprite.MOUTH_Y + 2).setSize(7, 6).setAlpha(0.7);
         break;
       case "angry":
-        // 内斜眼 + 眉毛
         l.setPosition(-gap, ey).setSize(11, 7).setRotation(-0.3).setAlpha(1);
         r.setPosition(gap, ey).setSize(11, 7).setRotation(0.3).setAlpha(1);
+        // 下弯嘴
+        m.setPosition(0, AgentSprite.MOUTH_Y + 4).setSize(10, 2.5).setAlpha(0.9);
         this.addBrows("angry");
         break;
       case "sad":
-        // 向下弯 + 稍低
         l.setPosition(-gap, ey + 3).setSize(11, 5).setRotation(0).setAlpha(0.8);
         r.setPosition(gap, ey + 3).setSize(11, 5).setRotation(0).setAlpha(0.8);
+        // 下坠小嘴
+        m.setPosition(0, AgentSprite.MOUTH_Y + 7).setSize(8, 3).setAlpha(0.6);
         break;
     }
   }
