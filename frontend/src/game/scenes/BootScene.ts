@@ -16,6 +16,6 @@ export class BootScene extends Phaser.Scene {
       generateAllTextures(this),
       generateAvatarTexture(this),
     ]);
-    this.scene.start("MapScene", { mapId: "library" });
+    this.scene.start("MapScene");
   }
 }

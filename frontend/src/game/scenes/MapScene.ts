@@ -72,9 +72,8 @@ export class MapScene extends Phaser.Scene {
    * ================================================================ */
 
   create(): void {
-    this.input.dragDistanceThreshold = 8; // 防止点击时误触发拖拽
+    this.input.dragDistanceThreshold = 8;
     this.ready = true;
-    // 监听来自 React 的耳语事件 → Agent 短暂闪烁
     this.game.events.on("agent-whisper", (agentId: string) => {
       const sprite = this.agentSprites.get(agentId);
       if (!sprite) return;
@@ -83,13 +82,16 @@ export class MapScene extends Phaser.Scene {
       });
     });
     this.startDialogueScanner();
+
+    // 从 GameCanvas registry 读取初始数据（绕过 getScene 时序问题）
+    const agents = this.game.registry.get("pendingAgents") as AgentSpriteData[] | undefined;
+    if (agents?.length) this.pendingAgents = agents;
+    const mapId = (this.game.registry.get("pendingMapId") as string) || "library";
+
     if (this.mapData) {
       this.buildScene();
     } else {
-      // 由 React mapId effect 负责首次加载；延迟 200ms 兜底
-      this.time.delayedCall(200, () => {
-        if (!this.mapData) this.loadMap("library");
-      });
+      this.loadMap(mapId);
     }
   }
 
@@ -122,7 +124,7 @@ export class MapScene extends Phaser.Scene {
    * ================================================================ */
 
   private buildScene(): void {
-    if (this.groundLayer) return; // 防止 buildScene 被重复调用（React loadMap + create fallback）
+    if (this.groundLayer) return;
     const d = this.mapData;
     if (!d) return;
 
@@ -158,7 +160,7 @@ export class MapScene extends Phaser.Scene {
       this.startWeather(d.weather, W, H);
     }
 
-    // 5. Agent 精灵 — 始终消费 pending（修复 BUG-023 首次加载不显示）
+    // 5. Agent 精灵 — 始终消费 pending（修复 BUG-023）
     const agents = this.pendingAgents ?? [];
     this.pendingAgents = null;
     if (agents.length > 0) this.placeAgents(agents);
@@ -311,11 +313,10 @@ export class MapScene extends Phaser.Scene {
 
   /** 设置/更新全部 Agent 精灵（从 React prop 同步） */
   setAgents(data: AgentSpriteData[]): void {
-    if (!this.ready || !this.mapData) {
-      this.pendingAgents = data;
-      return;
+    this.pendingAgents = data;
+    if (this.ready && this.groundLayer) {
+      this.placeAgents(data);
     }
-    this.placeAgents(data);
   }
 
   /** 获取指定 Agent 的精灵（供外部调用 showBubble 等） */

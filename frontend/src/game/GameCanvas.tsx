@@ -59,7 +59,10 @@ export default function GameCanvas({ mapId, agents, onAgentClick, onAgentMove, o
 
     const game = new Phaser.Game(config);
     gameRef.current = game;
-    onGameReady?.(game);  // Phaser.Game 构造即就绪，无需等 ready 事件
+    // registry 桥接初始数据 → MapScene.create() 消费
+    game.registry.set("pendingMapId", mapId);
+    game.registry.set("pendingAgents", agents);
+    onGameReady?.(game);
 
     // 监听 MapScene 发出的交互事件
     game.events.on("agent-clicked", (agentId: string) => {
@@ -78,20 +81,22 @@ export default function GameCanvas({ mapId, agents, onAgentClick, onAgentMove, o
     };
   }, []);
 
-  // 切换场景
+  // 切换场景 → 更新 registry（MapScene 内部读取）
   useEffect(() => {
     if (!gameRef.current || mapId === prevMapRef.current) return;
     prevMapRef.current = mapId;
-
-    const mapScene = gameRef.current.scene.getScene("MapScene") as MapScene | null;
-    if (mapScene) mapScene.loadMap(mapId);
+    gameRef.current.registry.set("pendingMapId", mapId);
+    gameRef.current.registry.set("pendingAgents", agents);
+    const ms = gameRef.current.scene.getScene("MapScene") as MapScene | null;
+    if (ms) ms.loadMap(mapId);
   }, [mapId]);
 
-  // 同步 Agent 数据
+  // Agent 变化 → 更新 registry + 直推（场景如果就绪）
   useEffect(() => {
     if (!gameRef.current) return;
-    const mapScene = gameRef.current.scene.getScene("MapScene") as MapScene | null;
-    if (mapScene) mapScene.setAgents(agents);
+    gameRef.current.registry.set("pendingAgents", agents);
+    const ms = gameRef.current.scene.getScene("MapScene") as MapScene | null;
+    if (ms) ms.setAgents(agents);
   }, [agents]);
 
   return (
