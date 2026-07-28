@@ -118,7 +118,7 @@ describe("Step 28 FeatureRouteBoundary", () => {
 
   it("keeps all menu IDs unique", () => {
     const items = MENU_SECTIONS.flatMap((section) => section.items);
-    expect(items).toHaveLength(62);
-    expect(new Set(items.map((item) => item.id)).size).toBe(62);
+    expect(items).toHaveLength(59);
+    expect(new Set(items.map((item) => item.id)).size).toBe(59);
   });
 });
