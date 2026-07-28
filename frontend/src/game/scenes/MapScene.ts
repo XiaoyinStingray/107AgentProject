@@ -482,6 +482,7 @@ export class MapScene extends Phaser.Scene {
   }
 
   private scanAndDialogue(): void {
+    if (!this.scene.isActive()) return;
     const agents = [...this.agentSprites.values()];
     if (agents.length < 2) return;
     const now = Date.now();
@@ -575,28 +576,19 @@ export class MapScene extends Phaser.Scene {
    * ================================================================ */
 
   private destroyScene(): void {
-    // 停止天气动画
-    this.weatherTweens.forEach((t) => t.stop());
-    this.weatherTweens = [];
+    // 杀光所有 tween + timer（防止回调在 scene 销毁后触发）
+    this.tweens.killAll();
+    this.time.removeAllEvents();
 
-    // 销毁自主移动器 + Agent 精灵
+    this.weatherTweens = [];
     this.movers.forEach((m) => m.destroy());
     this.movers.clear();
-    this.agentSprites.forEach((s) => s.destroy());
+    this.agentSprites.forEach((s) => { try { s.destroy(); } catch { /* already gone */ } });
     this.agentSprites.clear();
-
-    // 销毁物品对象
-    this.itemObjects.forEach((o) => o.destroy());
+    this.itemObjects.forEach((o) => { try { o.destroy(); } catch { /* already gone */ } });
     this.itemObjects = [];
 
-    // 销毁 tilemap 图层
-    if (this.groundLayer) {
-      this.groundLayer.destroy();
-      this.groundLayer = null;
-    }
-    if (this.tilemap) {
-      this.tilemap.destroy();
-      this.tilemap = null;
-    }
+    if (this.groundLayer) { this.groundLayer.destroy(); this.groundLayer = null; }
+    if (this.tilemap) { this.tilemap.destroy(); this.tilemap = null; }
   }
 }

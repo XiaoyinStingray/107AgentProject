@@ -57,7 +57,9 @@ export function generateAvatarTexture(scene: Phaser.Scene): Promise<void> {
 
     const img = new Image();
     img.onload = () => {
-      scene.textures.addSpriteSheet("avatars", img, { frameWidth: SIZE, frameHeight: SIZE });
+      if (!scene.textures.exists("avatars")) {
+        try { scene.textures.addSpriteSheet("avatars", img, { frameWidth: SIZE, frameHeight: SIZE }); } catch { /* 场景已销毁 */ }
+      }
       resolve();
     };
     img.src = canvas.toDataURL();

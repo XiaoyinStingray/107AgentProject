@@ -589,7 +589,9 @@ function makeTexture(
 
     const img = new Image();
     img.onload = () => {
-      scene.textures.addSpriteSheet(key, img, { frameWidth: TS, frameHeight: TS });
+      if (!scene.textures.exists(key)) {
+        try { scene.textures.addSpriteSheet(key, img, { frameWidth: TS, frameHeight: TS }); } catch { /* 场景已销毁 */ }
+      }
       resolve();
     };
     img.src = canvas.toDataURL();

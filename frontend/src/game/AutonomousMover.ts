@@ -119,6 +119,7 @@ export class AutonomousMover {
       duration: 350,
       ease: "Sine.easeInOut",
       onComplete: () => {
+        if (!this.scene || !this.active) return;
         this.sprite.tileX = target.tx;
         this.sprite.tileY = target.ty;
         this.sprite.setAction("idle");

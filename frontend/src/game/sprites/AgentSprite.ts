@@ -193,6 +193,7 @@ export class AgentSprite extends Phaser.GameObjects.Container {
     }
   }
   private startBreath(): void {
+    if (!this.scene) return;
     this.breathTween = this.scene.tweens.add({
       targets: this, scaleX: 1.04, scaleY: 1.04,
       duration: 1200, yoyo: true, repeat: -1, ease: "Sine.easeInOut",

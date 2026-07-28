@@ -18,12 +18,12 @@ const COLORS: Record<string, number> = {
 
 const lastBurst: Record<string, number> = {};
 
-export function emoteBurst(scene: Phaser.Scene, x: number, y: number, emotion: string, agentId?: string): void {
+export function emoteBurst(scene: Phaser.Scene | null, x: number, y: number, emotion: string, agentId?: string): void {
+  if (!scene) return;
   const color = COLORS[emotion];
   if (color === undefined) return;
-  // 同 Agent 1s 内不重复爆发
   const key = agentId ?? "global";
-  if (Date.now() - (lastBurst[key] ?? 0) < 1000) return;
+  if (Date.now() - (lastBurst[key] ?? 0) < 1500) return;
   lastBurst[key] = Date.now();
 
   const count = emotion === "angry" || emotion === "excited" ? 14 : 8;
