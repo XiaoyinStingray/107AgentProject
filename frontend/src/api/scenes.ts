@@ -19,7 +19,7 @@ export function useSceneState(sceneId: string) {
     queryKey: sceneKeys.state(sceneId),
     queryFn: () =>
       client
-        .get<SceneStateResponse>(`/api/scenes/${sceneId}/state`)
+        .get<SceneStateResponse>(`/scenes/${sceneId}/state`)
         .then((r) => r.agents),
     enabled: sceneId.length > 0,
     staleTime: 30_000,
@@ -37,7 +37,7 @@ export function useSyncSceneState() {
       sceneId: string;
       agents: AgentSpriteData[];
     }) =>
-      client.post<SceneStateResponse>(`/api/scenes/${sceneId}/state`, agents),
+      client.post<SceneStateResponse>(`/scenes/${sceneId}/state`, agents),
     onSuccess: (_data, { sceneId }) => {
       queryClient.invalidateQueries({ queryKey: sceneKeys.state(sceneId) });
     },

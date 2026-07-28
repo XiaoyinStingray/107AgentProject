@@ -66,6 +66,7 @@ export class MapScene extends Phaser.Scene {
    * ================================================================ */
 
   create(): void {
+    this.input.dragDistanceThreshold = 8; // 防止点击时误触发拖拽
     this.ready = true;
     if (this.mapData) this.buildScene();
     else this.loadMap("library");
@@ -303,6 +304,7 @@ export class MapScene extends Phaser.Scene {
         new Phaser.Geom.Circle(0, 0, r),
         Phaser.Geom.Circle.Contains,
       );
+      sprite.input!.cursor = "pointer";
       this.input.setDraggable(sprite);
 
       // pointerdown → 记录起始位置
@@ -320,10 +322,12 @@ export class MapScene extends Phaser.Scene {
         }
       });
 
-      // 拖拽中 → 跟随指针
+      // 拖拽中 → 跟随指针，限制在场景边界内
       sprite.on("drag", (_ptr: Phaser.Input.Pointer, dragX: number, dragY: number) => {
-        sprite.x = dragX;
-        sprite.y = dragY;
+        const MW = (this.mapData?.width ?? 12) * TILE_S;
+        const MH = (this.mapData?.height ?? 8) * TILE_S;
+        sprite.x = Math.max(TILE_S / 2, Math.min(dragX, MW - TILE_S / 2));
+        sprite.y = Math.max(TILE_S / 2, Math.min(dragY, MH - TILE_S / 2));
       });
 
       // 拖拽结束 → 吸附到最近 tile + 通知 React
