@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { ITEM_FRAME } from "../tileset";
 import { AgentSprite, AgentSpriteData } from "../sprites/AgentSprite";
 import { getDialogue } from "../dialogue";
+import { AutonomousMover } from "../AutonomousMover";
 
 /**
  * MapScene — Phaser 原生 tilemap 渲染。
@@ -57,8 +58,9 @@ export class MapScene extends Phaser.Scene {
   private agentSprites: Map<string, AgentSprite> = new Map();
   private pendingAgents: AgentSpriteData[] | null = null;
   private wallMap: number[][] = [];  // 墙壁占位 map，0=可通行
-  private dialogueCooldowns: Map<string, number> = new Map(); // "aId|bId" → lastDialogueTime
+  private dialogueCooldowns: Map<string, number> = new Map();
   private dialogueTimer: Phaser.Time.TimerEvent | null = null;
+  private movers: Map<string, AutonomousMover> = new Map();
   private ready = false;
 
   constructor() {
@@ -312,8 +314,19 @@ export class MapScene extends Phaser.Scene {
 
     data.forEach((d) => {
       const sprite = new AgentSprite(this, d);
-      sprite.setData("name", d.name); // for dialogue lookup
+      sprite.setData("name", d.name);
       this.agentSprites.set(d.agentId, sprite);
+
+      // 自主移动器
+      const mover = new AutonomousMover(
+        sprite,
+        this,
+        undefined,
+        (tx, ty) => this.isWalkable(tx, ty),
+        { w: this.mapData?.width ?? 12, h: this.mapData?.height ?? 8 },
+      );
+      mover.start();
+      this.movers.set(d.agentId, mover);
 
       // 交互区域 = 圆半径
       const r = 36;
@@ -501,7 +514,9 @@ export class MapScene extends Phaser.Scene {
     this.weatherTweens.forEach((t) => t.stop());
     this.weatherTweens = [];
 
-    // 销毁 Agent 精灵
+    // 销毁自主移动器 + Agent 精灵
+    this.movers.forEach((m) => m.destroy());
+    this.movers.clear();
     this.agentSprites.forEach((s) => s.destroy());
     this.agentSprites.clear();
 
