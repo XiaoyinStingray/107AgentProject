@@ -1,8 +1,12 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import Phaser from "phaser";
 import GameCanvas from "../game/GameCanvas";
 import type { AgentSpriteData, Emotion } from "../game/sprites/AgentSprite";
 import Card from "../components/shared/Card";
 import AgentPanel from "../components/scene/AgentPanel";
+import WhisperBox from "../components/scene/WhisperBox";
+import PersonaTamper, { DEFAULT_PERSONALITY } from "../components/scene/PersonaTamper";
+import type { Personality } from "../components/scene/PersonaTamper";
 import { useSyncSceneState } from "../api/scenes";
 
 /* —— 场景列表 —— */
@@ -61,16 +65,38 @@ function saveScene(id: string): void {
   localStorage.setItem(SCENE_KEY, id);
 }
 
+/* —— Agent 人格本地持久化 —— */
+const PERSONA_KEY = "m11-personalities";
+
+function loadPersonalities(): Record<string, Personality> {
+  try { return JSON.parse(localStorage.getItem(PERSONA_KEY) ?? "{}"); } catch { return {}; }
+}
+function savePersonalities(p: Record<string, Personality>): void {
+  localStorage.setItem(PERSONA_KEY, JSON.stringify(p));
+}
+
 export default function GameScenePage() {
   const [mapId, setMapId] = useState<string>(() => loadScene());
   const [agents, setAgents] = useState<AgentSpriteData[]>(() => loadAgents(loadScene()));
+  const [personalities, setPersonalities] = useState<Record<string, Personality>>(() => loadPersonalities());
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [whisperTargetId, setWhisperTargetId] = useState<string | null>(null);
+  const [tamperTargetId, setTamperTargetId] = useState<string | null>(null);
   const syncMutation = useSyncSceneState();
   const mountedRef = useRef(false);
+  const gameRef = useRef<Phaser.Game | null>(null);
 
   const selectedAgent = useMemo(
     () => agents.find((a) => a.agentId === selectedAgentId) ?? null,
     [agents, selectedAgentId],
+  );
+  const whisperTarget = useMemo(
+    () => agents.find((a) => a.agentId === whisperTargetId) ?? null,
+    [agents, whisperTargetId],
+  );
+  const tamperTarget = useMemo(
+    () => agents.find((a) => a.agentId === tamperTargetId) ?? null,
+    [agents, tamperTargetId],
   );
 
   // 后台同步到后端 API（localStorage 仍为主存储）
@@ -88,33 +114,6 @@ export default function GameScenePage() {
     setMapId(id);
     setAgents(loadAgents(id));
   }, []);
-
-  /** 投放单个 Agent */
-  const deployAgent = useCallback(
-    (def: (typeof AGENT_POOL)[number]) => {
-      setAgents((prev) => {
-        if (prev.find((a) => a.agentId === def.agentId)) return prev;
-        const slots = SPAWN_SLOTS[mapId] ?? SPAWN_SLOTS.library;
-        const slot = slots[prev.length % slots.length];
-        const next = [
-          ...prev,
-          {
-            agentId: def.agentId,
-            name: def.label.slice(0, 2),
-            emoji: def.emoji,
-            color: def.color,
-            tileX: slot.tileX,
-            tileY: slot.tileY,
-            action: "idle" as const,
-            emotion: "neutral" as const,
-          },
-        ];
-        saveAgents(mapId, next);
-        return next;
-      });
-    },
-    [mapId],
-  );
 
   /** 移除单个 Agent */
   const removeAgent = useCallback((agentId: string) => {
@@ -167,6 +166,73 @@ export default function GameScenePage() {
     [selectedAgentId, setAgentEmotion],
   );
 
+  /** 右键 → 打开耳语 */
+  const handleAgentRightClick = useCallback((agentId: string) => {
+    setWhisperTargetId(agentId);
+  }, []);
+
+  /** 双击 → 打开篡改面板 */
+  const handleAgentDoubleClick = useCallback((agentId: string) => {
+    setTamperTargetId(agentId);
+  }, []);
+
+  /** 耳语发送 → 气泡显示 */
+  const handleWhisperSubmit = useCallback(
+    (message: string) => {
+      if (!whisperTargetId) return;
+      // 通过 game events 通知 MapScene 显示气泡
+      gameRef.current?.events.emit("agent-whisper", whisperTargetId, message);
+    },
+    [whisperTargetId],
+  );
+
+  /** 人格篡改保存 */
+  const handleTamperSave = useCallback(
+    (p: Personality) => {
+      if (!tamperTargetId) return;
+      setPersonalities((prev) => {
+        const next = { ...prev, [tamperTargetId]: p };
+        savePersonalities(next);
+        return next;
+      });
+      setTamperTargetId(null);
+    },
+    [tamperTargetId],
+  );
+
+  /** 部署时初始化人格 */
+  const deployAgent = useCallback(
+    (def: (typeof AGENT_POOL)[number]) => {
+      setAgents((prev) => {
+        if (prev.find((a) => a.agentId === def.agentId)) return prev;
+        const slots = SPAWN_SLOTS[mapId] ?? SPAWN_SLOTS.library;
+        const slot = slots[prev.length % slots.length];
+        const next = [
+          ...prev,
+          {
+            agentId: def.agentId,
+            name: def.label.slice(0, 2),
+            emoji: def.emoji,
+            color: def.color,
+            tileX: slot.tileX,
+            tileY: slot.tileY,
+            action: "idle" as const,
+            emotion: "neutral" as const,
+          },
+        ];
+        saveAgents(mapId, next);
+        // 初始化人格（如未设置）
+        if (!personalities[def.agentId]) {
+          const newP = { ...personalities, [def.agentId]: { ...DEFAULT_PERSONALITY } };
+          setPersonalities(newP);
+          savePersonalities(newP);
+        }
+        return next;
+      });
+    },
+    [mapId, personalities],
+  );
+
   return (
     <div className="h-full overflow-y-auto p-6 animate-fade-in">
       <h1 className="text-2xl font-mono text-accent-orange mb-1">M11 游戏化场景</h1>
@@ -201,6 +267,9 @@ export default function GameScenePage() {
         agents={agents}
         onAgentClick={handleAgentClick}
         onAgentMove={handleAgentMove}
+        onAgentRightClick={handleAgentRightClick}
+        onAgentDoubleClick={handleAgentDoubleClick}
+        onGameReady={(g) => { gameRef.current = g; }}
       />
 
       {/* Agent 详情面板 */}
@@ -209,6 +278,27 @@ export default function GameScenePage() {
         onClose={() => setSelectedAgentId(null)}
         onEmotionChange={handlePanelEmotion}
       />
+
+      {/* 右键耳语弹窗 */}
+      {whisperTarget && (
+        <WhisperBox
+          agentName={whisperTarget.name}
+          agentEmoji={whisperTarget.emoji}
+          onSubmit={handleWhisperSubmit}
+          onClose={() => setWhisperTargetId(null)}
+        />
+      )}
+
+      {/* 双击篡改面板 */}
+      {tamperTarget && (
+        <PersonaTamper
+          agentName={tamperTarget.name}
+          agentEmoji={tamperTarget.emoji}
+          initial={personalities[tamperTarget.agentId] ?? DEFAULT_PERSONALITY}
+          onSave={handleTamperSave}
+          onClose={() => setTamperTargetId(null)}
+        />
+      )}
 
       {/* Agent 投放面板 */}
       <Card className="mt-4 p-3">

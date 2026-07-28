@@ -69,6 +69,10 @@ export class MapScene extends Phaser.Scene {
   create(): void {
     this.input.dragDistanceThreshold = 8; // 防止点击时误触发拖拽
     this.ready = true;
+    // 监听来自 React 的耳语事件
+    this.game.events.on("agent-whisper", (agentId: string, message: string) => {
+      this.showAgentBubble(agentId, message);
+    });
     if (this.mapData) this.buildScene();
     else this.loadMap("library");
   }
@@ -308,20 +312,36 @@ export class MapScene extends Phaser.Scene {
       sprite.input!.cursor = "pointer";
       this.input.setDraggable(sprite);
 
-      // pointerdown → 记录起始位置 + 起始 tile（用于重叠回弹）
+      // pointerdown → 记录起始位置 + tile / 右键检测
       sprite.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+        if (pointer.rightButtonDown()) {
+          this.game.events.emit("agent-rightclicked", d.agentId);
+          return;
+        }
         this.dragStartX = pointer.x;
         this.dragStartY = pointer.y;
         sprite.setData("startTileX", d.tileX);
         sprite.setData("startTileY", d.tileY);
       });
 
-      // pointerup → 判断点击 vs 拖拽
+      // pointerup → 点击 vs 双击 vs 拖拽
       sprite.on("pointerup", (pointer: Phaser.Input.Pointer) => {
         const dx = pointer.x - this.dragStartX;
         const dy = pointer.y - this.dragStartY;
-        if (Math.abs(dx) < this.DRAG_THRESHOLD && Math.abs(dy) < this.DRAG_THRESHOLD) {
-          this.game.events.emit("agent-clicked", d.agentId);
+        if (Math.abs(dx) >= this.DRAG_THRESHOLD || Math.abs(dy) >= this.DRAG_THRESHOLD) return;
+        // 双击判定：300ms 内两次点击 = 双击；否则延迟 300ms 确认单击
+        const lastClick: number = sprite.getData("lastClick") ?? 0;
+        const now = Date.now();
+        if (lastClick && now - lastClick < 300) {
+          sprite.setData("lastClick", 0);
+          this.game.events.emit("agent-doubleclicked", d.agentId);
+        } else {
+          sprite.setData("lastClick", now);
+          this.time.delayedCall(310, () => {
+            if (sprite.getData("lastClick") === now) {
+              this.game.events.emit("agent-clicked", d.agentId);
+            }
+          });
         }
       });
 

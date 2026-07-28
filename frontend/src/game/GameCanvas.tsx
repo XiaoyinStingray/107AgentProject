@@ -15,6 +15,9 @@ interface Props {
   agents: AgentSpriteData[];
   onAgentClick?: (agentId: string) => void;
   onAgentMove?: (agentId: string, tileX: number, tileY: number) => void;
+  onAgentRightClick?: (agentId: string) => void;
+  onAgentDoubleClick?: (agentId: string) => void;
+  onGameReady?: (game: Phaser.Game) => void;
 }
 
 /**
@@ -22,12 +25,12 @@ interface Props {
  * agents prop 变更 → MapScene.setAgents()
  * Phaser 交互事件 → onAgentClick / onAgentMove → React
  */
-export default function GameCanvas({ mapId, agents, onAgentClick, onAgentMove }: Props) {
+export default function GameCanvas({ mapId, agents, onAgentClick, onAgentMove, onAgentRightClick, onAgentDoubleClick, onGameReady }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<Phaser.Game | null>(null);
   const prevMapRef = useRef<string>("");
-  const cbRef = useRef({ onAgentClick, onAgentMove });
-  cbRef.current = { onAgentClick, onAgentMove };
+  const cbRef = useRef({ onAgentClick, onAgentMove, onAgentRightClick, onAgentDoubleClick });
+  cbRef.current = { onAgentClick, onAgentMove, onAgentRightClick, onAgentDoubleClick };
 
   // 初始化 Phaser（仅一次）
   useEffect(() => {
@@ -57,6 +60,7 @@ export default function GameCanvas({ mapId, agents, onAgentClick, onAgentMove }:
 
     const game = new Phaser.Game(config);
     gameRef.current = game;
+    game.events.on("ready", () => onGameReady?.(game));
 
     // 监听 MapScene 发出的交互事件
     game.events.on("agent-clicked", (agentId: string) => {
@@ -64,6 +68,12 @@ export default function GameCanvas({ mapId, agents, onAgentClick, onAgentMove }:
     });
     game.events.on("agent-moved", (agentId: string, tx: number, ty: number) => {
       cbRef.current.onAgentMove?.(agentId, tx, ty);
+    });
+    game.events.on("agent-rightclicked", (agentId: string) => {
+      cbRef.current.onAgentRightClick?.(agentId);
+    });
+    game.events.on("agent-doubleclicked", (agentId: string) => {
+      cbRef.current.onAgentDoubleClick?.(agentId);
     });
 
     return () => {
