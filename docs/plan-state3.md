@@ -38,10 +38,10 @@
 | 63b | 16.2 | 开发 | 场景后端 API | 63a | `POST /api/scenes/{id}/state` + SceneEngine 基础 | 2h |
 | 64a | 16.3 | 开发 | 点击 + 拖拽交互（前端） | 63a | Agent 点击→面板；拖拽→移动；Phaser↔React 事件 bridge | 3h |
 | 64b | 16.3 | 开发 | 右键耳语 + 双击篡改 | 64a, 63b | 右键→WhisperBox；双击→PersonaTamper；需真实 Agent 数据 | 3h |
-| 64c | 16.3 | 开发 | Agent 互动系统 | 64a, 63b | LLM 对话（性格×场景×话题）+ 物品互动 + 随机事件引擎 | 5h |
+| 64c | 16.3 | 开发 | Agent 对话循环（Mock） | 64a, 63b | 接近检测+冷却+Mock对话数据（性格×场景）+气泡循环+后端占位 | 4h |
 | 65 | 16.4 | 开发 | 时间轴 + 快照 | 62, 63b | 拖拽回退 tick + 每 tick 场景快照 + 状态还原 | 4h |
 | 66 | 16.5 | 开发 | 特效 + 导演 | 63a, 64a | 气泡/天气/情绪动画 + 剧本触发器 + 上帝之声 + 分支入口 | 5h |
-| 66-S | 16.6 | 开发 | 丰富互动库 + 随机引擎 | 64c | 更多表情/互动/随机事件/物品对话；可配置权重与冷却；探索程序化生成 | 4h |
+| 66-S | 16.6 | 开发 | LLM 对话升级 + 内容扩充 | 64c | Mock→LLM切换+Agent物品互动+随机事件+更多表情变体+随机引擎 | 4h |
 | T5 | — | 测试 | Phase 16 性能 + E2E | 62–66 | 6 场景渲染 + 5 Agent 同屏流畅 + 时间轴回退全链路 | 3h |
 | T6 | — | 测试 | Phase 16 Bug 修补 | T5 | 渲染异常 + 拖拽 + 快照还原 | 2h |
 | **🎯 Phase 17: 打磨交付** | | | | | | |
@@ -861,83 +861,50 @@ interface SceneSnapshot {
 
 **验收标准：** 右键弹出输入框、耳语注入成功、双击弹出人格滑块、修改生效。
 
-### Step 64c — Agent 互动系统
+### Step 64c — Agent 对话循环（Mock）
 
-**目标：** Agent 间 LLM 对话（性格×场景×话题）+ Agent 与物品互动（LLM）+ 随机场景事件。预留扩展接口。
+**目标：** 纯前端 Mock 互动循环：Agent 接近→自动对话→气泡交替→冷却。后端留好占位接口，LLM 切到 66-S。
 
-**性格档案（给 LLM 的风格约束）：**
+**性格档案：**
 
-| Agent | 人格标签 | 说话风格 |
-|-------|---------|---------|
-| 小林 👨‍💻 | INTJ/理性/社恐 | 简短、技术向、偶尔冷吐槽 |
-| 小红 👩‍🎨 | ENFP/热情/跳脱 | 感叹号多、爱夸人、话题飞 |
-| 小刚 👨‍💼 | ESTJ/务实/控制欲 | 直接、定计划、偶尔唠叨 |
-| 小雪 👩‍🔬 | INFP/细腻/走神 | 温柔、观察入微、偶尔哲学 |
-| 阿杰 🧑‍🎤 | ENTP/戏精/爱抬杠 | 玩笑多、反问多、夸张 |
+| Agent | 说话风格 | 口头禅 |
+|-------|---------|--------|
+| 小林 👨‍💻 | 简短、技术向、冷吐槽 | "理论上…""有bug" |
+| 小红 👩‍🎨 | 感叹号多、爱夸人 | "天哪！""好可爱！" |
+| 小刚 👨‍💼 | 直接、务实、爱唠叨 | "抓紧时间""听我说" |
+| 小雪 👩‍🔬 | 温柔、观察入微 | "你有没有想过…""好像…" |
+| 阿杰 🧑‍🎤 | 玩笑多、反问多 | "不是吧？""我有个想法" |
 
-**互动触发规则：**
+**Mock 对话数据：** 按 `(from, to, scene)` 三要素组合，每组合 3-5 句。场景话题作为种子注入。
 
-```
-MapScene 每 4 秒扫描 Agent 距离：
-  if 两 Agent ≤ 2 tile AND 上次对话 > 10 秒:
-    → POST /api/scenes/{id}/interact { from, to, scene, topics }
-    → LLM 返回 { from, to, message }
-    → ActionBubble 显示在说话者头顶 (2.5s fade)
-    → 对方 1.5s 后回复
-```
-
-**LLM 提示词约束：** `max_tokens=60, temperature=0.9`，输出 `<name>：<15-25字对话>`，不问候、不自我介绍、直接说话。
-
-**Agent ↔ 物品互动（LLM）：**
-
-| 物品 | 条件 | LLM prompt |
-|------|------|-----------|
-| seat/desk | Agent 停在相邻 tile | "你坐在了{scene}的座位上，说一句当下心情（15字内）" |
-| pc | Agent 停在相邻 tile | "你正在用电脑，说一句和工作/学习相关的话（15字内）" |
-| piano | 小红/阿杰 停在相邻 tile | "你看到一架钢琴，即兴一段（15字内，带🎵" |
-| board | 小刚/小雪 停在相邻 tile | "你站在讲台前，对大家说一句（15字内）" |
-| bed | Agent 停在相邻 tile | "你累了，躺下时嘟囔一句（15字内）" |
-
-**随机场景事件（每 30-60 秒随机触发）：**
-
-| 场景 | 事件 | 全体反应 |
-|------|------|---------|
-| 图书馆 | "突然有人大声打电话" | 全员 emotion → anxious 或 angry |
-| 宿舍 | "外卖到了！" | 随机一人→happy，气泡"我的我的！" |
-| 教室 | "投影仪坏了" | 小刚→angry，气泡"又坏了？" |
-| 实验室 | "数据全跑崩了" | 全员→anxious/sad |
-| 樱花大道 | "一阵风吹过" | 粒子爆发3s，随机一人→happy |
-
-**扩展接口设计（为 66-S 准备）：**
+**交互触发规则：**
 
 ```
-// 性格档案（可追加新 Agent）
-interface PersonaProfile { name, personality, style, catchphrases[] }
-
-// 话题池（按场景可追加）
-interface TopicPool { sceneId, topics[] }
-
-// 互动规则（权重 + 冷却可配置）
-interface InteractionRule { trigger, cooldownMs, priority, validator }
-
-// 随机事件（条件 + 效果可扩展）
-interface RandomEvent { sceneId, condition, effects[], weight, cooldownMs }
+MapScene 内置定时器，每 4s 扫描：
+  for each agent pair:
+    if 距离 ≤ 2 tile AND 上次对话 > 8s:
+      → 随机选 speaker
+      → getDialogue(from, to, scene) → 返回一句
+      → ActionBubble 弹在 speaker 头顶 (2.5s fade)
+      → 对方 1.5s 后回复
 ```
+
+**后端占位：** `POST /api/scenes/{id}/interact` 端点返回 mock 对话（为 66-S 切 LLM 预留）。
 
 **涉及文件：**
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `backend/src/engines/scene/interact.py` | **新建** | 交互引擎：性格档案 + 提示词构建 + 话题池 + LLM 调用 |
-| `backend/src/api/scenes.py` | 修改 | `POST /api/scenes/{id}/interact` — Agent 对话 + 物品互动 |
-| `frontend/src/game/scenes/MapScene.ts` | 修改 | 接近扫描定时器 + 物品互动检测 + 随机事件调度 |
-| `frontend/src/game/sprites/AgentSprite.ts` | 修改 | 物品联动动作（sit→物品occupied / use_item） |
+| `frontend/src/game/scenes/MapScene.ts` | 修改 | 接近扫描定时器 + 对话调度 + 冷却管理 |
+| `frontend/src/game/dialogue.ts` | **新建** | Mock 对话数据 + `getDialogue(from, to, scene)` |
+| `backend/src/api/scenes.py` | 修改 | `POST /api/scenes/{id}/interact` — Mock 返回 |
+| `frontend/src/api/scenes.ts` | 修改 | +`useInteract` hook |
 
-**验收标准：** 相邻 Agent 自动对话、物品互动弹出 LLM 气泡、随机事件触发情绪变化、扩展接口文档完备。
+**验收标准：** 相邻 Agent 自动对话气泡交替、冷却正确、切换场景重置状态。
 
-### Step 66-S — 丰富互动库 + 随机引擎
+### Step 66-S — LLM 对话升级 + 内容扩充
 
-**目标：** 在 64c 基础上扩充表情/互动/随机事件库；探索程序化生成引擎。为 Phase 17 交付准备足够的内容深度。
+**目标：** Mock→LLM 切换 + Agent-物品互动 + 随机场景事件 + 表情/变体扩充 + 随机引擎。
 
 **涉及文件：** 待 64c 完成后细化。
 
