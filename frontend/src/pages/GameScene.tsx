@@ -7,6 +7,7 @@ import AgentPanel from "../components/scene/AgentPanel";
 import PersonaTamper, { DEFAULT_PERSONALITY } from "../components/scene/PersonaTamper";
 import type { Personality } from "../components/scene/PersonaTamper";
 import CheckpointPanel from "../components/scene/CheckpointPanel";
+import DirectorPanel from "../components/scene/DirectorPanel";
 import { useSyncSceneState, useCheckpoints, useCreateCheckpoint, useDeleteCheckpoint } from "../api/scenes";
 
 /* —— 场景列表 —— */
@@ -82,6 +83,7 @@ export default function GameScenePage() {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [tamperTargetId, setTamperTargetId] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
+  const [weather, setWeather] = useState("clear");
   const syncMutation = useSyncSceneState();
   const mountedRef = useRef(false);
   const gameRef = useRef<Phaser.Game | null>(null);
@@ -213,6 +215,28 @@ export default function GameScenePage() {
     },
     [mapId, checkpoints],
   );
+
+  /** 导演: 切换天气 */
+  const handleWeatherChange = useCallback((w: string) => {
+    setWeather(w);
+    const ms = gameRef.current?.scene.getScene("MapScene") as any;
+    ms?.setWeather(w);
+  }, []);
+
+  /** 导演: 上帝之声 */
+  const handleGodVoice = useCallback((message: string) => {
+    const ms = gameRef.current?.scene.getScene("MapScene") as any;
+    ms?.broadcastGodVoice(message);
+  }, []);
+
+  /** 导演: 全员氛围 */
+  const handleMoodAll = useCallback((emotion: string) => {
+    setAgents((prev) => {
+      const next = prev.map((a) => ({ ...a, emotion: emotion as Emotion }));
+      saveAgents(mapId, next);
+      return next;
+    });
+  }, [mapId]);
 
   /** 删除存档 */
   const handleDeleteCheckpoint = useCallback(
@@ -359,9 +383,21 @@ export default function GameScenePage() {
         </div>
       </Card>
 
+      {/* 导演面板 (Step 66) */}
+      <Card className="mt-4 p-3">
+        <p className="text-xs font-mono text-text-secondary mb-2">导演模式</p>
+        <DirectorPanel
+          weather={weather}
+          onWeatherChange={handleWeatherChange}
+          onGodVoice={handleGodVoice}
+          onMoodAll={handleMoodAll}
+          paused={paused}
+        />
+      </Card>
+
       {/* 存档面板 */}
       <Card className="mt-4 p-3">
-        <p className="text-xs font-mono text-text-secondary mb-2">存档管理 (Step 65)</p>
+        <p className="text-xs font-mono text-text-secondary mb-2">存档管理</p>
         <CheckpointPanel
           checkpoints={checkpoints}
           count={checkpoints.length}

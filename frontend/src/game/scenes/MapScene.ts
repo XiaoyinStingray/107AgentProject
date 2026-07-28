@@ -284,6 +284,31 @@ export class MapScene extends Phaser.Scene {
   }
 
   /* ================================================================
+   * 导演模式（Step 66）— 天气 + 广播
+   * ================================================================ */
+
+  setWeather(type: string): void {
+    if (!this.mapData) return;
+    this.mapData.weather = type as any;
+    this.weatherTweens.forEach((t) => t.stop());
+    this.weatherTweens = [];
+    if (type === "sakura" || type === "rain") {
+      this.startWeather(type, this.mapData.width, this.mapData.height);
+    }
+  }
+
+  getWeather(): string { return this.mapData?.weather ?? "clear"; }
+
+  broadcastGodVoice(message: string): void {
+    this.agentSprites.forEach((sprite) => {
+      import("../sprites/ActionBubble").then(({ ActionBubble }) => {
+        const b = new ActionBubble(this, message);
+        b.show(sprite);
+      });
+    });
+  }
+
+  /* ================================================================
    * 暂停/继续（Step 65 存档系统）
    * ================================================================ */
 

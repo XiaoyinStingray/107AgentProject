@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { AVATAR_FRAME } from "../avatars";
+import { emoteBurst } from "../effects/EmoteBurst";
 
 export type Emotion =
   | "neutral" | "happy" | "anxious" | "angry" | "sad"
@@ -205,6 +206,10 @@ export class AgentSprite extends Phaser.GameObjects.Container {
     this.emotion = emotion;
     this.applyEmotion(emotion);
     this.startEmotionPopup();
+    // 粒子爆发（非 neutral）
+    if (emotion !== "neutral" && this.scene) {
+      emoteBurst(this.scene, this.x, this.y, emotion);
+    }
   }
 
   private applyEmotion(emotion: Emotion): void {
