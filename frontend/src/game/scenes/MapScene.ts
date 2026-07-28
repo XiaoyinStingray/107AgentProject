@@ -78,6 +78,7 @@ export class MapScene extends Phaser.Scene {
   }
 
   shutdown(): void {
+    this.game.events.off("agent-whisper");
     this.destroyScene();
   }
 
@@ -329,19 +330,25 @@ export class MapScene extends Phaser.Scene {
         const dx = pointer.x - this.dragStartX;
         const dy = pointer.y - this.dragStartY;
         if (Math.abs(dx) >= this.DRAG_THRESHOLD || Math.abs(dy) >= this.DRAG_THRESHOLD) return;
-        // 双击判定：300ms 内两次点击 = 双击；否则延迟 300ms 确认单击
+        // 双击判定：300ms 内两次点击 = 双击；超时 = 单击
         const lastClick: number = sprite.getData("lastClick") ?? 0;
+        const pendingTimer: Phaser.Time.TimerEvent | null = sprite.getData("clickTimer") ?? null;
         const now = Date.now();
         if (lastClick && now - lastClick < 300) {
+          // 双击：取消挂起的单击定时器
+          pendingTimer?.remove();
+          sprite.setData("clickTimer", null);
           sprite.setData("lastClick", 0);
           this.game.events.emit("agent-doubleclicked", d.agentId);
         } else {
           sprite.setData("lastClick", now);
-          this.time.delayedCall(310, () => {
+          const timer = this.time.delayedCall(310, () => {
             if (sprite.getData("lastClick") === now) {
+              sprite.setData("clickTimer", null);
               this.game.events.emit("agent-clicked", d.agentId);
             }
           });
+          sprite.setData("clickTimer", timer);
         }
       });
 

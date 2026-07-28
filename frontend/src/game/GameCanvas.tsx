@@ -60,7 +60,7 @@ export default function GameCanvas({ mapId, agents, onAgentClick, onAgentMove, o
 
     const game = new Phaser.Game(config);
     gameRef.current = game;
-    game.events.on("ready", () => onGameReady?.(game));
+    onGameReady?.(game);  // Phaser.Game 构造即就绪，无需等 ready 事件
 
     // 监听 MapScene 发出的交互事件
     game.events.on("agent-clicked", (agentId: string) => {
