@@ -355,4 +355,19 @@
 - **状态**：✅ 已修复 (2026-07-28, Step 65)
 - **优先级**：P2
 - **发现日期**：2026-07-28
-- **修复**：`buildScene()` 中改为**始终消费** `pendingAgents`（`const agents = this.pendingAgents ?? []; this.pendingAgents = null; if (agents.length > 0) this.placeAgents(agents)`），不再依赖 `if (this.pendingAgents)` 的条件判断。同时 `loadMap()` 加 `_loadingMap` 防重入，避免 `create()` 和 React mapId effect 同时触发两次 import。
+- **修复**：GameCanvas mount 时通过 `game.registry.set("pendingMapId"/"pendingAgents")` 桥接初始数据；MapScene.create() 从 registry 读取，彻底绕过 `getScene()` 时序依赖。
+
+---
+
+## BUG-024：M11 侧边栏子项跳转不生效
+
+- **状态**：📝 已知，暂不修复
+- **优先级**：P3
+- **发现日期**：2026-07-28
+- **环境**：M11 侧边栏 → 子项（时间轴与快照/导演模式/叙事导出）
+- **复现步骤**：
+  1. 展开 M11 侧边栏
+  2. 点击 ⏪ 时间轴与快照 / 🎬 导演模式 / 📖 叙事导出
+- **实际结果**：跳转到 `/scene#item-57` 等 hash 路由，但 `/scene` 页面不处理 hash，停留在场景选择页无变化
+- **根因**：menuData 子项的导航逻辑为 `navigate('/scene#item-{id}')`，hash 片段不被 React Router 或 M11 页面消费
+- **计划修复时机**：对应功能（Step 65 时间轴、Step 66 导演、Step 71 叙事导出）实现后改为跳转具体子页面/锚点
