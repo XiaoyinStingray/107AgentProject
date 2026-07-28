@@ -61,6 +61,7 @@ export class MapScene extends Phaser.Scene {
   private dialogueCooldowns: Map<string, number> = new Map();
   private dialogueTimer: Phaser.Time.TimerEvent | null = null;
   private movers: Map<string, AutonomousMover> = new Map();
+  private _loadingMap = false;
   private ready = false;
 
   constructor() {
@@ -99,15 +100,19 @@ export class MapScene extends Phaser.Scene {
    * ================================================================ */
 
   loadMap(mapId: string): void {
+    if (this._loadingMap) return;
+    this._loadingMap = true;
     this.destroyScene();
 
     import(`../../data/scenes/${mapId}.json`)
       .then((m) => {
         this.mapData = (m.default ?? m) as MapData;
         if (this.ready) this.buildScene();
+        this._loadingMap = false;
       })
       .catch((err) => {
         console.error(`[MapScene] 加载场景失败: ${mapId}`, err);
+        this._loadingMap = false;
       });
   }
 
@@ -151,10 +156,10 @@ export class MapScene extends Phaser.Scene {
       this.startWeather(d.weather, W, H);
     }
 
-    // 5. Agent 精灵（如有挂起数据）
-    if (this.pendingAgents) {
-      this.placeAgents(this.pendingAgents);
-    }
+    // 5. Agent 精灵 — 始终消费 pending（修复 BUG-023 首次加载不显示）
+    const agents = this.pendingAgents ?? [];
+    this.pendingAgents = null;
+    if (agents.length > 0) this.placeAgents(agents);
   }
 
   /* ================================================================
@@ -275,6 +280,30 @@ export class MapScene extends Phaser.Scene {
   }
 
   /* ================================================================
+   * 暂停/继续（Step 65 存档系统）
+   * ================================================================ */
+
+  private paused = false;
+
+  isPaused(): boolean { return this.paused; }
+
+  pauseSimulation(): void {
+    if (this.paused) return;
+    this.paused = true;
+    this.movers.forEach((m) => m.stop());
+    if (this.dialogueTimer) this.dialogueTimer.paused = true;
+    // 取消所有进行中的 tween（停止移动动画）
+    this.tweens.killTweensOf(this.agentSprites);
+  }
+
+  resumeSimulation(): void {
+    if (!this.paused) return;
+    this.paused = false;
+    this.movers.forEach((m) => m.start());
+    if (this.dialogueTimer) this.dialogueTimer.paused = false;
+  }
+
+  /* ================================================================
    * Agent 精灵管理
    * ================================================================ */
 
@@ -326,7 +355,7 @@ export class MapScene extends Phaser.Scene {
         (tx, ty) => this.isOccupiedByOther(d.agentId, tx, ty),
         { w: this.mapData?.width ?? 12, h: this.mapData?.height ?? 8 },
       );
-      mover.start();
+      if (!this.paused) mover.start();
       this.movers.set(d.agentId, mover);
 
       // 交互区域 = 圆半径

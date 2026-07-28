@@ -6,7 +6,8 @@ import Card from "../components/shared/Card";
 import AgentPanel from "../components/scene/AgentPanel";
 import PersonaTamper, { DEFAULT_PERSONALITY } from "../components/scene/PersonaTamper";
 import type { Personality } from "../components/scene/PersonaTamper";
-import { useSyncSceneState } from "../api/scenes";
+import CheckpointPanel from "../components/scene/CheckpointPanel";
+import { useSyncSceneState, useCheckpoints, useCreateCheckpoint, useDeleteCheckpoint } from "../api/scenes";
 
 /* —— 场景列表 —— */
 const SCENES = [
@@ -80,9 +81,15 @@ export default function GameScenePage() {
   const [personalities, setPersonalities] = useState<Record<string, Personality>>(() => loadPersonalities());
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [tamperTargetId, setTamperTargetId] = useState<string | null>(null);
+  const [paused, setPaused] = useState(false);
   const syncMutation = useSyncSceneState();
   const mountedRef = useRef(false);
   const gameRef = useRef<Phaser.Game | null>(null);
+
+  // 存档 API
+  const { data: checkpoints = [] } = useCheckpoints(mapId);
+  const createCp = useCreateCheckpoint();
+  const deleteCp = useDeleteCheckpoint();
 
   const selectedAgent = useMemo(
     () => agents.find((a) => a.agentId === selectedAgentId) ?? null,
@@ -172,6 +179,46 @@ export default function GameScenePage() {
       gameRef.current?.events.emit("agent-whisper", selectedAgentId, message);
     },
     [selectedAgentId],
+  );
+
+  /** 暂停/继续 */
+  const handleTogglePause = useCallback(() => {
+    const ms = gameRef.current?.scene.getScene("MapScene") as any;
+    if (!ms) return;
+    if (paused) {
+      ms.resumeSimulation();
+      setPaused(false);
+    } else {
+      ms.pauseSimulation();
+      setPaused(true);
+    }
+  }, [paused]);
+
+  /** 保存存档 */
+  const handleSaveCheckpoint = useCallback(
+    (name: string) => {
+      createCp.mutate({ sceneId: mapId, name, agents });
+    },
+    [mapId, agents, createCp],
+  );
+
+  /** 加载存档 */
+  const handleLoadCheckpoint = useCallback(
+    (id: string) => {
+      const cp = checkpoints.find((c: any) => c.id === id);
+      if (!cp?.agents?.length) return;
+      setAgents(cp.agents);
+      saveAgents(mapId, cp.agents);
+    },
+    [mapId, checkpoints],
+  );
+
+  /** 删除存档 */
+  const handleDeleteCheckpoint = useCallback(
+    (id: string) => {
+      deleteCp.mutate({ sceneId: mapId, id });
+    },
+    [mapId, deleteCp],
   );
 
   /** 人格篡改保存 */
@@ -309,6 +356,21 @@ export default function GameScenePage() {
             );
           })}
         </div>
+      </Card>
+
+      {/* 存档面板 */}
+      <Card className="mt-4 p-3">
+        <p className="text-xs font-mono text-text-secondary mb-2">存档管理 (Step 65)</p>
+        <CheckpointPanel
+          checkpoints={checkpoints}
+          count={checkpoints.length}
+          max={30}
+          paused={paused}
+          onSave={handleSaveCheckpoint}
+          onLoad={handleLoadCheckpoint}
+          onDelete={handleDeleteCheckpoint}
+          onTogglePause={handleTogglePause}
+        />
       </Card>
 
       {/* 已投放 Agent 情绪控制 */}

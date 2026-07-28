@@ -352,15 +352,7 @@
 
 ## BUG-023：M11 首次进入 Agent 不加载，需切换场景后才出现
 
-- **状态**：📝 已知，暂不修复
-- **优先级**：P2（不影响功能——切一次场景即可正常使用）
+- **状态**：✅ 已修复 (2026-07-28, Step 65)
+- **优先级**：P2
 - **发现日期**：2026-07-28
-- **环境**：M11 游戏化场景 `/scene`
-- **复现步骤**：
-  1. 从侧边栏或其他页面首次进入 `/scene`
-  2. 观察 Phaser 画布——场景地面和物品正确渲染，但已投放的 Agent 精灵未出现
-  3. 点击切换场景（如从图书馆切到宿舍）→ Agent 正常加载
-  4. 之后再切回图书馆 → Agent 也正常显示
-- **根因分析**：BootScene 异步生成纹理（`await generateAllTextures`）需要 ~200ms。在此期间 React 的 agents useEffect 已将 Agent 数据通过 `setAgents()` 写入 MapScene 的 `pendingAgents`。但首屏时序存在竞态：BootScene 尚未 `start("MapScene")` 时，MapScene 实例虽已注册但 `create()` 未执行，其属性访问路径与 Phaser 内部生命周期依赖微妙顺序，导致 `pendingAgents` 写入与 `buildScene()` 消费之间存在丢失窗口。
-- **临时绕过**：切换场景即可触发 `loadMap()` → `destroyScene()` → 重建 → 重新消费 `setAgents()`，此后一切正常。
-- **计划修复时机**：Step 65（时间轴）或 T5（Phase 16 性能测试）中统一处理 Phaser 生命周期与 React 同步问题。
+- **修复**：`buildScene()` 中改为**始终消费** `pendingAgents`（`const agents = this.pendingAgents ?? []; this.pendingAgents = null; if (agents.length > 0) this.placeAgents(agents)`），不再依赖 `if (this.pendingAgents)` 的条件判断。同时 `loadMap()` 加 `_loadingMap` 防重入，避免 `create()` 和 React mapId effect 同时触发两次 import。

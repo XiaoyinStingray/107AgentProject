@@ -40,6 +40,7 @@ export const simulationKeys = {
 
 export const sceneKeys = {
   state: (sceneId: string) => ["scenes", sceneId, "state"] as const,
+  checkpoints: (sceneId: string) => ["scenes", sceneId, "checkpoints"] as const,
 };
 
 export const achievementKeys = {

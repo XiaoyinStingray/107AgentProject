@@ -8,10 +8,13 @@
     DELETE /api/scenes/{scene_id}/agents/{agent_id}  移除单个 Agent
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from engines.scene.engine import scene_engine, AgentSpriteData
+from models.checkpoint_orm import CheckpointRow
+from db import get_db
 
 router = APIRouter(prefix="/api/scenes", tags=["scenes"])
 
@@ -143,3 +146,71 @@ async def scene_interact(scene_id: str, body: InteractRequest):
         to_agent=body.to_agent,
         message=mock_replies.get(body.scene, "嗯…"),
     )
+
+
+# ── 存档（Step 65 Checkpoint）──
+
+class CheckpointCreate(BaseModel):
+    name: str = ""
+    agents: list[AgentSpriteSchema] = []
+
+
+class CheckpointResponse(BaseModel):
+    id: str
+    scene_id: str
+    name: str
+    agents: list[AgentSpriteSchema]
+    created_at: str
+
+    class Config:
+        from_attributes = True
+
+
+@router.get("/{scene_id}/checkpoints", response_model=list[CheckpointResponse])
+async def list_checkpoints(scene_id: str, db: AsyncSession = Depends(get_db)):
+    """列出某场景的所有存档"""
+    rows = await CheckpointRow.list_by_scene(db, scene_id)
+    result = []
+    for r in rows:
+        import json
+        agents_raw = json.loads(r.agents_json) if r.agents_json else []
+        result.append(CheckpointResponse(
+            id=r.id, scene_id=r.scene_id, name=r.name,
+            agents=[AgentSpriteSchema(**a) for a in agents_raw],
+            created_at=r.created_at.isoformat() if r.created_at else "",
+        ))
+    return result
+
+
+@router.post("/{scene_id}/checkpoints", response_model=CheckpointResponse)
+async def create_checkpoint(scene_id: str, body: CheckpointCreate, db: AsyncSession = Depends(get_db)):
+    """创建存档（上限 30）"""
+    count = await CheckpointRow.count_by_scene(db, scene_id)
+    if count >= CheckpointRow.MAX_PER_SCENE:
+        raise HTTPException(400, f"存档已达上限（{CheckpointRow.MAX_PER_SCENE}）")
+    import json
+    import uuid
+    from datetime import datetime, timezone
+    agents_json = json.dumps([a.model_dump() for a in body.agents], ensure_ascii=False)
+    now = datetime.now(timezone.utc)
+    row = CheckpointRow(
+        id=str(uuid.uuid4()), scene_id=scene_id, name=body.name,
+        agents_json=agents_json, created_at=now,
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return CheckpointResponse(
+        id=row.id, scene_id=row.scene_id, name=row.name,
+        agents=[AgentSpriteSchema(**a) for a in (json.loads(row.agents_json) if row.agents_json else [])],
+        created_at=row.created_at.isoformat() if row.created_at else "",
+    )
+
+
+@router.delete("/{scene_id}/checkpoints/{checkpoint_id}")
+async def delete_checkpoint(scene_id: str, checkpoint_id: str, db: AsyncSession = Depends(get_db)):
+    """删除存档"""
+    ok = await CheckpointRow.delete_by_id(db, checkpoint_id)
+    if not ok:
+        raise HTTPException(404, "存档不存在")
+    return {"ok": True}

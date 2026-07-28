@@ -43,3 +43,51 @@ export function useSyncSceneState() {
     },
   });
 }
+
+/* ── 存档（Step 65）── */
+
+interface CheckpointItem {
+  id: string;
+  name: string;
+  agents: AgentSpriteData[];
+  created_at: string;
+}
+
+export function useCheckpoints(sceneId: string) {
+  return useQuery({
+    queryKey: sceneKeys.checkpoints(sceneId),
+    queryFn: () =>
+      client.get<CheckpointItem[]>(`/scenes/${sceneId}/checkpoints`),
+    enabled: sceneId.length > 0,
+  });
+}
+
+export function useCreateCheckpoint() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      sceneId,
+      name,
+      agents,
+    }: {
+      sceneId: string;
+      name: string;
+      agents: AgentSpriteData[];
+    }) =>
+      client.post<CheckpointItem>(`/scenes/${sceneId}/checkpoints`, { name, agents }),
+    onSuccess: (_data, { sceneId }) => {
+      queryClient.invalidateQueries({ queryKey: sceneKeys.checkpoints(sceneId) });
+    },
+  });
+}
+
+export function useDeleteCheckpoint() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sceneId, id }: { sceneId: string; id: string }) =>
+      client.delete(`/scenes/${sceneId}/checkpoints/${id}`),
+    onSuccess: (_data, { sceneId }) => {
+      queryClient.invalidateQueries({ queryKey: sceneKeys.checkpoints(sceneId) });
+    },
+  });
+}
