@@ -116,9 +116,9 @@ describe("Step 28 FeatureRouteBoundary", () => {
     expect(screen.getByText("竞技场正文")).toBeInTheDocument();
   });
 
-  it("keeps all 56 menu IDs unique", () => {
+  it("keeps all menu IDs unique", () => {
     const items = MENU_SECTIONS.flatMap((section) => section.items);
-    expect(items).toHaveLength(56);
-    expect(new Set(items.map((item) => item.id)).size).toBe(56);
+    expect(items).toHaveLength(62);
+    expect(new Set(items.map((item) => item.id)).size).toBe(62);
   });
 });

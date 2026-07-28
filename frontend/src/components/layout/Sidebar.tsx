@@ -161,7 +161,7 @@ export default function Sidebar() {
             P0: 6 · P1: 14 · P2: 19 · P3: 17
           </p>
           <p className="text-xs font-mono text-text-secondary/40">
-            共 56 项功能菜单
+            共 62 项功能菜单
           </p>
         </div>
       )}

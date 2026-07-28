@@ -134,7 +134,14 @@ export const MENU_SECTIONS: MenuSection[] = [
   {
     title: "M11 游戏化场景",
     route: "/scene",
-    items: [],
+    items: [
+      { id: 57, emoji: "📚", label: "科大图书馆", priority: "P1" },
+      { id: 58, emoji: "🏠", label: "学生宿舍", priority: "P1" },
+      { id: 59, emoji: "🏫", label: "空教室", priority: "P1" },
+      { id: 60, emoji: "🎨", label: "艺术中心", priority: "P1" },
+      { id: 61, emoji: "🔬", label: "实验室", priority: "P1" },
+      { id: 62, emoji: "🌸", label: "樱花大道", priority: "P1" },
+    ],
   },
 ];
 

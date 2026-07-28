@@ -1,17 +1,21 @@
-import type { AgentSpriteData } from "../../game/sprites/AgentSprite";
+import type { AgentSpriteData, Emotion } from "../../game/sprites/AgentSprite";
 
 interface Props {
   agent: AgentSpriteData | null;
   onClose: () => void;
-  onEmotionChange?: (emotion: AgentSpriteData["emotion"]) => void;
+  onEmotionChange?: (emotion: Emotion) => void;
 }
 
-const EMOTION_LABELS: Record<string, string> = {
-  neutral: "😐 平静",
-  happy: "😊 开心",
-  anxious: "😰 焦虑",
-  angry: "😡 愤怒",
-  sad: "😢 悲伤",
+const EMOTION_LABELS: Record<Emotion, string> = {
+  neutral: "平静",
+  happy: "开心",
+  anxious: "焦虑",
+  angry: "愤怒",
+  sad: "悲伤",
+  surprised: "惊讶",
+  confused: "困惑",
+  tired: "疲惫",
+  excited: "兴奋",
 };
 
 export default function AgentPanel({ agent, onClose, onEmotionChange }: Props) {
@@ -42,24 +46,7 @@ export default function AgentPanel({ agent, onClose, onEmotionChange }: Props) {
       <div className="px-4 py-3 space-y-2 text-xs font-mono">
         <Row label="位置" value={`(${agent.tileX}, ${agent.tileY})`} />
         <Row label="动作" value={agent.action} />
-        <Row
-          label="情绪"
-          value={
-            <span
-              className={
-                agent.emotion === "angry"
-                  ? "text-red-400"
-                  : agent.emotion === "happy"
-                    ? "text-green-400"
-                    : agent.emotion === "anxious"
-                      ? "text-yellow-400"
-                      : "text-text-secondary"
-              }
-            >
-              {EMOTION_LABELS[agent.emotion] ?? agent.emotion}
-            </span>
-          }
-        />
+        <Row label="情绪" value={EMOTION_LABELS[agent.emotion] ?? agent.emotion} />
         <Row label="ID" value={agent.agentId} />
       </div>
 
@@ -67,18 +54,18 @@ export default function AgentPanel({ agent, onClose, onEmotionChange }: Props) {
       <div className="px-4 py-2 border-t border-border">
         <p className="text-[10px] font-mono text-text-secondary mb-1.5">切换情绪</p>
         <div className="flex flex-wrap gap-1">
-          {(Object.entries(EMOTION_LABELS) as [string, string][]).map(([key, label]) => (
+          {(Object.entries(EMOTION_LABELS) as [Emotion, string][]).map(([key, label]) => (
             <button
               key={key}
               type="button"
-              onClick={() => onEmotionChange?.(key as AgentSpriteData["emotion"])}
+              onClick={() => onEmotionChange?.(key)}
               className={`px-2 py-0.5 text-[10px] font-mono rounded border transition-colors ${
                 agent.emotion === key
                   ? "border-accent-orange/60 bg-accent-orange/10 text-accent-orange"
                   : "border-border text-text-secondary hover:border-text-secondary/40"
               }`}
             >
-              {label.slice(0, 2)}
+              {label}
             </button>
           ))}
         </div>

@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import GameCanvas from "../game/GameCanvas";
-import type { AgentSpriteData } from "../game/sprites/AgentSprite";
+import type { AgentSpriteData, Emotion } from "../game/sprites/AgentSprite";
 import Card from "../components/shared/Card";
 import AgentPanel from "../components/scene/AgentPanel";
 import { useSyncSceneState } from "../api/scenes";
@@ -127,7 +127,7 @@ export default function GameScenePage() {
 
   /** 切换单个 Agent 的情绪 */
   const setAgentEmotion = useCallback(
-    (agentId: string, emotion: AgentSpriteData["emotion"]) => {
+    (agentId: string, emotion: Emotion) => {
       setAgents((prev) => {
         const next = prev.map((a) =>
           a.agentId === agentId ? { ...a, emotion } : a,
@@ -160,7 +160,7 @@ export default function GameScenePage() {
 
   /** AgentPanel 情绪切换 */
   const handlePanelEmotion = useCallback(
-    (emotion: AgentSpriteData["emotion"]) => {
+    (emotion: Emotion) => {
       if (!selectedAgentId) return;
       setAgentEmotion(selectedAgentId, emotion);
     },
@@ -257,7 +257,7 @@ export default function GameScenePage() {
                 <span className="text-xs font-mono text-text-primary w-10 shrink-0">
                   {agent.name}
                 </span>
-                {(["neutral", "happy", "anxious", "angry", "sad"] as const).map(
+                {(["neutral","happy","anxious","angry","sad","surprised","confused","tired","excited"] as Emotion[]).map(
                   (em) => (
                     <button
                       key={em}

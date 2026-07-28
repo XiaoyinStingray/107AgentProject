@@ -1,6 +1,10 @@
 import Phaser from "phaser";
 import { AVATAR_FRAME } from "../avatars";
 
+export type Emotion =
+  | "neutral" | "happy" | "anxious" | "angry" | "sad"
+  | "surprised" | "confused" | "tired" | "excited";
+
 export interface AgentSpriteData {
   agentId: string;
   name: string;
@@ -9,30 +13,88 @@ export interface AgentSpriteData {
   tileX: number;
   tileY: number;
   action: "idle" | "walk" | "sit" | "talk";
-  emotion: "neutral" | "happy" | "anxious" | "angry" | "sad";
+  emotion: Emotion;
 }
 
 const TILE = 64;
 const CIRCLE_R = 36;
 
-/** 情绪 → 弹窗 emoji */
-const EMOTION_EMOJI: Record<string, string> = {
+const EMOTION_EMOJI: Record<Emotion, string> = {
   neutral: "",
   happy: "😊",
   anxious: "😰",
   angry: "😡",
   sad: "😢",
+  surprised: "😲",
+  confused: "😵",
+  tired: "😴",
+  excited: "🤩",
 };
 
-/** 波兰球风格 — Agent 精灵。纯色球 + 白椭圆眼 + 情绪弹窗。 */
+/** 表情参数 */
+interface Face {
+  eyeW: number; eyeH: number; eyeY: number; eyeGap: number; eyeRot: number; eyeA: number;
+  mW: number; mH: number; mY: number; mA: number;
+  brows?: true;
+}
+
+/** 同情绪 2-3 种微变体，随机选取 */
+const FACES: Record<Emotion, Face[]> = {
+  neutral: [
+    { eyeW:12, eyeH:8,  eyeY:-6, eyeGap:8, eyeRot:0,   eyeA:1,   mW:10, mH:2,  mY:10, mA:0.85 },
+    { eyeW:11, eyeH:7,  eyeY:-6, eyeGap:9, eyeRot:0,   eyeA:1,   mW:9,  mH:2,  mY:10, mA:0.8  },
+  ],
+  happy: [
+    { eyeW:11, eyeH:5,  eyeY:-8, eyeGap:8, eyeRot:0,   eyeA:1,   mW:16, mH:5,  mY:8,  mA:0.9  },
+    { eyeW:10, eyeH:4,  eyeY:-8, eyeGap:9, eyeRot:0,   eyeA:1,   mW:14, mH:4,  mY:9,  mA:0.85 },
+    { eyeW:12, eyeH:6,  eyeY:-7, eyeGap:8, eyeRot:0,   eyeA:1,   mW:15, mH:6,  mY:8,  mA:0.9  },
+  ],
+  anxious: [
+    { eyeW:5,  eyeH:5,  eyeY:-6, eyeGap:6, eyeRot:0,   eyeA:1,   mW:7,  mH:6,  mY:12, mA:0.7  },
+    { eyeW:6,  eyeH:6,  eyeY:-6, eyeGap:5, eyeRot:0,   eyeA:1,   mW:6,  mH:5,  mY:13, mA:0.65 },
+  ],
+  angry: [
+    { eyeW:11, eyeH:7,  eyeY:-6, eyeGap:8, eyeRot:-0.3, eyeA:1,  mW:10, mH:2.5,mY:14, mA:0.9, brows:true },
+    { eyeW:10, eyeH:6,  eyeY:-6, eyeGap:8, eyeRot:-0.3, eyeA:1,  mW:8,  mH:2,  mY:14, mA:0.85,brows:true },
+    { eyeW:12, eyeH:8,  eyeY:-5, eyeGap:7, eyeRot:-0.3, eyeA:1,  mW:11, mH:3,  mY:14, mA:0.9, brows:true },
+  ],
+  sad: [
+    { eyeW:11, eyeH:5,  eyeY:-3, eyeGap:8, eyeRot:0,   eyeA:0.8, mW:8,  mH:3,  mY:17, mA:0.6  },
+    { eyeW:10, eyeH:4,  eyeY:-3, eyeGap:9, eyeRot:0,   eyeA:0.7, mW:7,  mH:2,  mY:17, mA:0.55 },
+  ],
+  surprised: [
+    { eyeW:8,  eyeH:12, eyeY:-6, eyeGap:8, eyeRot:0,   eyeA:1,   mW:10, mH:10, mY:12, mA:0.85 },
+    { eyeW:7,  eyeH:11, eyeY:-6, eyeGap:9, eyeRot:0,   eyeA:1,   mW:9,  mH:9,  mY:13, mA:0.8  },
+  ],
+  confused: [
+    { eyeW:14, eyeH:8,  eyeY:-8, eyeGap:7, eyeRot:-0.15,eyeA:0.9, mW:10, mH:3,  mY:10, mA:0.6, brows:true },
+    { eyeW:13, eyeH:7,  eyeY:-7, eyeGap:8, eyeRot:-0.1, eyeA:0.85,mW:9,  mH:3,  mY:11, mA:0.55,brows:true },
+  ],
+  tired: [
+    { eyeW:12, eyeH:4,  eyeY:-4, eyeGap:9, eyeRot:0,   eyeA:0.7, mW:7,  mH:2,  mY:12, mA:0.5  },
+    { eyeW:11, eyeH:3,  eyeY:-4, eyeGap:10,eyeRot:0,   eyeA:0.65,mW:6,  mH:2,  mY:13, mA:0.45 },
+  ],
+  excited: [
+    { eyeW:7,  eyeH:10, eyeY:-8, eyeGap:8, eyeRot:0,   eyeA:1,   mW:14, mH:6,  mY:8,  mA:0.9  },
+    { eyeW:8,  eyeH:11, eyeY:-8, eyeGap:7, eyeRot:0,   eyeA:1,   mW:16, mH:7,  mY:7,  mA:0.9  },
+    { eyeW:6,  eyeH:9,  eyeY:-8, eyeGap:9, eyeRot:0,   eyeA:1,   mW:13, mH:5,  mY:9,  mA:0.85 },
+  ],
+};
+
+function pickFace(emotion: Emotion): Face {
+  const variants = FACES[emotion] ?? FACES.neutral;
+  return variants[Math.floor(Math.random() * variants.length)];
+}
+
+/** 波兰球风格 — Agent 精灵。彩色球 + 白椭圆眼 + 嘴 + 情绪弹窗。 */
 export class AgentSprite extends Phaser.GameObjects.Container {
   public agentId: string;
   public tileX: number;
   public tileY: number;
   public action: AgentSpriteData["action"];
-  public emotion: AgentSpriteData["emotion"];
+  public emotion: Emotion;
 
-  private avatar: Phaser.GameObjects.Image | null = null;
+  private ball: Phaser.GameObjects.Arc | Phaser.GameObjects.Image | null = null;
   private leftEye: Phaser.GameObjects.Ellipse;
   private rightEye: Phaser.GameObjects.Ellipse;
   private leftBrow: Phaser.GameObjects.Rectangle | null = null;
@@ -43,11 +105,6 @@ export class AgentSprite extends Phaser.GameObjects.Container {
   private shadow: Phaser.GameObjects.Ellipse;
   private breathTween: Phaser.Tweens.Tween | null = null;
   private popupTimer: Phaser.Time.TimerEvent | null = null;
-
-  /* —— 五官常量 —— */
-  private static readonly EYE_Y = -6;
-  private static readonly EYE_GAP = 8;
-  private static readonly MOUTH_Y = 10;
 
   constructor(scene: Phaser.Scene, data: AgentSpriteData) {
     const px = data.tileX * TILE + TILE / 2;
@@ -64,48 +121,45 @@ export class AgentSprite extends Phaser.GameObjects.Container {
     this.shadow = scene.add.ellipse(0, CIRCLE_R - 8, CIRCLE_R * 2, 18, 0x000000, 0.22);
     this.add(this.shadow);
 
-    // 波兰球（72×72 纹理，displaySize 填满 72px 圆区域）
-    const frame = AVATAR_FRAME[data.agentId] ?? 0;
-    if (scene.textures.exists("avatars")) {
-      this.avatar = scene.add.image(0, 0, "avatars", frame).setDisplaySize(CIRCLE_R * 2, CIRCLE_R * 2);
-      this.add(this.avatar);
+    // 球体：优先用预生成纹理（有渐变），未知 Agent 用纯色 Circle
+    const frame = AVATAR_FRAME[data.agentId];
+    if (frame !== undefined && scene.textures.exists("avatars")) {
+      this.ball = scene.add.image(0, 0, "avatars", frame).setDisplaySize(CIRCLE_R * 2, CIRCLE_R * 2);
+    } else {
+      this.ball = scene.add.circle(
+        0, 0, CIRCLE_R - 2,
+        Phaser.Display.Color.HexStringToColor(data.color).color, 1,
+      );
+      this.ball.setStrokeStyle(2, 0xffffff, 0.25);
     }
+    this.add(this.ball);
 
     // 左眼
-    this.leftEye = scene.add.ellipse(
-      -AgentSprite.EYE_GAP, AgentSprite.EYE_Y, 12, 8, 0xffffff,
-    );
+    this.leftEye = scene.add.ellipse(-8, -6, 12, 8, 0xffffff);
     this.add(this.leftEye);
-
     // 右眼
-    this.rightEye = scene.add.ellipse(
-      AgentSprite.EYE_GAP, AgentSprite.EYE_Y, 12, 8, 0xffffff,
-    );
+    this.rightEye = scene.add.ellipse(8, -6, 12, 8, 0xffffff);
     this.add(this.rightEye);
-
     // 嘴
-    this.mouth = scene.add.ellipse(0, AgentSprite.MOUTH_Y, 10, 2, 0xffffff, 0.85);
+    this.mouth = scene.add.ellipse(0, 10, 10, 2, 0xffffff, 0.85);
     this.add(this.mouth);
 
     // 情绪 emoji 弹窗
     this.emotionPopup = scene.add.text(CIRCLE_R - 8, -CIRCLE_R + 6, "", {
-      fontSize: "20px",
-      fontFamily: "sans-serif",
+      fontSize: "20px", fontFamily: "sans-serif",
     }).setOrigin(0.5).setAlpha(0).setScale(0);
     this.add(this.emotionPopup);
 
     // 名字
     this.nameText = scene.add.text(0, CIRCLE_R + 10, data.name, {
-      fontSize: "16px",
-      fontFamily: "monospace",
-      color: "#e0e0e0",
-      backgroundColor: "rgba(0,0,0,0.55)",
+      fontSize: "16px", fontFamily: "monospace",
+      color: "#e0e0e0", backgroundColor: "rgba(0,0,0,0.55)",
       padding: { x: 6, y: 3 },
     }).setOrigin(0.5, 0);
     this.add(this.nameText);
 
-    this.applyAction(data.action);
     this.applyEmotion(data.emotion);
+    this.setAction(data.action);
     this.startEmotionPopup();
 
     scene.add.existing(this);
@@ -115,72 +169,28 @@ export class AgentSprite extends Phaser.GameObjects.Container {
   /* ================================================================
    * 位置
    * ================================================================ */
-
   setTile(tx: number, ty: number): void {
-    this.tileX = tx;
-    this.tileY = ty;
-    this.x = tx * TILE + TILE / 2;
-    this.y = ty * TILE + TILE / 2;
-  }
-
-  moveToTile(tx: number, ty: number, duration = 300): Promise<void> {
-    return new Promise((resolve) => {
-      this.tileX = tx;
-      this.tileY = ty;
-      this.scene.tweens.add({
-        targets: this,
-        x: tx * TILE + TILE / 2,
-        y: ty * TILE + TILE / 2,
-        duration,
-        ease: "Sine.easeInOut",
-        onComplete: () => resolve(),
-      });
-    });
+    this.tileX = tx; this.tileY = ty;
+    this.x = tx * TILE + TILE / 2; this.y = ty * TILE + TILE / 2;
   }
 
   /* ================================================================
    * 动作
    * ================================================================ */
-
   setAction(action: AgentSpriteData["action"]): void {
     this.action = action;
-    this.applyAction(action);
-  }
-
-  private applyAction(action: AgentSpriteData["action"]): void {
-    this.breathTween?.stop();
-    this.breathTween = null;
-
+    this.breathTween?.stop(); this.breathTween = null;
+    this.setScale(1); this.setAlpha(1); this.nameText.setVisible(true);
     switch (action) {
-      case "idle":
-        this.setScale(1);
-        this.setAlpha(1);
-        this.nameText.setVisible(true);
-        this.startBreath();
-        break;
+      case "idle": this.startBreath(); break;
       case "walk":
-        this.setScale(1);
-        this.setAlpha(1);
-        this.nameText.setVisible(true);
         this.breathTween = this.scene.tweens.add({
-          targets: this, scaleY: 0.96, duration: 150,
-          yoyo: true, repeat: -1, ease: "Sine.easeInOut",
-        });
-        break;
-      case "sit":
-        this.setScale(0.78);
-        this.y += 8;
-        this.nameText.setVisible(true);
-        break;
-      case "talk":
-        this.setScale(1);
-        this.setAlpha(1);
-        this.nameText.setVisible(true);
-        this.startBreath();
-        break;
+          targets: this, scaleY: 0.96, duration: 150, yoyo: true, repeat: -1, ease: "Sine.easeInOut",
+        }); break;
+      case "sit": this.setScale(0.78); this.y += 8; break;
+      case "talk": this.startBreath(); break;
     }
   }
-
   private startBreath(): void {
     this.breathTween = this.scene.tweens.add({
       targets: this, scaleX: 1.04, scaleY: 1.04,
@@ -189,119 +199,57 @@ export class AgentSprite extends Phaser.GameObjects.Container {
   }
 
   /* ================================================================
-   * 情绪 → 波兰球眼形
+   * 情绪 → 表情参数
    * ================================================================ */
-
-  setEmotion(emotion: AgentSpriteData["emotion"]): void {
+  setEmotion(emotion: Emotion): void {
     this.emotion = emotion;
     this.applyEmotion(emotion);
     this.startEmotionPopup();
   }
 
-  private applyEmotion(emotion: AgentSpriteData["emotion"]): void {
-    const ey = AgentSprite.EYE_Y;
-    const gap = AgentSprite.EYE_GAP;
-    const l = this.leftEye;
-    const r = this.rightEye;
-    const m = this.mouth;
-
-    // 清除旧眉毛
-    this.leftBrow?.destroy();
-    this.rightBrow?.destroy();
-    this.leftBrow = null;
-    this.rightBrow = null;
-
-    switch (emotion) {
-      case "neutral":
-        l.setPosition(-gap, ey).setSize(12, 8).setRotation(0).setAlpha(1);
-        r.setPosition(gap, ey).setSize(12, 8).setRotation(0).setAlpha(1);
-        m.setPosition(0, AgentSprite.MOUTH_Y).setSize(10, 2).setAlpha(0.85);
-        break;
-      case "happy":
-        l.setPosition(-gap, ey - 2).setSize(11, 5).setRotation(0).setAlpha(1);
-        r.setPosition(gap, ey - 2).setSize(11, 5).setRotation(0).setAlpha(1);
-        // 大弧线笑嘴
-        m.setPosition(0, AgentSprite.MOUTH_Y - 2).setSize(16, 5).setAlpha(0.9);
-        break;
-      case "anxious":
-        l.setPosition(-gap + 2, ey).setSize(5, 5).setRotation(0).setAlpha(1);
-        r.setPosition(gap - 2, ey).setSize(5, 5).setRotation(0).setAlpha(1);
-        // 小圆张嘴
-        m.setPosition(0, AgentSprite.MOUTH_Y + 2).setSize(7, 6).setAlpha(0.7);
-        break;
-      case "angry":
-        l.setPosition(-gap, ey).setSize(11, 7).setRotation(-0.3).setAlpha(1);
-        r.setPosition(gap, ey).setSize(11, 7).setRotation(0.3).setAlpha(1);
-        // 下弯嘴
-        m.setPosition(0, AgentSprite.MOUTH_Y + 4).setSize(10, 2.5).setAlpha(0.9);
-        this.addBrows("angry");
-        break;
-      case "sad":
-        l.setPosition(-gap, ey + 3).setSize(11, 5).setRotation(0).setAlpha(0.8);
-        r.setPosition(gap, ey + 3).setSize(11, 5).setRotation(0).setAlpha(0.8);
-        // 下坠小嘴
-        m.setPosition(0, AgentSprite.MOUTH_Y + 7).setSize(8, 3).setAlpha(0.6);
-        break;
+  private applyEmotion(emotion: Emotion): void {
+    const f = pickFace(emotion);
+    // 眼睛
+    this.leftEye.setPosition(-f.eyeGap, f.eyeY).setSize(f.eyeW, f.eyeH)
+      .setRotation(emotion === "angry" ? -0.3 : f.eyeRot).setAlpha(f.eyeA);
+    this.rightEye.setPosition(f.eyeGap, f.eyeY).setSize(f.eyeW, f.eyeH)
+      .setRotation(emotion === "angry" ? 0.3 : f.eyeRot).setAlpha(f.eyeA);
+    // 嘴
+    this.mouth.setPosition(0, f.mY).setSize(f.mW, f.mH).setAlpha(f.mA);
+    // 眉毛
+    this.leftBrow?.destroy(); this.rightBrow?.destroy();
+    this.leftBrow = null; this.rightBrow = null;
+    if (f.brows) {
+      const by = f.eyeY - 9;
+      this.leftBrow = this.scene.add.rectangle(-f.eyeGap - 1, by, 12, 3, 0xffffff).setRotation(-0.4);
+      this.rightBrow = this.scene.add.rectangle(f.eyeGap + 1, by, 12, 3, 0xffffff).setRotation(0.4);
+      this.add(this.leftBrow); this.add(this.rightBrow);
     }
-  }
-
-  /** 画眉毛（angry 时用） */
-  private addBrows(_style: string): void {
-    const by = AgentSprite.EYE_Y - 9;
-    const bg = AgentSprite.EYE_GAP;
-    this.leftBrow = this.scene.add.rectangle(-bg - 1, by, 12, 3, 0xffffff).setRotation(-0.4);
-    this.rightBrow = this.scene.add.rectangle(bg + 1, by, 12, 3, 0xffffff).setRotation(0.4);
-    this.add(this.leftBrow);
-    this.add(this.rightBrow);
   }
 
   /* ================================================================
    * 情绪 emoji 弹窗
    * ================================================================ */
-
   private startEmotionPopup(): void {
     this.popupTimer?.destroy();
     if (!this.emotionPopup) return;
-
     const emoji = EMOTION_EMOJI[this.emotion];
-    if (!emoji) {
-      this.emotionPopup.setAlpha(0).setScale(0);
-      return;
-    }
-
+    if (!emoji) { this.emotionPopup.setAlpha(0).setScale(0); return; }
     this.emotionPopup.setText(emoji);
-
     const show = () => {
       if (!this.emotionPopup || !this.scene) return;
       this.emotionPopup.setAlpha(1).setScale(0.3);
       this.scene.tweens.add({
-        targets: this.emotionPopup,
-        scaleX: 1.2, scaleY: 1.2,
-        duration: 300, ease: "Back.easeOut",
-        onComplete: () => {
-          this.scene.tweens.add({
-            targets: this.emotionPopup,
-            alpha: 0, duration: 800, delay: 600,
-          });
-        },
+        targets: this.emotionPopup, scaleX: 1.2, scaleY: 1.2, duration: 300, ease: "Back.easeOut",
+        onComplete: () => { this.scene.tweens.add({ targets: this.emotionPopup, alpha: 0, duration: 800, delay: 600 }); },
       });
     };
-
     show();
-    this.popupTimer = this.scene.time.addEvent({
-      delay: 5000 + Math.random() * 3000,
-      loop: true,
-      callback: show,
-    });
+    this.popupTimer = this.scene.time.addEvent({ delay: 5000 + Math.random() * 3000, loop: true, callback: show });
   }
 
-  /* ================================================================
-   * 清理
-   * ================================================================ */
-
   destroy(fromScene?: boolean): void {
-    this.breathTween?.stop();
-    this.popupTimer?.destroy();
+    this.breathTween?.stop(); this.popupTimer?.destroy();
     super.destroy(fromScene);
   }
 }
