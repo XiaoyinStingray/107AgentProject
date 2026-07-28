@@ -4,7 +4,6 @@ import GameCanvas from "../game/GameCanvas";
 import type { AgentSpriteData, Emotion } from "../game/sprites/AgentSprite";
 import Card from "../components/shared/Card";
 import AgentPanel from "../components/scene/AgentPanel";
-import WhisperBox from "../components/scene/WhisperBox";
 import PersonaTamper, { DEFAULT_PERSONALITY } from "../components/scene/PersonaTamper";
 import type { Personality } from "../components/scene/PersonaTamper";
 import { useSyncSceneState } from "../api/scenes";
@@ -80,7 +79,6 @@ export default function GameScenePage() {
   const [agents, setAgents] = useState<AgentSpriteData[]>(() => loadAgents(loadScene()));
   const [personalities, setPersonalities] = useState<Record<string, Personality>>(() => loadPersonalities());
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-  const [whisperTargetId, setWhisperTargetId] = useState<string | null>(null);
   const [tamperTargetId, setTamperTargetId] = useState<string | null>(null);
   const syncMutation = useSyncSceneState();
   const mountedRef = useRef(false);
@@ -89,10 +87,6 @@ export default function GameScenePage() {
   const selectedAgent = useMemo(
     () => agents.find((a) => a.agentId === selectedAgentId) ?? null,
     [agents, selectedAgentId],
-  );
-  const whisperTarget = useMemo(
-    () => agents.find((a) => a.agentId === whisperTargetId) ?? null,
-    [agents, whisperTargetId],
   );
   const tamperTarget = useMemo(
     () => agents.find((a) => a.agentId === tamperTargetId) ?? null,
@@ -166,24 +160,18 @@ export default function GameScenePage() {
     [selectedAgentId, setAgentEmotion],
   );
 
-  /** 右键 → 打开耳语 */
-  const handleAgentRightClick = useCallback((agentId: string) => {
-    setWhisperTargetId(agentId);
-  }, []);
-
   /** 双击 → 打开篡改面板 */
   const handleAgentDoubleClick = useCallback((agentId: string) => {
     setTamperTargetId(agentId);
   }, []);
 
-  /** 耳语发送 → 气泡显示 */
-  const handleWhisperSubmit = useCallback(
+  /** AgentPanel 耳语发送 → 气泡 */
+  const handlePanelWhisper = useCallback(
     (message: string) => {
-      if (!whisperTargetId) return;
-      // 通过 game events 通知 MapScene 显示气泡
-      gameRef.current?.events.emit("agent-whisper", whisperTargetId, message);
+      if (!selectedAgentId) return;
+      gameRef.current?.events.emit("agent-whisper", selectedAgentId, message);
     },
-    [whisperTargetId],
+    [selectedAgentId],
   );
 
   /** 人格篡改保存 */
@@ -267,7 +255,6 @@ export default function GameScenePage() {
         agents={agents}
         onAgentClick={handleAgentClick}
         onAgentMove={handleAgentMove}
-        onAgentRightClick={handleAgentRightClick}
         onAgentDoubleClick={handleAgentDoubleClick}
         onGameReady={(g) => { gameRef.current = g; }}
       />
@@ -277,17 +264,8 @@ export default function GameScenePage() {
         agent={selectedAgent}
         onClose={() => setSelectedAgentId(null)}
         onEmotionChange={handlePanelEmotion}
+        onWhisper={handlePanelWhisper}
       />
-
-      {/* 右键耳语弹窗 */}
-      {whisperTarget && (
-        <WhisperBox
-          agentName={whisperTarget.name}
-          agentEmoji={whisperTarget.emoji}
-          onSubmit={handleWhisperSubmit}
-          onClose={() => setWhisperTargetId(null)}
-        />
-      )}
 
       {/* 双击篡改面板 */}
       {tamperTarget && (

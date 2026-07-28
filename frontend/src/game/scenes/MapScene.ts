@@ -313,12 +313,8 @@ export class MapScene extends Phaser.Scene {
       sprite.input!.cursor = "pointer";
       this.input.setDraggable(sprite);
 
-      // pointerdown → 记录起始位置 + tile / 右键检测
+      // pointerdown → 记录起始位置 + tile
       sprite.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-        if (pointer.rightButtonDown()) {
-          this.game.events.emit("agent-rightclicked", d.agentId);
-          return;
-        }
         this.dragStartX = pointer.x;
         this.dragStartY = pointer.y;
         sprite.setData("startTileX", d.tileX);
