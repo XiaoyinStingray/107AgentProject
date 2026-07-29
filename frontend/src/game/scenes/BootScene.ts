@@ -1,21 +1,26 @@
 import Phaser from "phaser";
-import { generateAllTextures } from "../tileset";
 import { generateAvatarTexture } from "../avatars";
 
 /**
- * BootScene — 生成所有程序化贴图 → 跳转 MapScene。
- * 零外部资源加载，所有纹理在 create() 中 Canvas 生成。
+ * BootScene — 加载静态 tile spritesheet + 生成 Agent 头像。
+ * Tile 素材使用 AI 生成的 Retro Diffusion rd-tile 像素图。
  */
 export class BootScene extends Phaser.Scene {
   constructor() {
     super({ key: "BootScene" });
   }
 
+  preload(): void {
+    this.load.spritesheet("tiles", "assets/tiles.png", {
+      frameWidth: 64, frameHeight: 64,
+    });
+    this.load.spritesheet("items", "assets/items.png", {
+      frameWidth: 64, frameHeight: 64,
+    });
+  }
+
   async create(): Promise<void> {
-    await Promise.all([
-      generateAllTextures(this),
-      generateAvatarTexture(this),
-    ]);
+    await generateAvatarTexture(this);
     this.scene.start("MapScene");
   }
 }
