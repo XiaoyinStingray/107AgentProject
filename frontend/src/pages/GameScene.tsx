@@ -9,6 +9,7 @@ import type { Personality } from "../components/scene/PersonaTamper";
 import CheckpointPanel from "../components/scene/CheckpointPanel";
 import DirectorPanel from "../components/scene/DirectorPanel";
 import { useSyncSceneState, useCheckpoints, useCreateCheckpoint, useDeleteCheckpoint } from "../api/scenes";
+import { pickAccessoryId } from "../game/accessories";
 
 /* —— 场景列表 —— */
 const SCENES = [
@@ -31,12 +32,12 @@ const AGENT_POOL = [
 
 /* —— 每场景的投放坐标 —— */
 const SPAWN_SLOTS: Record<string, { tileX: number; tileY: number }[]> = {
-  library:    [{ tileX: 2, tileY: 3 }, { tileX: 4, tileY: 3 }, { tileX: 8, tileY: 3 }, { tileX: 6, tileY: 5 }, { tileX: 9, tileY: 5 }],
-  dorm:       [{ tileX: 3, tileY: 3 }, { tileX: 6, tileY: 3 }, { tileX: 9, tileY: 3 }, { tileX: 4, tileY: 5 }, { tileX: 8, tileY: 5 }],
-  classroom:  [{ tileX: 2, tileY: 2 }, { tileX: 4, tileY: 2 }, { tileX: 6, tileY: 2 }, { tileX: 8, tileY: 4 }, { tileX: 10, tileY: 4 }],
-  art:        [{ tileX: 2, tileY: 4 }, { tileX: 5, tileY: 3 }, { tileX: 7, tileY: 5 }, { tileX: 9, tileY: 4 }, { tileX: 4, tileY: 6 }],
-  lab:        [{ tileX: 3, tileY: 3 }, { tileX: 7, tileY: 3 }, { tileX: 5, tileY: 5 }, { tileX: 9, tileY: 5 }, { tileX: 2, tileY: 6 }],
-  sakura:     [{ tileX: 2, tileY: 2 }, { tileX: 5, tileY: 3 }, { tileX: 7, tileY: 4 }, { tileX: 9, tileY: 5 }, { tileX: 3, tileY: 6 }],
+  library:    [{ tileX: 3, tileY: 4 }, { tileX: 6, tileY: 4 }, { tileX: 10, tileY: 4 }, { tileX: 8, tileY: 7 }, { tileX: 12, tileY: 7 }],
+  dorm:       [{ tileX: 4, tileY: 4 }, { tileX: 8, tileY: 4 }, { tileX: 12, tileY: 4 }, { tileX: 5, tileY: 7 }, { tileX: 10, tileY: 7 }],
+  classroom:  [{ tileX: 2, tileY: 3 }, { tileX: 5, tileY: 3 }, { tileX: 8, tileY: 3 }, { tileX: 10, tileY: 6 }, { tileX: 13, tileY: 6 }],
+  art:        [{ tileX: 3, tileY: 5 }, { tileX: 7, tileY: 4 }, { tileX: 10, tileY: 7 }, { tileX: 13, tileY: 5 }, { tileX: 5, tileY: 9 }],
+  lab:        [{ tileX: 4, tileY: 4 }, { tileX: 9, tileY: 4 }, { tileX: 7, tileY: 7 }, { tileX: 12, tileY: 7 }, { tileX: 2, tileY: 9 }],
+  sakura:     [{ tileX: 3, tileY: 3 }, { tileX: 7, tileY: 4 }, { tileX: 10, tileY: 6 }, { tileX: 13, tileY: 7 }, { tileX: 4, tileY: 9 }],
 };
 
 const SCENE_KEY = "m11-current-scene";
@@ -280,6 +281,7 @@ export default function GameScenePage() {
             tileY: slot.tileY,
             action: "idle" as const,
             emotion: "neutral" as const,
+            accessory: pickAccessoryId(),
           },
         ];
         saveAgents(mapId, next);

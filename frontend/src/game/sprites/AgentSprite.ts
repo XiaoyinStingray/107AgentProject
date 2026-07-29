@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { AVATAR_FRAME } from "../avatars";
 import { emoteBurst } from "../effects/EmoteBurst";
+import { AccessoryDef, getAccessory } from "../accessories";
 
 export type Emotion =
   | "neutral" | "happy" | "anxious" | "angry" | "sad"
@@ -15,6 +16,8 @@ export interface AgentSpriteData {
   tileY: number;
   action: "idle" | "walk" | "sit" | "talk";
   emotion: Emotion;
+  /** 配饰 ID（部署时随机分配，持久化到 localStorage，为空=不戴） */
+  accessory?: string;
 }
 
 const TILE = 64;
@@ -87,15 +90,17 @@ function pickFace(emotion: Emotion): Face {
   return variants[Math.floor(Math.random() * variants.length)];
 }
 
-/** 波兰球风格 — Agent 精灵。彩色球 + 白椭圆眼 + 嘴 + 情绪弹窗。 */
+/** 波兰球风格 — Agent 精灵。彩色球 + 白椭圆眼 + 嘴 + 情绪弹窗 + 可选配饰。 */
 export class AgentSprite extends Phaser.GameObjects.Container {
   public agentId: string;
   public tileX: number;
   public tileY: number;
   public action: AgentSpriteData["action"];
   public emotion: Emotion;
+  public accessory: AccessoryDef | undefined;
 
   private ball: Phaser.GameObjects.Arc | Phaser.GameObjects.Image | null = null;
+  private accSprite: Phaser.GameObjects.Image | null = null;
   private leftEye: Phaser.GameObjects.Ellipse;
   private rightEye: Phaser.GameObjects.Ellipse;
   private leftBrow: Phaser.GameObjects.Rectangle | null = null;
@@ -117,10 +122,21 @@ export class AgentSprite extends Phaser.GameObjects.Container {
     this.tileY = data.tileY;
     this.action = data.action;
     this.emotion = data.emotion;
+    this.accessory = data.accessory ? getAccessory(data.accessory) : undefined;
 
     // 阴影
     this.shadow = scene.add.ellipse(0, CIRCLE_R - 8, CIRCLE_R * 2, 18, 0x000000, 0.22);
     this.add(this.shadow);
+
+    // 配饰 — layer 0: 球体后面（翅膀等完全在球体背后）
+    if (this.accessory && this.accessory.layer === 0) {
+      const img = scene.add.image(
+        this.accessory.ox, this.accessory.oy, `acc_${this.accessory.id}`,
+      ).setScale(this.accessory.scale).disableInteractive();
+      if (this.accessory.rotation !== undefined) img.setAngle(this.accessory.rotation);
+      this.accSprite = img;
+      this.add(this.accSprite);
+    }
 
     // 球体：优先用预生成纹理（有渐变），未知 Agent 用纯色 Circle
     const frame = AVATAR_FRAME[data.agentId];
@@ -135,6 +151,16 @@ export class AgentSprite extends Phaser.GameObjects.Container {
     }
     this.add(this.ball);
 
+    // 配饰 — layer 1: 球体前、面部后（猫耳、光环等）
+    if (this.accessory && this.accessory.layer === 1) {
+      const img = scene.add.image(
+        this.accessory.ox, this.accessory.oy, `acc_${this.accessory.id}`,
+      ).setScale(this.accessory.scale).disableInteractive();
+      if (this.accessory.rotation !== undefined) img.setAngle(this.accessory.rotation);
+      this.accSprite = img;
+      this.add(this.accSprite);
+    }
+
     // 左眼
     this.leftEye = scene.add.ellipse(-8, -6, 12, 8, 0xffffff);
     this.add(this.leftEye);
@@ -144,6 +170,16 @@ export class AgentSprite extends Phaser.GameObjects.Container {
     // 嘴
     this.mouth = scene.add.ellipse(0, 10, 10, 2, 0xffffff, 0.85);
     this.add(this.mouth);
+
+    // 配饰 — layer 2: 面部之上（帽子/眼镜/领结盖在脸上）
+    if (this.accessory && this.accessory.layer >= 2) {
+      const img = scene.add.image(
+        this.accessory.ox, this.accessory.oy, `acc_${this.accessory.id}`,
+      ).setScale(this.accessory.scale).disableInteractive();
+      if (this.accessory.rotation !== undefined) img.setAngle(this.accessory.rotation);
+      this.accSprite = img;
+      this.add(this.accSprite);
+    }
 
     // 情绪 emoji 弹窗
     this.emotionPopup = scene.add.text(CIRCLE_R - 8, -CIRCLE_R + 6, "", {

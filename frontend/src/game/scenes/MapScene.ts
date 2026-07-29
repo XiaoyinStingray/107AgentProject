@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { ITEM_FRAME } from "../tileset";
+import { ITEM_FRAME, DECOR_FRAME, WALL_DECOR_FRAME, BG_FRAME, FG_FRAME } from "../tileset";
 import { AgentSprite, AgentSpriteData } from "../sprites/AgentSprite";
 import { getDialogue } from "../dialogue";
 import { AutonomousMover } from "../AutonomousMover";
@@ -54,6 +54,8 @@ export class MapScene extends Phaser.Scene {
   private tilemap: Phaser.Tilemaps.Tilemap | null = null;
   private groundLayer: Phaser.Tilemaps.TilemapLayer | null = null;
   private itemObjects: Phaser.GameObjects.GameObject[] = [];
+  private bgImage: Phaser.GameObjects.Image | null = null;
+  private fgImages: Phaser.GameObjects.Image[] = [];
   private weatherTweens: Phaser.Tweens.Tween[] = [];
   private agentSprites: Map<string, AgentSprite> = new Map();
   private pendingAgents: AgentSpriteData[] | null = null;
@@ -131,6 +133,13 @@ export class MapScene extends Phaser.Scene {
     const W = d.width;
     const H = d.height;
 
+    // 0. 背景层 — 场景专属 tileable 墙纸
+    if (this.textures.exists("backgrounds")) {
+      const bgFrame = BG_FRAME[d.id] ?? 0;
+      this.bgImage = this.add.image(W * TILE_S / 2, H * TILE_S / 2, "backgrounds", bgFrame)
+        .setDisplaySize(W * TILE_S, H * TILE_S).setDepth(-1);
+    }
+
     // 1. 生成合并图层数据（地面 0-5 + 墙壁 6-9）
     const layerData = this.buildLayerData(d);
 
@@ -155,6 +164,9 @@ export class MapScene extends Phaser.Scene {
     // 3. 物品
     this.placeItems(d);
 
+    // 3.5 装饰层（地板花纹 + 墙面挂饰）
+    this.placeDecors(d);
+
     // 4. 天气
     if (d.weather === "sakura" || d.weather === "rain") {
       this.startWeather(d.weather, W, H);
@@ -164,6 +176,20 @@ export class MapScene extends Phaser.Scene {
     const agents = this.pendingAgents ?? [];
     this.pendingAgents = null;
     if (agents.length > 0) this.placeAgents(agents);
+
+    // 6. 前景层 — 覆盖在 Agent 上方（吊灯影、树冠等）
+    const fgs = (d as any).foregrounds as Array<{ type: string; tileX: number; tileY: number }> | undefined;
+    this.fgImages = [];
+    if (fgs?.length && this.textures.exists("foregrounds")) {
+      fgs.forEach((fg) => {
+        const cfg = FG_FRAME[fg.type];
+        if (cfg === undefined) return;
+        const cx = fg.tileX * TILE_S + TILE_S / 2;
+        const cy = fg.tileY * TILE_S + TILE_S / 2;
+        const img = this.add.image(cx, cy, "foregrounds", cfg).setAlpha(0.35).setDepth(20);
+        this.fgImages.push(img);
+      });
+    }
   }
 
   /* ================================================================
@@ -247,6 +273,22 @@ export class MapScene extends Phaser.Scene {
         this.itemObjects.push(sprite);
       }
       // 若类型无对应帧，静默跳过（不渲染 emoji）
+    });
+  }
+
+  /** 放置地板装饰 + 墙面挂饰 */
+  private placeDecors(d: MapData): void {
+    const decors = (d as any).decors as Array<{ type: string; tileX: number; tileY: number }> | undefined;
+    if (!decors?.length) return;
+
+    decors.forEach((item) => {
+      const cx = item.tileX * TILE_S + TILE_S / 2;
+      const cy = item.tileY * TILE_S + TILE_S / 2;
+      const frame = DECOR_FRAME[item.type] ?? WALL_DECOR_FRAME[item.type];
+      if (frame !== undefined && this.textures.exists("decors")) {
+        const sprite = this.add.image(cx, cy, "decors", frame).setDepth(3);
+        this.itemObjects.push(sprite);
+      }
     });
   }
 
@@ -337,10 +379,11 @@ export class MapScene extends Phaser.Scene {
         const mover = new AutonomousMover(sprite, this, undefined,
           (tx, ty) => this.isWalkable(tx, ty),
           (tx, ty) => this.isOccupiedByOther(d.agentId, tx, ty),
-          { w: this.mapData?.width ?? 12, h: this.mapData?.height ?? 8 },
+          { w: this.mapData?.width ?? 16, h: this.mapData?.height ?? 12 },
         );
         if (!this.paused) mover.start();
         this.movers.set(d.agentId, mover);
+        this.setupAgentInteraction(sprite, d);
       }
     }
   }
@@ -432,79 +475,84 @@ export class MapScene extends Phaser.Scene {
         undefined,
         (tx, ty) => this.isWalkable(tx, ty),
         (tx, ty) => this.isOccupiedByOther(d.agentId, tx, ty),
-        { w: this.mapData?.width ?? 12, h: this.mapData?.height ?? 8 },
+        { w: this.mapData?.width ?? 16, h: this.mapData?.height ?? 12 },
       );
       if (!this.paused) mover.start();
       this.movers.set(d.agentId, mover);
 
-      // 交互区域 = 圆半径
-      const r = 36;
-      sprite.setInteractive(
-        new Phaser.Geom.Circle(0, 0, r),
-        Phaser.Geom.Circle.Contains,
-      );
-      sprite.input!.cursor = "pointer";
-      this.input.setDraggable(sprite);
+      this.setupAgentInteraction(sprite, d);
+    });
+  }
 
-      // pointerdown → 记录起始位置 + tile
-      sprite.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-        this.dragStartX = pointer.x;
-        this.dragStartY = pointer.y;
-        sprite.setData("startTileX", d.tileX);
-        sprite.setData("startTileY", d.tileY);
-      });
+  /** 为 Agent sprite 设置点击/拖拽交互（placeAgents 和 syncAgentsInPlace 共用） */
+  private setupAgentInteraction(sprite: AgentSprite, d: AgentSpriteData): void {
+    // 交互区域 = 圆半径
+    const r = 36;
+    sprite.setInteractive(
+      new Phaser.Geom.Circle(0, 0, r),
+      Phaser.Geom.Circle.Contains,
+    );
+    sprite.input!.cursor = "pointer";
+    this.input.setDraggable(sprite);
 
-      // pointerup → 点击 vs 双击 vs 拖拽
-      sprite.on("pointerup", (pointer: Phaser.Input.Pointer) => {
-        const dx = pointer.x - this.dragStartX;
-        const dy = pointer.y - this.dragStartY;
-        if (Math.abs(dx) >= this.DRAG_THRESHOLD || Math.abs(dy) >= this.DRAG_THRESHOLD) return;
-        // 双击判定：300ms 内两次点击 = 双击；超时 = 单击
-        const lastClick: number = sprite.getData("lastClick") ?? 0;
-        const pendingTimer: Phaser.Time.TimerEvent | null = sprite.getData("clickTimer") ?? null;
-        const now = Date.now();
-        if (lastClick && now - lastClick < 300) {
-          // 双击：取消挂起的单击定时器
-          pendingTimer?.remove();
-          sprite.setData("clickTimer", null);
-          sprite.setData("lastClick", 0);
-          this.game.events.emit("agent-doubleclicked", d.agentId);
-        } else {
-          sprite.setData("lastClick", now);
-          const timer = this.time.delayedCall(310, () => {
-            if (sprite.getData("lastClick") === now) {
-              sprite.setData("clickTimer", null);
-              this.game.events.emit("agent-clicked", d.agentId);
-            }
-          });
-          sprite.setData("clickTimer", timer);
-        }
-      });
+    // pointerdown → 记录起始位置 + tile
+    sprite.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      this.dragStartX = pointer.x;
+      this.dragStartY = pointer.y;
+      sprite.setData("startTileX", d.tileX);
+      sprite.setData("startTileY", d.tileY);
+    });
 
-      // 拖拽中 → 跟随指针，限制在场景边界内
-      sprite.on("drag", (_ptr: Phaser.Input.Pointer, dragX: number, dragY: number) => {
-        const MW = (this.mapData?.width ?? 12) * TILE_S;
-        const MH = (this.mapData?.height ?? 8) * TILE_S;
-        sprite.x = Math.max(TILE_S / 2, Math.min(dragX, MW - TILE_S / 2));
-        sprite.y = Math.max(TILE_S / 2, Math.min(dragY, MH - TILE_S / 2));
-      });
+    // pointerup → 点击 vs 双击 vs 拖拽
+    sprite.on("pointerup", (pointer: Phaser.Input.Pointer) => {
+      const dx = pointer.x - this.dragStartX;
+      const dy = pointer.y - this.dragStartY;
+      if (Math.abs(dx) >= this.DRAG_THRESHOLD || Math.abs(dy) >= this.DRAG_THRESHOLD) return;
+      // 双击判定：300ms 内两次点击 = 双击；超时 = 单击
+      const lastClick: number = sprite.getData("lastClick") ?? 0;
+      const pendingTimer: Phaser.Time.TimerEvent | null = sprite.getData("clickTimer") ?? null;
+      const now = Date.now();
+      if (lastClick && now - lastClick < 300) {
+        // 双击：取消挂起的单击定时器
+        pendingTimer?.remove();
+        sprite.setData("clickTimer", null);
+        sprite.setData("lastClick", 0);
+        this.game.events.emit("agent-doubleclicked", d.agentId);
+      } else {
+        sprite.setData("lastClick", now);
+        const timer = this.time.delayedCall(310, () => {
+          if (sprite.getData("lastClick") === now) {
+            sprite.setData("clickTimer", null);
+            this.game.events.emit("agent-clicked", d.agentId);
+          }
+        });
+        sprite.setData("clickTimer", timer);
+      }
+    });
 
-      // 拖拽结束 → 吸附到最近可通行 tile + 重叠检查 + 通知 React
-      sprite.on("dragend", () => {
-        const W = this.mapData?.width ?? 12;
-        const H = this.mapData?.height ?? 8;
-        let tx = Math.round(sprite.x / TILE_S);
-        let ty = Math.round(sprite.y / TILE_S);
-        tx = Math.max(0, Math.min(tx, W - 1));
-        ty = Math.max(0, Math.min(ty, H - 1));
-        // 墙壁/重叠 → 弹回起始 tile
-        if (!this.isWalkable(tx, ty) || this.isOccupiedByOther(d.agentId, tx, ty)) {
-          tx = sprite.getData("startTileX") ?? d.tileX;
-          ty = sprite.getData("startTileY") ?? d.tileY;
-        }
-        sprite.setTile(tx, ty);
-        this.game.events.emit("agent-moved", d.agentId, tx, ty);
-      });
+    // 拖拽中 → 跟随指针，限制在场景边界内
+    sprite.on("drag", (_ptr: Phaser.Input.Pointer, dragX: number, dragY: number) => {
+      const MW = (this.mapData?.width ?? 16) * TILE_S;
+      const MH = (this.mapData?.height ?? 12) * TILE_S;
+      sprite.x = Math.max(TILE_S / 2, Math.min(dragX, MW - TILE_S / 2));
+      sprite.y = Math.max(TILE_S / 2, Math.min(dragY, MH - TILE_S / 2));
+    });
+
+    // 拖拽结束 → 吸附到最近可通行 tile + 重叠检查 + 通知 React
+    sprite.on("dragend", () => {
+      const W = this.mapData?.width ?? 16;
+      const H = this.mapData?.height ?? 12;
+      let tx = Math.round(sprite.x / TILE_S);
+      let ty = Math.round(sprite.y / TILE_S);
+      tx = Math.max(0, Math.min(tx, W - 1));
+      ty = Math.max(0, Math.min(ty, H - 1));
+      // 墙壁/重叠 → 弹回起始 tile
+      if (!this.isWalkable(tx, ty) || this.isOccupiedByOther(d.agentId, tx, ty)) {
+        tx = sprite.getData("startTileX") ?? d.tileX;
+        ty = sprite.getData("startTileY") ?? d.tileY;
+      }
+      sprite.setTile(tx, ty);
+      this.game.events.emit("agent-moved", d.agentId, tx, ty);
     });
   }
 
@@ -634,5 +682,8 @@ export class MapScene extends Phaser.Scene {
 
     if (this.groundLayer) { this.groundLayer.destroy(); this.groundLayer = null; }
     if (this.tilemap) { this.tilemap.destroy(); this.tilemap = null; }
+    if (this.bgImage) { this.bgImage.destroy(); this.bgImage = null; }
+    this.fgImages.forEach((img) => { try { img.destroy(); } catch { /* already gone */ } });
+    this.fgImages = [];
   }
 }

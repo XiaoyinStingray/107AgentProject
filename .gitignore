@@ -74,3 +74,6 @@ backend/data/*.sqlite
 # ===== Misc =====
 *.tmp
 *.temp
+*.ps1
+
+test_output/

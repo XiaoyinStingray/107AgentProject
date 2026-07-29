@@ -5,10 +5,10 @@ import { MapScene } from "./scenes/MapScene";
 import type { AgentSpriteData } from "./sprites/AgentSprite";
 
 const TILE = 64;
-const COLS = 12;
-const ROWS = 8;
-const W = COLS * TILE; // 768
-const H = ROWS * TILE; // 512
+const COLS = 16;
+const ROWS = 12;
+const W = COLS * TILE; // 1024
+const H = ROWS * TILE; // 768
 
 interface Props {
   mapId: string;

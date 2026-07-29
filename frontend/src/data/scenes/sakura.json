@@ -1,31 +1,53 @@
 {
   "id": "sakura",
   "name": "樱花大道",
-  "width": 12,
-  "height": 8,
+  "width": 16,
+  "height": 12,
   "tileSize": 32,
   "weather": "sakura",
   "indoor": false,
   "ground": [
-    [3,3,3,3,5,5,5,5,3,3,3,3],
-    [3,3,3,5,5,5,5,5,5,3,3,3],
-    [3,3,5,5,5,5,5,5,5,5,3,3],
-    [3,3,5,5,5,5,5,5,5,5,3,3],
-    [3,3,5,5,5,5,5,5,5,5,3,3],
-    [3,3,3,5,5,5,5,5,5,3,3,3],
-    [3,3,3,3,5,5,5,5,3,3,3,3],
-    [3,3,3,3,3,3,3,3,3,3,3,3]
+    [3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3],
+    [3,3,3,3,3,3,5,5,5,5,3,3,3,3,3,3],
+    [3,3,3,3,5,5,5,5,5,5,5,5,3,3,3,3],
+    [3,3,3,5,5,5,5,5,5,5,5,5,5,3,3,3],
+    [3,3,5,5,5,5,5,5,5,5,5,5,5,5,3,3],
+    [3,3,5,5,5,5,5,5,5,5,5,5,5,5,3,3],
+    [3,3,5,5,5,5,5,5,5,5,5,5,5,5,3,3],
+    [3,3,5,5,5,5,5,5,5,5,5,5,5,5,3,3],
+    [3,3,5,5,5,5,5,5,5,5,5,5,5,5,3,3],
+    [3,3,3,5,5,5,5,5,5,5,5,5,5,3,3,3],
+    [3,3,3,3,5,5,5,5,5,5,5,5,3,3,3,3],
+    [3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3]
   ],
   "items": [
-    {"id":"t1","type":"tree","tileX":1,"tileY":1,"state":"empty"},
-    {"id":"t2","type":"tree","tileX":3,"tileY":7,"state":"empty"},
-    {"id":"t3","type":"tree","tileX":8,"tileY":7,"state":"empty"},
-    {"id":"t4","type":"tree","tileX":10,"tileY":2,"state":"empty"},
-    {"id":"t5","type":"tree","tileX":11,"tileY":5,"state":"empty"},
-    {"id":"t6","type":"tree","tileX":0,"tileY":5,"state":"empty"},
-    {"id":"bn1","type":"bench","tileX":2,"tileY":4,"state":"empty"},
-    {"id":"bn2","type":"bench","tileX":9,"tileY":4,"state":"empty"},
-    {"id":"bn3","type":"bench","tileX":6,"tileY":1,"state":"empty"}
+    {"id":"t1","type":"tree","tileX":2,"tileY":1,"state":"empty"},
+    {"id":"t2","type":"tree","tileX":5,"tileY":10,"state":"empty"},
+    {"id":"t3","type":"tree","tileX":10,"tileY":10,"state":"empty"},
+    {"id":"t4","type":"tree","tileX":13,"tileY":2,"state":"empty"},
+    {"id":"t5","type":"tree","tileX":14,"tileY":8,"state":"empty"},
+    {"id":"t6","type":"tree","tileX":1,"tileY":8,"state":"empty"},
+    {"id":"t7","type":"tree","tileX":8,"tileY":1,"state":"empty"},
+    {"id":"bn1","type":"bench","tileX":3,"tileY":5,"state":"empty"},
+    {"id":"bn2","type":"bench","tileX":12,"tileY":5,"state":"empty"},
+    {"id":"bn3","type":"bench","tileX":8,"tileY":2,"state":"empty"},
+    {"id":"bn4","type":"bench","tileX":8,"tileY":9,"state":"empty"},
+    {"id":"bn5","type":"bench","tileX":5,"tileY":7,"state":"empty"},
+    {"id":"ln1","type":"lantern","tileX":3,"tileY":2,"state":"empty"},
+    {"id":"ln2","type":"lantern","tileX":12,"tileY":2,"state":"empty"},
+    {"id":"fb1","type":"flower_bed","tileX":7,"tileY":2,"state":"empty"},
+    {"id":"fb2","type":"flower_bed","tileX":7,"tileY":9,"state":"empty"},
+    {"id":"bu1","type":"bush","tileX":0,"tileY":3,"state":"empty"},
+    {"id":"bu2","type":"bush","tileX":15,"tileY":3,"state":"empty"},
+    {"id":"ft","type":"fountain","tileX":8,"tileY":6,"state":"empty"}
   ],
-  "spawns": [{"x":0,"y":4},{"x":11,"y":4}]
+  "decors": [
+    {"type":"rug_round","tileX":8,"tileY":5}
+  ],
+  "foregrounds": [
+    {"type":"tree_canopy","tileX":2,"tileY":1},
+    {"type":"tree_canopy","tileX":13,"tileY":2},
+    {"type":"tree_canopy","tileX":8,"tileY":1}
+  ],
+  "spawns": [{"x":0,"y":6},{"x":15,"y":6}]
 }
