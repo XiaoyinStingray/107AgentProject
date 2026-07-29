@@ -80,3 +80,66 @@
 - 前端新增 API 错误展示时优先使用 `ApiError.code`，同时保留对普通字符串和 FastAPI `detail` 的兼容。
 - 后续成就字段若扩展，应继续在 `frontend/src/api/achievements.ts` 的 API 边界统一做 snake_case → camelCase 映射。
 - T2 已关闭当前登记的缺陷；Phase 15 开发中新发现的问题进入 T4，不回填到本步。
+
+---
+
+## 依赖闭环补充验证（2026-07-29）
+
+### 背景
+
+T2 最初完成时，其依赖步骤 T1 尚未合入。T1 完成后，按
+`READ → DESIGN → CHECK-1 → IMPLEMENT → TEST → CHECK-2 → DONE`
+重新检查 Phase 14 Team 的创建、执行、完成态、报告持久化、评估与下载闭环。
+
+### 补充产出
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `requirements.txt` | 修改 | 登记 `pytest-cov>=6.0`，保证其他开发者可复现 Team 覆盖率验证 |
+| `backend/tests/test_team_engine.py` | 修改 | 补充完成态同步、报告持久化及显式结束测试 |
+| `backend/tests/test_teams_api.py` | 修改 | 补充持久化报告恢复及基于报告内容评估测试 |
+| `backend/tests/test_e2e_team.py` | 修改 | 修正真实 E2E 描述，并增加 Mock World 的完成事件与报告持久化闭环 |
+| `frontend/src/pages/TeamDashboard.tsx` | 修改 | 执行失败改为页面级可见提示；报告下载链接挂载 DOM 并延迟释放 Blob URL |
+| `frontend/src/pages/team/__tests__/TeamDashboard.test.tsx` | 修改 | 补充执行、评估、报告下载和执行失败回归测试 |
+
+### 补充决策记录
+
+- **真实 LLM 与 Mock 闭环分层验证：** 真实 Team E2E 验证 Agent 创建、组队、执行和 Plan；Mock World E2E 以确定性方式验证
+  `connected → agent_action → plan_updated → session_end → report_ready`
+  事件顺序及报告持久化，避免覆盖率测试重复消耗 API。
+- **不扩大为 T1 架构重构：** `engines/team/diagnostics.py` 与 `report.py` 已存在并有单元测试，但当前运行链路仍由
+  `PlanManager.build_report()` 生成报告。本次只验证现有生产闭环，不强行接入或删除未接线模块。
+- **按“发现一个、修复一个、测试一个”处理：** 自动化测试发现 Team 执行失败无可见反馈；人工验收发现下载按钮未触发真实浏览器下载。两项均先形成最小修复，再分别执行定向回归。
+- **依赖声明可复现：** `pytest-cov` 写入项目依赖，而不是只安装在当前虚拟环境。
+
+### 补充接口与回溯修改
+
+- 未修改 Phase 0 定义的共享 Pydantic/TypeScript 类型。
+- 未修改后端 API 路径、请求结构、响应结构或 SSE 事件类型。
+- ⚠️ **BREAKING（回溯修改记录）：** 修改了已完成 Step 53 的
+  `TeamDashboard.tsx` 和 Step T1 的 Team 测试产出，并重新执行对应定向测试、前端全量回归及生产构建。
+  这里的 `BREAKING` 仅用于 STEP.md 的向后修改审计，不表示对外接口不兼容。
+
+### 补充测试结果
+
+- [x] 后端定向测试：`31 passed, 1 warning`，包含真实 Team LLM E2E
+- [x] Team 引擎覆盖率：`84.74%`，达到 T1 要求的 `≥80%`
+- [x] Team 覆盖率测试：`74 passed`
+- [x] 后端全量回归：`443 passed, 2 deselected, 12 warnings`
+- [x] 前端 Team 定向测试：`28 passed`
+- [x] 前端全量回归：`284 passed`（28 个测试文件）
+- [x] TypeScript + Vite 生产构建：通过
+- [x] `git diff --check`：通过（仅 Windows LF/CRLF 提示）
+- [x] 人工验收：后端不可达时执行错误可见，重启后旧错误清除并可正常执行
+- [x] 人工验收：评估结果可见，Markdown 报告可下载，刷新后完成态和持久化报告可恢复
+
+> 后端全量回归中的 2 个 deselected 分别为已单独通过的真实 Team LLM E2E，以及与本次 T2
+> 依赖闭环无关、会重复消耗 API 的真实 Bench E2E。
+
+### 补充已知问题
+
+- 12 条后端警告包括既有 `StarletteDeprecationWarning`，以及 T1 测试中同步函数继承
+  `pytest.mark.asyncio` 的测试标记警告；均不影响本次结果。
+- Vite 构建成功，但游戏化 `GameScene` 分包约 `1.52 MB`，仍有 chunk size warning，留给后续性能打磨。
+- `npm install` 报告 7 个既有依赖漏洞；本次未执行可能产生破坏性升级的 `npm audit fix --force`。
+- `diagnostics.py`、`report.py` 与当前生产运行链路的接线关系需要由后续 Team 架构整理统一决定。
