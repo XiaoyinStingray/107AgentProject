@@ -1,15 +1,26 @@
 /**
  * TeamDashboard 组件测试 — Step T1。
- * 覆盖: Team 创建表单渲染、Team 列表展示。
+ * 覆盖: Team 创建表单渲染、Team 列表、执行、报告、评估与下载。
  */
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import TeamDashboard from "../../TeamDashboard";
-import type { TeamSummary } from "../../../types/team";
+import type { TeamPlan, TeamSummary } from "../../../types/team";
 
 // ── Mock API hooks ─────────────────────────────────────
+
+const hookState = vi.hoisted(() => ({
+  execute: vi.fn(),
+  evaluate: vi.fn(),
+  clear: vi.fn(),
+  disconnect: vi.fn(),
+  pause: vi.fn(),
+  start: vi.fn(),
+  plan: null as TeamPlan | null,
+  events: [] as Array<Record<string, unknown>>,
+}));
 
 const MOCK_AGENTS = [
   { id: "a1", name: "小红", persona: { mbti: "ENFP" } },
@@ -28,6 +39,31 @@ const MOCK_TEAMS: TeamSummary[] = [
   },
 ];
 
+const MOCK_PLAN: TeamPlan = {
+  id: "p1",
+  team_id: "t1",
+  task: "设计校园App",
+  steps: [
+    {
+      id: "s1",
+      title: "输出方案",
+      assignee: "a1",
+      description: "整理产品方案",
+      status: "done",
+      progress: 1,
+      depends_on: [],
+    },
+  ],
+  status: "finished",
+  world_id: "w1",
+  created_at: "2026-01-01T00:00:00Z",
+  progress_pct: 1,
+  report: {
+    title: "团队任务完成报告",
+    content: "完成校园应用原型与风险清单。",
+  },
+};
+
 vi.mock("../../../api/agents", () => ({
   useAgents: () => ({ data: MOCK_AGENTS }),
 }));
@@ -37,9 +73,9 @@ vi.mock("../../../api/teams", () => ({
   useCreateTeam: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDeleteTeam: () => ({ mutateAsync: vi.fn() }),
   useSuggestRoles: () => ({ mutateAsync: vi.fn(), isPending: false, isError: false }),
-  useExecuteTeam: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useEvaluateTeam: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useTeamPlan: () => ({ data: null }),
+  useExecuteTeam: () => ({ mutateAsync: hookState.execute, isPending: false }),
+  useEvaluateTeam: () => ({ mutateAsync: hookState.evaluate, isPending: false }),
+  useTeamPlan: () => ({ data: hookState.plan }),
 }));
 
 vi.mock("../../../api/market", () => ({
@@ -47,12 +83,17 @@ vi.mock("../../../api/market", () => ({
 }));
 
 vi.mock("../../../api/worlds", () => ({
-  usePauseWorld: () => ({ mutateAsync: vi.fn() }),
-  useStartWorld: () => ({ mutateAsync: vi.fn() }),
+  usePauseWorld: () => ({ mutateAsync: hookState.pause }),
+  useStartWorld: () => ({ mutateAsync: hookState.start }),
 }));
 
 vi.mock("../../../hooks/useSSE", () => ({
-  useSSE: () => ({ events: [], connected: false, disconnect: vi.fn(), clear: vi.fn() }),
+  useSSE: () => ({
+    events: hookState.events,
+    connected: false,
+    disconnect: hookState.disconnect,
+    clear: hookState.clear,
+  }),
 }));
 
 // ── Helper ─────────────────────────────────────────────
@@ -75,6 +116,12 @@ function renderDashboard() {
 describe("TeamDashboard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    hookState.plan = null;
+    hookState.events = [];
+    hookState.execute.mockResolvedValue(MOCK_PLAN);
+    hookState.evaluate.mockResolvedValue({ evaluation: "协作质量：9/10" });
+    hookState.pause.mockResolvedValue({});
+    hookState.start.mockResolvedValue({});
   });
 
   it("renders page title", () => {
@@ -114,5 +161,76 @@ describe("TeamDashboard", () => {
     // 使用 getByRole 精确匹配按钮，避免匹配到 "待执行" Badge
     const btn = screen.getByRole("button", { name: /执行/ });
     expect(btn).toBeInTheDocument();
+  });
+
+  it("executes a team and enters the live dashboard", async () => {
+    hookState.plan = MOCK_PLAN;
+    renderDashboard();
+
+    fireEvent.click(screen.getByRole("button", { name: /执行/ }));
+
+    await waitFor(() => {
+      expect(hookState.clear).toHaveBeenCalledOnce();
+      expect(hookState.execute).toHaveBeenCalledWith("t1");
+    });
+    expect(await screen.findByRole("button", { name: /返回列表/ })).toBeInTheDocument();
+    expect(screen.getByText("完成校园应用原型与风险清单。")).toBeInTheDocument();
+  });
+
+  it("evaluates a completed team and displays the result", async () => {
+    hookState.plan = MOCK_PLAN;
+    renderDashboard();
+    fireEvent.click(screen.getByRole("button", { name: /执行/ }));
+
+    fireEvent.click(await screen.findByRole("button", { name: /评估团队/ }));
+
+    await waitFor(() => {
+      expect(hookState.evaluate).toHaveBeenCalledWith("t1");
+    });
+    expect(await screen.findByText("协作质量：9/10")).toBeInTheDocument();
+  });
+
+  it("downloads the persisted report as markdown", async () => {
+    const createObjectURL = vi.fn(() => "blob:team-report");
+    const revokeObjectURL = vi.fn();
+    let clickedAnchor: HTMLAnchorElement | null = null;
+    const anchorClick = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        clickedAnchor = this;
+        expect(this.isConnected).toBe(true);
+      });
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: createObjectURL,
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: revokeObjectURL,
+    });
+    hookState.plan = MOCK_PLAN;
+    renderDashboard();
+    fireEvent.click(screen.getByRole("button", { name: /执行/ }));
+
+    fireEvent.click(await screen.findByRole("button", { name: /下载/ }));
+
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    expect(anchorClick).toHaveBeenCalledOnce();
+    expect(clickedAnchor).not.toBeNull();
+    expect(document.body.contains(clickedAnchor)).toBe(false);
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:team-report");
+    });
+    anchorClick.mockRestore();
+  });
+
+  it("shows an execute failure instead of failing silently", async () => {
+    hookState.execute.mockRejectedValueOnce(new Error("执行失败：后端不可用"));
+    renderDashboard();
+
+    fireEvent.click(screen.getByRole("button", { name: /执行/ }));
+
+    expect(await screen.findByText("执行失败：后端不可用")).toBeInTheDocument();
   });
 });

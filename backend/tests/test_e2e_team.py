@@ -8,6 +8,7 @@ Phase 14 E2E 全链路测试 — Step T1。
 
 import json
 import tempfile
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -78,7 +79,7 @@ def _create_agent(client, desc):
 class TestTeamFullChain:
 
     def test_full_chain(self, client):
-        """E2E 全链路：创建 Agent → 组队 → 执行 → 验证 Plan → 查看报告。"""
+        """真实 LLM 链路：创建 Agent → 组队 → 执行 → 验证 Plan。"""
 
         # 1. 创建 3 个 Agent（不同人格）
         a1 = _create_agent(client, "你是一个产品经理，MBTI 是 ENFP，善于沟通和创意发散")
@@ -142,3 +143,113 @@ class TestTeamFullChain:
         teams_list = resp.json()
         assert len(teams_list) >= 1
         assert any(t["id"] == team_id for t in teams_list)
+
+
+# =====================================================================
+# E2E: Team 完成闭环（Mock LLM / Mock World）
+# =====================================================================
+
+
+class _CompletingPlan:
+    """Deterministic PlanManager stand-in that completes on the first tick."""
+
+    def __init__(self):
+        self.all_done = False
+        self._ticks_on_step = 0
+        self.steps = [{"title": "输出方案", "status": "active", "progress": 0.1}]
+
+    async def check_progress(self, _tick, _events):
+        self.steps[0].update(status="done", progress=1.0)
+        self.all_done = True
+
+    def to_dict(self):
+        return {"steps": self.steps, "progress_pct": 1.0, "all_done": True}
+
+    def current_step(self):
+        return None
+
+    def build_report(self):
+        return {
+            "title": "团队任务完成报告",
+            "content": "已完成全部步骤",
+            "steps_count": 1,
+            "completed_count": 1,
+        }
+
+
+class _RecordingTeamEngine:
+    def __init__(self):
+        self.sync_count = 0
+        self.saved_reports = []
+
+    async def _sync_plan_to_db(self):
+        self.sync_count += 1
+
+    async def _save_report(self, report):
+        self.saved_reports.append(report)
+
+
+class _OneTickWorld:
+    def __init__(self, plan, team_engine):
+        self.agents = {}
+        self.world = SimpleNamespace(status="running")
+        self.current_tick = 0
+        self.team_plan = plan
+        self.team_engine = team_engine
+
+    async def tick_stream(self):
+        from models.event import SimEvent
+
+        self.current_tick = 1
+        yield SimEvent(
+            id="event-1",
+            world_id="world-team",
+            tick=1,
+            type="agent_action",
+            source_agent_id="agent-1",
+            description="提交最终方案",
+            data={"action": "submit_deliverable"},
+            created_at="2026-07-29T00:00:00+00:00",
+        )
+
+
+@pytest.mark.asyncio
+async def test_mock_runtime_emits_and_persists_completion(monkeypatch):
+    """Mock runtime must emit progress/report events and persist the report."""
+    import api.sse as sse_api
+
+    plan = _CompletingPlan()
+    team_engine = _RecordingTeamEngine()
+    world_engine = _OneTickWorld(plan, team_engine)
+
+    async def _skip_simulation_finish(_engine):
+        return None
+
+    monkeypatch.setattr(
+        sse_api,
+        "_finish_engine_simulation",
+        _skip_simulation_finish,
+    )
+    sse_api._active_connection_ids["world-team"] = "conn-team"
+
+    payloads = []
+    async for chunk in sse_api._world_event_generator(
+        "world-team",
+        world_engine,
+        "conn-team",
+    ):
+        payloads.append(json.loads(chunk.removeprefix("data: ").strip()))
+
+    event_types = [payload["type"] for payload in payloads]
+    assert event_types == [
+        "connected",
+        "agent_action",
+        "plan_updated",
+        "session_end",
+        "report_ready",
+    ]
+    assert payloads[2]["data"]["progress_pct"] == 1.0
+    assert payloads[-1]["data"]["completed_count"] == 1
+    assert world_engine.world.status == "finished"
+    assert team_engine.sync_count == 1
+    assert team_engine.saved_reports == [payloads[-1]["data"]]

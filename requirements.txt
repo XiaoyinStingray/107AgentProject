@@ -35,6 +35,7 @@ orjson>=3.10                        # 快速 JSON（SSE 高频序列化用）
 # ---- 测试 (Phase 0-9 全程) ----
 pytest>=8.3
 pytest-asyncio>=0.24
+pytest-cov>=6.0                    # Phase 14+ 测试线覆盖率报告
 
 # ---- 代码检查 ----
 ruff>=0.9                           # 格式化 + lint
