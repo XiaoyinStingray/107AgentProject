@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 from api.agents import get_agent_factory, router as agents_router
 from api.teams import router as teams_router
@@ -113,6 +114,20 @@ def _create_agent(client: TestClient, description: str = "测试角色") -> str:
     resp = client.post("/api/agents", json={"description": description})
     assert resp.status_code == 201, resp.text
     return resp.json()["id"]
+
+
+def _persist_plan_report(plan_id: str, report: dict) -> None:
+    """Write a report through a separate sync session to simulate SSE persistence."""
+    from models.plan_orm import PlanRow
+
+    engine = create_engine(_SYNC_DB_URL)
+    with Session(engine) as session:
+        row = session.get(PlanRow, plan_id)
+        assert row is not None
+        row.report = json.dumps(report, ensure_ascii=False)
+        row.status = "finished"
+        session.commit()
+    engine.dispose()
 
 
 # =============================================================================
@@ -355,6 +370,24 @@ class TestExecuteTeam:
         resp = client.get("/api/teams/nonexistent-99/plan")
         assert resp.status_code == 404
 
+    def test_get_plan_restores_persisted_report(self, client):
+        """重入 Team 页面时，Plan API 应恢复 SSE 已持久化的报告。"""
+        aid = _create_agent(client)
+        team = client.post("/api/teams", json={
+            "name": "报告恢复团队",
+            "description": "生成并保存报告",
+            "agent_ids": [aid],
+        }).json()
+        plan = client.post(f"/api/teams/{team['id']}/execute").json()
+        report = {"title": "团队任务完成报告", "content": "报告正文"}
+        _persist_plan_report(plan["id"], report)
+
+        response = client.get(f"/api/teams/{team['id']}/plan")
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "finished"
+        assert response.json()["report"] == report
+
     def test_execute_idempotent(self, client):
         """重复执行返回已有 Plan（不重复创建）。"""
         aid = _create_agent(client)
@@ -443,3 +476,41 @@ class TestEvaluateTeam:
             f"任务完成度：0/{len(plan['steps'])}（0%）"
             in response.json()["evaluation"]
         )
+
+    def test_evaluate_uses_persisted_report_content(self, client, monkeypatch):
+        """团队完成后，评估提示词必须包含已持久化的报告正文。"""
+        aid = _create_agent(client)
+        team = client.post("/api/teams", json={
+            "name": "已完成团队",
+            "description": "验证报告评估",
+            "agent_ids": [aid],
+        }).json()
+        plan = client.post(f"/api/teams/{team['id']}/execute").json()
+        report = {
+            "title": "团队任务完成报告",
+            "content": "关键成果：完成校园应用原型与风险清单。",
+        }
+        _persist_plan_report(plan["id"], report)
+        prompts = []
+
+        class RecordingModelClient:
+            async def create(self, messages, **kwargs):
+                prompts.append(messages[0].content)
+                return _FakeCreateResult("协作质量：9/10")
+
+        class RecordingFactory:
+            model_client = RecordingModelClient()
+
+        import api.agents
+
+        monkeypatch.setattr(
+            api.agents,
+            "get_agent_factory",
+            lambda: RecordingFactory(),
+        )
+
+        response = client.post(f"/api/teams/{team['id']}/evaluate")
+
+        assert response.status_code == 200
+        assert response.json() == {"evaluation": "协作质量：9/10"}
+        assert "完成校园应用原型与风险清单" in prompts[0]

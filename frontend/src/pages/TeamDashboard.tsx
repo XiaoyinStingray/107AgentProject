@@ -160,6 +160,7 @@ export default function TeamDashboard() {
 
   const handleExecute = useCallback(
     async (id: string) => {
+      setErrorMsg(null);
       try {
         clear(); // BUG-010: 新执行前清空上次残留事件
         const plan = await executeTeam.mutateAsync(id);
@@ -289,8 +290,12 @@ export default function TeamDashboard() {
                       const blob = new Blob([text as string], { type: "text/markdown;charset=utf-8" });
                       const url = URL.createObjectURL(blob);
                       const a = document.createElement("a");
-                      a.href = url; a.download = "team-report.md"; a.click();
-                      URL.revokeObjectURL(url);
+                      a.href = url;
+                      a.download = "team-report.md";
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      window.setTimeout(() => URL.revokeObjectURL(url), 0);
                     }}
                     className="px-3 py-1 text-xs font-mono rounded border border-border text-text-secondary hover:border-accent-green hover:text-accent-green transition-colors"
                   >
@@ -370,6 +375,14 @@ export default function TeamDashboard() {
       {showMarket && <div className="mb-6"><MarketPanel /></div>}
       {publishMsg && (
         <div className="mb-3 px-3 py-2 rounded border border-accent-green/40 bg-accent-green/5 text-xs font-mono text-accent-green">{publishMsg}</div>
+      )}
+      {errorMsg && (
+        <div
+          role="alert"
+          className="mb-3 px-3 py-2 rounded border border-accent-red/40 bg-accent-red/5 text-xs font-mono text-accent-red"
+        >
+          {errorMsg}
+        </div>
       )}
 
       {/* 操作栏 */}
@@ -490,10 +503,7 @@ export default function TeamDashboard() {
             {/* 角色预览 */}
             {RolePreview}
 
-            {/* 错误 + 创建 */}
-            {errorMsg && (
-              <p className="text-xs font-mono text-accent-red mb-3">{errorMsg}</p>
-            )}
+            {/* 创建 */}
             <button
               type="button"
               disabled={!canCreate}
