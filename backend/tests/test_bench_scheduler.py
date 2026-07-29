@@ -15,6 +15,7 @@ from db import Base
 from models.bench_orm import BenchRun, BenchResult
 from engines.bench.scheduler import (
     STD_AGENTS, STD_SCENARIOS, REPEAT_COUNT,
+    _build_tick_context,
     run_bench_suite,
 )
 
@@ -56,17 +57,29 @@ async def session():
 # Mock model client factory
 # =============================================================================
 
-class _FakeResult:
-    def __init__(self, content=""): self.content = content
-
-
 class MockModelClient:
     """模拟 LLM 客户端——返回固定格式的响应。"""
 
     model_info = {"function_calling": True, "vision": False, "json_output": True}
 
     async def create(self, messages, **kw):
-        return _FakeResult("我觉得应该这样做。这是经过深思熟虑的决定。")
+        from autogen_core.models import CreateResult, RequestUsage
+
+        return CreateResult(
+            finish_reason="stop",
+            content="我觉得应该这样做。这是经过深思熟虑的决定。",
+            usage=RequestUsage(prompt_tokens=10, completion_tokens=5),
+            cached=False,
+        )
+
+
+class FailingModelClient:
+    """模拟每个 tick 都无法调用 LLM。"""
+
+    model_info = {"function_calling": True, "vision": False, "json_output": True}
+
+    async def create(self, messages, **kw):
+        raise ConnectionError("mock LLM unavailable")
 
 
 def _mock_factory_factory(api_key, base_url, model):
@@ -77,6 +90,11 @@ def _mock_factory_factory(api_key, base_url, model):
 def _bad_factory_factory(api_key, base_url, model):
     """模拟连接失败。"""
     raise ConnectionError("无法连接到 LLM API")
+
+
+def _failing_model_factory(api_key, base_url, model):
+    """返回一个在生成阶段持续失败的 Mock 客户端。"""
+    return FailingModelClient()
 
 
 # =============================================================================
@@ -117,6 +135,23 @@ class TestTaskGeneration:
         for s in STD_SCENARIOS:
             assert s.name
             assert s.description
+
+    def test_final_week_context_interpolates_remaining_seats(self):
+        """期末周资源数量必须随 tick 变化，不能把表达式原样注入。"""
+        final_week = next(s for s in STD_SCENARIOS if s.name == "期末周")
+
+        context = _build_tick_context(final_week, 3)
+
+        assert "图书馆剩余座位 50 个" in context
+        assert "{max(" not in context
+
+    def test_non_final_week_context_uses_weather(self):
+        """非期末周场景使用普通天气上下文。"""
+        registration = next(s for s in STD_SCENARIOS if s.name == "新生报到")
+
+        context = _build_tick_context(registration, 2)
+
+        assert "🌤️ 天气: 晴" in context
 
 
 # =============================================================================
@@ -249,3 +284,59 @@ class TestRunBenchSuite:
         bench_run = result.scalar_one()
         assert bench_run.status == "failed"
         assert "LLM 连接失败" in bench_run.report
+
+    @pytest.mark.asyncio
+    async def test_all_tick_failures_are_persisted_as_zero_score_failures(
+        self,
+        session,
+        monkeypatch,
+    ):
+        """所有 tick 失败时，子任务与整次评测都必须明确失败。"""
+        from engines.bench import reporter
+
+        async def _mock_report(scores, task_count):
+            return "Mock failure report"
+
+        monkeypatch.setattr(reporter, "generate_report", _mock_report)
+        run = BenchRun(
+            id="test-run-all-failed",
+            name="全失败验证",
+            llm_api_key="sk-mock",
+            llm_base_url="http://mock",
+            llm_model="mock-model",
+        )
+        session.add(run)
+        await session.commit()
+
+        await run_bench_suite(
+            "test-run-all-failed",
+            session,
+            _failing_model_factory,
+        )
+
+        run_result = await session.execute(
+            select(BenchRun).where(BenchRun.id == "test-run-all-failed")
+        )
+        bench_run = run_result.scalar_one()
+        result_rows = await session.execute(
+            select(BenchResult).where(
+                BenchResult.run_id == "test-run-all-failed"
+            )
+        )
+        rows = result_rows.scalars().all()
+        zero_scores = {
+            "人格一致性": 0.0,
+            "决策质量": 0.0,
+            "交互深度": 0.0,
+            "鲁棒性": 0.0,
+            "创造力": 0.0,
+            "适应性": 0.0,
+        }
+
+        assert bench_run.status == "failed"
+        assert bench_run.completed_tasks == 27
+        assert bench_run.llm_api_key == ""
+        assert len(rows) == 27
+        assert all(row.status == "failed" for row in rows)
+        assert all(json.loads(row.scores_json) == zero_scores for row in rows)
+        assert all("all 8 ticks failed" in (row.error or "") for row in rows)

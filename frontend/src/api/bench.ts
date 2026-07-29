@@ -16,7 +16,11 @@ export function useBenchRuns() {
   return useQuery({
     queryKey: benchKeys.all,
     queryFn: () => client.get<BenchRunSummary[]>("/bench/runs"),
-    refetchInterval: 3_000,  // 运行中每 3s 轮询
+    // 空闲时停止轮询，避免用户停留在 Bench 页时永久请求后端。
+    refetchInterval: (query) =>
+      query.state.data?.some((run) => run.status === "running")
+        ? 3_000
+        : false,
   });
 }
 

@@ -3,8 +3,9 @@ Bench API — LLM 评测端点。
 Step 58: 创建评测任务 + 查询结果 + 报告。
 """
 
-import uuid
 import asyncio
+import time
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from loguru import logger
@@ -29,8 +30,6 @@ async def test_api(body: dict):
     try:
         from autogen_ext.models.openai import OpenAIChatCompletionClient
         from autogen_core.models import UserMessage
-        import time, asyncio
-
         client = OpenAIChatCompletionClient(
             model=model, api_key=api_key, base_url=base_url,
             model_info={"vision": False, "function_calling": True, "json_output": True,
@@ -108,8 +107,14 @@ async def get_bench_run(run_id: str, db: AsyncSession = Depends(get_db)):
 async def delete_bench_run(run_id: str, db: AsyncSession = Depends(get_db)):
     """删除评测记录及所有子结果。"""
     result = await db.execute(select(BenchRun).where(BenchRun.id == run_id))
-    if not result.scalar_one_or_none():
+    run = result.scalar_one_or_none()
+    if not run:
         raise HTTPException(status_code=404, detail="评测不存在")
+    if run.status == "running":
+        raise HTTPException(
+            status_code=409,
+            detail="运行中的评测不可删除，请等待完成",
+        )
     await db.execute(delete(BenchResult).where(BenchResult.run_id == run_id))
     await db.execute(delete(BenchRun).where(BenchRun.id == run_id))
     await db.commit()

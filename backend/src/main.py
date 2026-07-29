@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from config import ensure_dirs
-from db import init_db
+from db import async_session, init_db
 from api.agents import router as agents_router
 from api.arenas import router as arenas_router
 from api.export import router as export_router
@@ -24,6 +24,7 @@ from api.teams import router as teams_router
 from api.market import router as market_router
 from api.bench import router as bench_router
 from api.scenes import router as scenes_router
+from engines.bench.recovery import recover_interrupted_bench_runs
 from llm.errors import register_llm_error_middleware
 
 
@@ -33,6 +34,8 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Life Lab...")
     ensure_dirs()
     await init_db()
+    async with async_session() as db:
+        await recover_interrupted_bench_runs(db)
     logger.info("Life Lab ready")
     yield
     logger.info("Shutting down Life Lab")

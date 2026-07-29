@@ -60,6 +60,7 @@ export default function BenchLab() {
     try {
       const result = await createRun.mutateAsync({ api_key: apiKey, base_url: baseUrl, model, name: `${model} 评测` });
       setSelectedRunId(result.id);
+      setApiKey("");
       setMsg("评测已启动，后台运行中…");
     } catch { setMsg("启动失败"); }
     setTesting(false);
@@ -235,7 +236,21 @@ export default function BenchLab() {
                     <p className="text-xs font-mono text-text-primary">{r.name}</p>
                     <p className="text-xs text-text-secondary/50">{r.llm_model} · {r.completed_tasks}/{r.total_tasks}</p>
                   </div>
-                  <button onClick={(e) => { e.stopPropagation(); if(confirm("删除此评测?")) deleteRun.mutate(r.id); }} className="text-xs font-mono text-text-secondary hover:text-accent-red transition-colors mr-2">删除</button><span className="text-xs text-text-secondary/50">{r.created_at.slice(0, 16).replace("T", " ")}</span>
+                  <button
+                    type="button"
+                    disabled={r.status === "running" || deleteRun.isPending}
+                    title={r.status === "running" ? "运行中的评测不可删除" : "删除评测"}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (confirm("删除此评测?")) deleteRun.mutate(r.id);
+                    }}
+                    className="text-xs font-mono text-text-secondary hover:text-accent-red transition-colors mr-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    删除
+                  </button>
+                  <span className="text-xs text-text-secondary/50">
+                    {r.created_at.slice(0, 16).replace("T", " ")}
+                  </span>
                 </Card>
               ))}
             </div>
