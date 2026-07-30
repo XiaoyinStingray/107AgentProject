@@ -71,6 +71,7 @@ class BenchResult(Base):
             "scenario": self.scenario,
             "repeat_index": self.repeat_index,
             "scores": json.loads(self.scores_json) if self.scores_json else None,
+            "events_json": self.events_json,
             "status": self.status,
             "error": self.error,
             "created_at": self.created_at,

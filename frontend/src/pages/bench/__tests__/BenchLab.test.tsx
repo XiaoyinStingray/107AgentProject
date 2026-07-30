@@ -43,6 +43,8 @@ vi.mock("../../../api/bench", () => ({
   useCreateBenchTemplate: () => ({ mutate: vi.fn(), isPending: false }),
   useDeleteBenchTemplate: () => ({ mutate: vi.fn(), isPending: false }),
   useBenchByScenario: () => ({ data: null }),
+  useBenchFingerprint: () => ({ data: null }),
+  useDegradation: () => ({ data: null }),
 }));
 
 const RUNNING_RUN: BenchRunSummary = {

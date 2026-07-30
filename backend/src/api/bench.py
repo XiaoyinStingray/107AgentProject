@@ -228,6 +228,32 @@ async def cancel_bench_run(run_id: str, db: AsyncSession = Depends(get_db)):
     return {"ok": True}
 
 
+# ── 70: 行为指纹 ──
+
+@router.get("/runs/{run_id}/fingerprint")
+async def get_fingerprint(run_id: str, db: AsyncSession = Depends(get_db)):
+    """获取评测的评分诊断（解释每个维度为什么得这个分）。"""
+    from engines.bench.fingerprint import diagnose_scores
+
+    sub = await db.execute(
+        select(BenchResult).where(BenchResult.run_id == run_id)
+    )
+    results = [r.to_dict() for r in sub.scalars().all()]
+    return diagnose_scores(results)
+
+
+# ── 70: 劣化检测 ──
+
+@router.get("/degradation")
+async def get_degradation(db: AsyncSession = Depends(get_db)):
+    """检测所有模型的劣化趋势。"""
+    from engines.bench.fingerprint import detect_degradation
+
+    r = await db.execute(select(BenchRun).where(BenchRun.status == "done").order_by(BenchRun.created_at.asc()))
+    runs = [row.to_dict() for row in r.scalars().all()]
+    return detect_degradation(runs)
+
+
 async def _execute_bench_run(
     run_id: str,
     custom_agents: list | None = None,

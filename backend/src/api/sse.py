@@ -196,10 +196,12 @@ async def _world_event_generator(
                     # 67: 调 team_engine.on_tick（辩论检测 + 角色演化）
                     debate_state = None
                     evolutions: list[dict] = []
+                    extra_events: list[dict] = []
                     if hasattr(engine, "team_engine") and engine.team_engine:
-                        extra_events = await engine.team_engine.on_tick(
-                            tick_count, tick_events,
-                        )
+                        if hasattr(engine.team_engine, "on_tick"):
+                            extra_events = await engine.team_engine.on_tick(
+                                tick_count, tick_events,
+                            )
                         await engine.team_engine._sync_plan_to_db()
                         # 提取辩论+演化数据，嵌入 plan_updated
                         for ev in extra_events:
@@ -215,7 +217,7 @@ async def _world_event_generator(
                     # 角色：优先用演化后的，fallback 到初始分配
                     te = getattr(engine, "team_engine", None)
                     roles_src = getattr(engine, "team_agent_roles", {}) or {}
-                    if te and te._evolved_roles:
+                    if te and hasattr(te, "_evolved_roles") and te._evolved_roles:
                         roles_src = {**roles_src, **te._evolved_roles}
                     plan_data["agent_roles"] = [
                         {"id": aid, "name": name_map.get(aid, aid), "role": roles_src.get(aid, "成员")}

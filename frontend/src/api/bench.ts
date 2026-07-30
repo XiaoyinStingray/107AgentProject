@@ -89,11 +89,33 @@ export function useCancelBenchRun() {
 
 // 69: 分场景雷达
 export interface ByScenario { run_id: string; model: string; scenarios: Record<string, Record<string, number>>; }
-
 export function useBenchByScenario(runId: string | null) {
   return useQuery({
     queryKey: [...benchKeys.detail(runId ?? ""), "by-scenario"],
     queryFn: () => client.get<ByScenario>(`/bench/runs/${runId}/by-scenario`),
     enabled: !!runId,
+  });
+}
+
+// 70: 评分诊断
+export interface Fingerprint {
+  agents: Record<string, { diagnostics: Record<string,{score:number;reasons:string[];level:string}>; scores: Record<string,number>; event_counts: Record<string,number> }>;
+  total_agents: number;
+}
+export function useBenchFingerprint(runId: string | null, runStatus?: string) {
+  return useQuery({
+    queryKey: [...benchKeys.detail(runId ?? ""), "fingerprint"],
+    queryFn: () => client.get<Fingerprint>(`/bench/runs/${runId}/fingerprint`),
+    enabled: !!runId && runStatus === "done",
+    refetchInterval: runStatus === "done" ? false : 5_000,
+  });
+}
+
+// 70: 劣化检测
+export interface Degradation { [model: string]: { trend: string; declining: boolean; points: Array<{run_id:string;created_at:string;overall:number}> } }
+export function useDegradation() {
+  return useQuery({
+    queryKey: [...benchKeys.all, "degradation"],
+    queryFn: () => client.get<Degradation>("/bench/degradation"),
   });
 }

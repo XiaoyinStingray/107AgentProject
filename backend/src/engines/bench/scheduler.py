@@ -128,11 +128,10 @@ async def run_bench_suite(
         async with sem:
             result_id = str(uuid.uuid4())
             try:
-                scores = await _run_single_test(agent_tpl, scenario, rep, model_client, db)
-                return (result_id, scores, None)
+                scores, events = await _run_single_test(agent_tpl, scenario, rep, model_client, db)
+                return (result_id, scores, None, events)
             except Exception as e:
-                # 失败任务保留六维全零，避免下游把空 JSON 误认为“尚未计算”。
-                return (result_id, calculate_metrics([], {}), str(e)[:500])
+                return (result_id, calculate_metrics([], {}), str(e)[:500], [])
 
     # 构建任务列表 + 元数据
     task_specs = [
@@ -140,19 +139,20 @@ async def run_bench_suite(
     ]
 
     async def _run_with_meta(agent_tpl, scenario, rep):
-        result_id, scores, error = await _run_one(agent_tpl, scenario, rep)
-        return (agent_tpl, scenario, rep, result_id, scores, error)
+        result_id, scores, error, events = await _run_one(agent_tpl, scenario, rep)
+        return (agent_tpl, scenario, rep, result_id, scores, error, events)
 
     pending = [_run_with_meta(a, s, r) for a, s, r in task_specs]
 
     for coro in asyncio.as_completed(pending):
-        agent_tpl, scenario, rep, result_id, scores, error = await coro
+        agent_tpl, scenario, rep, result_id, scores, error, events_raw = await coro
         br = BenchResult(
             id=result_id, run_id=run_id,
             agent_template=agent_tpl.get("name", agent_tpl.get("id", "?")),
             scenario=scenario.name if hasattr(scenario, "name") else scenario.get("name", "?"),
             repeat_index=rep,
             scores_json=json.dumps(scores, ensure_ascii=False),
+            events_json=json.dumps(events_raw, ensure_ascii=False),
             status="done" if not error else "failed",
             error=error,
         )
@@ -187,7 +187,7 @@ async def run_bench_suite(
 
 
 async def _run_single_test(agent_tpl: dict, scenario, rep: int,
-                           model_client, _db: AsyncSession) -> dict:
+                           model_client, _db: AsyncSession):
     """运行一条评测：创建 Agent → 注入场景 → run 8 ticks → 计算指标。"""
     from engines.agent_factory.factory import AgentFactory
 
@@ -226,12 +226,14 @@ async def _run_single_test(agent_tpl: dict, scenario, rep: int,
             for msg in getattr(result, "inner_messages", []) or []:
                 content = str(getattr(msg, "content", ""))
                 if content:
-                    events.append({"type": "thought_stream", "content": content, "tick": tick})
+                    tag = "agent_action" if any(kw in content for kw in ["调用","执行","Action","Tool","function","complete_step","submit"]) else "thought_stream"
+                    events.append({"type": tag, "content": content, "tick": tick})
             # v0.7: messages 属性
             for msg in getattr(result, "messages", []) or []:
                 content = str(getattr(msg, "content", ""))
                 if content:
-                    events.append({"type": "agent_message", "content": content, "tick": tick})
+                    tag = "agent_action" if any(kw in content for kw in ["调用","执行","Action","Tool","function","complete_step","submit"]) else "agent_message"
+                    events.append({"type": tag, "content": content, "tick": tick})
             # 兜底: chat_message
             chat = getattr(result, "chat_message", None)
             if chat and getattr(chat, "content", ""):
@@ -239,7 +241,8 @@ async def _run_single_test(agent_tpl: dict, scenario, rep: int,
             # 兜底: result 本身就有 content
             content = getattr(result, "content", None)
             if content and isinstance(content, str):
-                events.append({"type": "agent_message", "content": content, "tick": tick})
+                tag = "agent_action" if any(kw in content for kw in ["调用","执行","Action","Tool","function","complete_step","submit"]) else "agent_message"
+                events.append({"type": tag, "content": content, "tick": tick})
         except asyncio.TimeoutError:
             tick_errors.append(f"tick {tick}: timeout")
         except Exception as exc:
@@ -265,4 +268,5 @@ async def _run_single_test(agent_tpl: dict, scenario, rep: int,
         f"Bench task finished: {agent_tpl['name']} × {scenario.name} #{rep}, "
         f"{successful_ticks}/8 ticks, {len(events)} events, scores={scores}"
     )
-    return scores
+    logger.info(f"  events collected: {len(events)} total (thoughts={sum(1 for e in events if e.get('type')=='thought_stream')}, msgs={sum(1 for e in events if e.get('type')=='agent_message')})")
+    return scores, events

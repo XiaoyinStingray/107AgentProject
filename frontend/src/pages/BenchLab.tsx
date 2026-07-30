@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useBenchRuns, useBenchRun, useCreateBenchRun, useDeleteBenchRun, useBenchTemplates, useCreateBenchTemplate, useDeleteBenchTemplate, useCancelBenchRun, useBenchByScenario } from "../api/bench";
+import { useBenchRuns, useBenchRun, useCreateBenchRun, useDeleteBenchRun, useBenchTemplates, useCreateBenchTemplate, useDeleteBenchTemplate, useCancelBenchRun, useBenchByScenario, useBenchFingerprint, useDegradation } from "../api/bench";
 import { useAgents } from "../api/agents";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
@@ -100,6 +100,9 @@ export default function BenchLab() {
       {/* 69: 自定义套件 + 模板 */}
       <CustomSuitePanel onStart={(cfg) => handleStart(cfg)} createPending={createRun.isPending} testing={testing} />
 
+      {/* 70: 劣化检测 */}
+      <DegradationPanel />
+
       {/* 对比 + 盲测 */}
       {doneRuns.length >= 2 && (
         <Card className="mb-6">
@@ -196,6 +199,9 @@ export default function BenchLab() {
           )}
 
           {/* 详细结果表 */}
+          {/* 70: 评分诊断 */}
+          <FingerprintPanel runId={selectedRunId} runStatus={detail?.status ?? selectedRun?.status} />
+
           {detail?.results && detail.results.length > 0 && (
             <div className="overflow-x-auto">
               <table className="w-full text-xs font-mono border-collapse">
@@ -472,7 +478,6 @@ function CustomSuitePanel({ onStart, createPending, testing }: {
 function ByScenarioRadars({ runId }: { runId: string | null }) {
   const { data } = useBenchByScenario(runId);
   if (!data?.scenarios || Object.keys(data.scenarios).length <= 1) return null;
-
   return (
     <div>
       <p className="text-xs font-mono text-text-secondary mb-2">分场景对比</p>
@@ -485,6 +490,70 @@ function ByScenarioRadars({ runId }: { runId: string | null }) {
         ))}
       </div>
     </div>
+  );
+}
+
+
+/* 70: 评分诊断面板 */
+function FingerprintPanel({ runId, runStatus }: { runId: string | null; runStatus?: string }) {
+  const { data } = useBenchFingerprint(runId, runStatus);
+  if (!data?.agents || Object.keys(data.agents).length === 0) return null;
+
+  const agents = (data as any)?.agents ?? {};
+  const hint = (data as any)?.hint;
+
+  return (
+    <Card className="p-4 space-y-3">
+      <h3 className="text-sm font-mono text-text-primary">🔍 评分诊断</h3>
+      {hint && <p className="text-xs font-mono text-text-secondary/40">{hint}</p>}
+      {Object.entries(agents).map(([name, agent]: any) => (
+        <div key={name} className="border-t border-border pt-2 first:border-0 first:pt-0">
+          <p className="text-xs font-mono text-text-primary mb-2">{name}</p>
+          {Object.entries(agent.diagnostics as Record<string, any>).map(([dim, d]) => (
+            <div key={dim} className="flex items-start gap-2 py-1.5 text-[11px] font-mono">
+              <span className={`shrink-0 text-right ${d.score >= 70 ? "text-accent-green" : d.score >= 40 ? "text-accent-orange" : "text-accent-red"}`} style={{minWidth:130}}>
+                {dim} <b>{d.score}</b>
+              </span>
+              <span className="text-accent-orange/70 shrink-0">[{d.level}]</span>
+              <span className="text-text-secondary/60 leading-relaxed">{d.reasons?.join(" · ")}</span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </Card>
+  );
+}
+
+
+/* 70: 劣化检测面板 */
+function DegradationPanel() {
+  const { data } = useDegradation();
+  if (!data || Object.keys(data).length === 0) return null;
+
+  const declining = Object.entries(data).filter(([, v]) => v.declining);
+
+  return (
+    <Card className="mb-6">
+      <h2 className="text-sm font-mono text-text-primary mb-3">📉 劣化检测</h2>
+      {Object.entries(data).map(([model, d]) => (
+        <div key={model} className="flex items-center gap-3 py-1 border-b border-border/30 last:border-0">
+          <span className="text-xs font-mono text-text-primary">{model}</span>
+          <span className={`text-xs font-mono ${d.declining ? "text-accent-red" : "text-text-secondary/50"}`}>{d.trend}</span>
+          {d.points.length >= 2 && (
+            <div className="flex-1 flex items-end gap-0.5 h-8">
+              {d.points.map((p, i) => (
+                <div key={i} className="flex-1 bg-accent-orange/30 rounded-t" style={{ height: `${Math.max(4, p.overall)}%` }}
+                  title={`#${i + 1}: ${p.overall}`} />
+              ))}
+            </div>
+          )}
+          <span className="text-[10px] font-mono text-text-secondary/30">{d.points.length}次</span>
+        </div>
+      ))}
+      {declining.length > 0 && (
+        <p className="text-xs font-mono text-accent-red mt-2">⚠️ {declining.map(([m]) => m).join("、")} 存在劣化趋势</p>
+      )}
+    </Card>
   );
 }
 
