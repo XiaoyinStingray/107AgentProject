@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useBenchRuns, useBenchRun, useCreateBenchRun, useDeleteBenchRun } from "../api/bench";
+import { useBenchRuns, useBenchRun, useCreateBenchRun, useDeleteBenchRun, useBenchTemplates, useCreateBenchTemplate, useDeleteBenchTemplate, useCancelBenchRun, useBenchByScenario } from "../api/bench";
+import { useAgents } from "../api/agents";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
 import EmptyState from "../components/shared/EmptyState";
@@ -10,6 +11,7 @@ export default function BenchLab() {
   const { data: runs = [] } = useBenchRuns();
   const createRun = useCreateBenchRun();
   const deleteRun = useDeleteBenchRun();
+  const cancelRun = useCancelBenchRun();
 
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("https://api.deepseek.com");
@@ -41,9 +43,8 @@ export default function BenchLab() {
     setRevealed(false);
   };
 
-  const handleStart = async () => {
+  const handleStart = async (custom?: { agents?: any[]; scenarios?: any[]; repeats?: number; template_id?: string }) => {
     if (!apiKey || !baseUrl || !model) return;
-    // 先测连通性
     setTesting(true); setMsg("正在测试 API 连通性…");
     try {
       const testRes = await fetch("/api/bench/test-api", {
@@ -51,17 +52,18 @@ export default function BenchLab() {
         body: JSON.stringify({ api_key: apiKey, base_url: baseUrl, model }),
       });
       const testData = await testRes.json();
-      if (!testData.ok) {
-        setMsg(`API 连接失败: ${testData.error}`); setTesting(false); return;
-      }
+      if (!testData.ok) { setMsg(`API 连接失败: ${testData.error}`); setTesting(false); return; }
       setMsg(`API 连通 (${testData.elapsed}s) → 启动评测…`);
     } catch { setMsg("API 测试请求失败"); setTesting(false); return; }
 
     try {
-      const result = await createRun.mutateAsync({ api_key: apiKey, base_url: baseUrl, model, name: `${model} 评测` });
+      const config: any = { api_key: apiKey, base_url: baseUrl, model, name: `${model} 评测` };
+      if (custom) Object.assign(config, custom);
+      if (!custom) config.name = `${model} 评测（标准套件）`;
+      const result = await createRun.mutateAsync(config);
       setSelectedRunId(result.id);
       setApiKey("");
-      setMsg("评测已启动，后台运行中…");
+      setMsg(`评测已启动 (${result.total_tasks} 条任务)…`);
     } catch { setMsg("启动失败"); }
     setTesting(false);
   };
@@ -85,7 +87,7 @@ export default function BenchLab() {
             placeholder="Model" className="bg-bg-secondary border border-border rounded px-3 py-2 text-xs font-mono text-text-primary focus:outline-none focus:border-accent-orange" />
         </div>
         <button type="button" disabled={createRun.isPending || testing || !apiKey}
-          onClick={handleStart}
+          onClick={() => handleStart()}
           className="px-6 py-2 rounded-lg bg-accent-orange text-bg-primary font-mono text-sm hover:bg-accent-orange/90 disabled:opacity-40 transition-colors">
           {testing ? "测试中…" : createRun.isPending ? "启动中…" : "▶ 开始评测"}
         </button>
@@ -94,6 +96,9 @@ export default function BenchLab() {
         </p>
         {msg && <p className="text-xs font-mono text-accent-green mt-2">{msg}</p>}
       </Card>
+
+      {/* 69: 自定义套件 + 模板 */}
+      <CustomSuitePanel onStart={(cfg) => handleStart(cfg)} createPending={createRun.isPending} testing={testing} />
 
       {/* 对比 + 盲测 */}
       {doneRuns.length >= 2 && (
@@ -152,24 +157,34 @@ export default function BenchLab() {
           <div className="flex items-center gap-3">
             <button type="button" onClick={() => setSelectedRunId(null)} className="text-xs font-mono text-text-secondary hover:text-text-primary">← 返回列表</button>
             <h3 className="text-sm font-mono text-text-primary">{detail?.name ?? selectedRun?.name}</h3>
-            <Badge label={(detail?.status ?? selectedRun?.status) === "running" ? "运行中" : detail?.status === "failed" ? "失败" : "完成"} variant={detail?.status === "done" ? "P1" : "P2"} />
+            <Badge label={(detail?.status ?? selectedRun?.status) === "running" ? "运行中" : (detail?.status === "failed" ? "失败" : (detail?.status as string) === "cancelled" ? "已取消" : "完成")} variant={detail?.status === "done" ? "P1" : "P2"} />
             {detail && <span className="text-xs text-text-secondary/50 font-mono">{detail.completed_tasks}/{detail.total_tasks}</span>}
+            {detail?.status === "running" && (
+              <button onClick={() => { cancelRun.mutate(selectedRunId!); }}
+                className="px-2 py-0.5 text-xs font-mono rounded border border-accent-red/40 text-accent-red hover:bg-accent-red/10">
+                ⏹ 取消
+              </button>
+            )}
           </div>
 
           {/* 六边形图 */}
           {detail?.scores && (
-            <div className="flex flex-col md:flex-row gap-6 items-start">
-              <HexagonChart scores={detail.scores} size={220} />
-              <div className="flex-1">
-                <div className="grid grid-cols-2 gap-2">
-                  {Object.entries(detail.scores).map(([k, v]) => (
-                    <div key={k} className="flex justify-between text-xs font-mono">
-                      <span className="text-text-secondary">{k}</span>
-                      <span className={v >= 70 ? "text-accent-green" : v >= 40 ? "text-accent-orange" : "text-accent-red"}>{typeof v === 'number' ? v.toFixed(1) : v}</span>
-                    </div>
-                  ))}
+            <div className="space-y-4">
+              <div className="flex flex-col md:flex-row gap-6 items-start">
+                <HexagonChart scores={detail.scores} size={220} />
+                <div className="flex-1">
+                  <div className="grid grid-cols-2 gap-2">
+                    {Object.entries(detail.scores).map(([k, v]) => (
+                      <div key={k} className="flex justify-between text-xs font-mono">
+                        <span className="text-text-secondary">{k}</span>
+                        <span className={v >= 70 ? "text-accent-green" : v >= 40 ? "text-accent-orange" : "text-accent-red"}>{typeof v === 'number' ? v.toFixed(1) : v}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
+              {/* 69: 分场景雷达 */}
+              <ByScenarioRadars runId={selectedRunId} />
             </div>
           )}
 
@@ -325,6 +340,151 @@ function TrendView({ runs }: { runs: { id: string; name: string; llm_model: stri
       <div className="flex justify-between text-[10px] font-mono text-text-secondary/50 mt-1">{data.map((d, i) => <span key={i}>{d.date.slice(5)}</span>)}</div>
       {declining && <p className="text-xs font-mono text-accent-red mt-2">⚠️ {dim}连续下降，可能退化</p>}
     </Card>
+  );
+}
+
+
+/* ================================================================
+   69: 自定义套件 + 模板管理（合并组件）
+   ================================================================ */
+
+function CustomSuitePanel({ onStart, createPending, testing }: {
+  onStart: (cfg: any) => void; createPending: boolean; testing: boolean;
+}) {
+  const [show, setShow] = useState(false);
+  const { data: templates = [] } = useBenchTemplates();
+  const createTpl = useCreateBenchTemplate();
+  const deleteTpl = useDeleteBenchTemplate();
+  const [tplName, setTplName] = useState("");
+  const [repeats, setRepeats] = useState(3);
+
+  // Agent 池：内置 + API
+  const BUILTIN_AGENTS = [
+    { id: "intj-scholar", name: "学霸小明 (内置)" },
+    { id: "enfp-social", name: "社交小红 (内置)" },
+    { id: "estj-leader", name: "领导者小刚 (内置)" },
+  ];
+  const { data: apiAgents = [] } = useAgents();
+  const agentOptions = [...BUILTIN_AGENTS, ...apiAgents.map((a: any) => ({ id: a.id, name: a.name }))];
+  const [selAgents, setSelAgents] = useState<Set<string>>(new Set(["intj-scholar", "enfp-social", "estj-leader"]));
+
+  // 场景池：内置
+  const BUILTIN_SCENARIOS = ["期末周", "新生报到", "毕业选择"];
+  const [selScenarios, setSelScenarios] = useState<Set<string>>(new Set(BUILTIN_SCENARIOS));
+
+  const currentConfig = {
+    agents: [...selAgents].map((id) => { const a = agentOptions.find((x: any) => x.id === id); return { id, name: a?.name || id }; }),
+    scenarios: [...selScenarios].map((n) => ({ name: n, description: n })),
+    repeats,
+  };
+
+  const applyTemplate = (t: any) => {
+    if (t.agents?.length) setSelAgents(new Set(t.agents.map((a: any) => a.id)));
+    if (t.scenarios?.length) setSelScenarios(new Set(t.scenarios.map((s: any) => s.name)));
+    if (t.repeats) setRepeats(t.repeats);
+  };
+
+  const toggleAgent = (id: string) => setSelAgents((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleScenario = (s: string) => setSelScenarios((prev) => { const n = new Set(prev); n.has(s) ? n.delete(s) : n.add(s); return n; });
+
+  if (!show) return <button onClick={() => setShow(true)}
+    className="mb-6 px-3 py-1 text-xs font-mono rounded border border-border text-text-secondary hover:border-text-secondary/40">⚙ 自定义套件 ({templates.length} 模板)</button>;
+
+  return (
+    <Card className="mb-6">
+      <h2 className="text-sm font-mono text-text-primary mb-3">⚙ 自定义评测套件</h2>
+
+      {/* 模板列表 */}
+      {templates.length > 0 && (
+        <div className="mb-3 pb-3 border-b border-border">
+          <p className="text-xs font-mono text-text-secondary mb-1">📋 模板</p>
+          {templates.map((t) => (
+            <div key={t.id} className="flex items-center justify-between py-1">
+              <span className="text-xs font-mono text-text-primary">{t.name}</span>
+              <span className="text-[10px] text-text-secondary/40">{t.agents?.length || 0}A × {t.scenarios?.length || 0}S × {t.repeats}</span>
+              <div className="flex gap-2">
+                <button onClick={() => applyTemplate(t)} className="text-[10px] font-mono text-accent-orange">套用</button>
+                <button onClick={() => deleteTpl.mutate(t.id)} className="text-[10px] font-mono text-text-secondary/40 hover:text-accent-red">✕</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="space-y-3">
+        {/* Agent 多选 */}
+        <div>
+          <label className="text-xs font-mono text-text-secondary">Agent（{selAgents.size} 选中）</label>
+          <div className="flex flex-wrap gap-1 mt-1 max-h-32 overflow-y-auto">
+            {agentOptions.map((a: any) => (
+              <button key={a.id} onClick={() => toggleAgent(a.id)}
+                className={`px-2 py-0.5 text-[10px] font-mono rounded border transition-colors ${
+                  selAgents.has(a.id) ? "border-accent-orange/60 bg-accent-orange/10 text-accent-orange" : "border-border text-text-secondary/50"}`}>
+                {a.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 场景多选 */}
+        <div>
+          <label className="text-xs font-mono text-text-secondary">场景（{selScenarios.size} 选中）</label>
+          <div className="flex flex-wrap gap-1 mt-1">
+            {BUILTIN_SCENARIOS.map((s) => (
+              <button key={s} onClick={() => toggleScenario(s)}
+                className={`px-2 py-0.5 text-[10px] font-mono rounded border transition-colors ${
+                  selScenarios.has(s) ? "border-accent-green/60 bg-accent-green/10 text-accent-green" : "border-border text-text-secondary/50"}`}>
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <label className="text-xs font-mono text-text-secondary">重复次数</label>
+          <input type="number" min={1} max={10} value={repeats} onChange={(e) => setRepeats(Number(e.target.value))}
+            className="w-20 px-2 py-1 text-xs font-mono rounded border border-border bg-bg-secondary text-text-primary" />
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button disabled={createPending || testing || selAgents.size === 0 || selScenarios.size === 0}
+            onClick={() => onStart(currentConfig)}
+            className="px-4 py-1.5 text-xs font-mono rounded bg-accent-orange text-bg-primary disabled:opacity-40">
+            ▶ 启动 ({selAgents.size}A × {selScenarios.size}S × {repeats})
+          </button>
+          <input value={tplName} onChange={(e) => setTplName(e.target.value)} placeholder="模板名"
+            className="w-28 px-2 py-1 text-xs font-mono rounded border border-border bg-bg-secondary text-text-primary" />
+          <button disabled={!tplName.trim() || createTpl.isPending}
+            onClick={() => { createTpl.mutate({ name: tplName.trim(), ...currentConfig }); setTplName(""); }}
+            className="px-3 py-1 text-xs font-mono rounded border border-accent-green/60 text-accent-green hover:bg-accent-green/10 disabled:opacity-30">
+            💾 保存模板
+          </button>
+          <button onClick={() => setShow(false)}
+            className="px-3 py-1.5 text-xs font-mono rounded border border-border text-text-secondary">收起</button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+
+/* 69: 分场景雷达 */
+function ByScenarioRadars({ runId }: { runId: string | null }) {
+  const { data } = useBenchByScenario(runId);
+  if (!data?.scenarios || Object.keys(data.scenarios).length <= 1) return null;
+
+  return (
+    <div>
+      <p className="text-xs font-mono text-text-secondary mb-2">分场景对比</p>
+      <div className="flex gap-3 overflow-x-auto">
+        {Object.entries(data.scenarios).map(([name, scores]) => (
+          <div key={name} className="text-center">
+            <HexagonChart scores={scores} size={110} />
+            <p className="text-[10px] font-mono text-text-secondary mt-1">{name}</p>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

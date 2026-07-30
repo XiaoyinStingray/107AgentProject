@@ -21,6 +21,10 @@ const hookState = vi.hoisted(() => ({
   deleteRun: vi.fn(),
 }));
 
+vi.mock("../../../api/agents", () => ({
+  useAgents: () => ({ data: [] }),
+}));
+
 vi.mock("../../../api/bench", () => ({
   useBenchRuns: () => ({ data: hookState.runs }),
   useBenchRun: (id: string | null) => ({
@@ -34,6 +38,11 @@ vi.mock("../../../api/bench", () => ({
     mutate: hookState.deleteRun,
     isPending: false,
   }),
+  useCancelBenchRun: () => ({ mutate: vi.fn(), isPending: false }),
+  useBenchTemplates: () => ({ data: [] }),
+  useCreateBenchTemplate: () => ({ mutate: vi.fn(), isPending: false }),
+  useDeleteBenchTemplate: () => ({ mutate: vi.fn(), isPending: false }),
+  useBenchByScenario: () => ({ data: null }),
 }));
 
 const RUNNING_RUN: BenchRunSummary = {
@@ -139,11 +148,11 @@ describe("BenchLab", () => {
         api_key: "sk-secret",
         base_url: "https://api.deepseek.com",
         model: "deepseek-v4-flash",
-        name: "deepseek-v4-flash 评测",
+        name: expect.stringContaining("deepseek-v4-flash 评测"),
       });
     });
     expect(apiKeyInput).toHaveValue("");
-    expect(await screen.findByText("评测已启动，后台运行中…")).toBeInTheDocument();
+    expect(await screen.findByText(/评测已启动/)).toBeInTheDocument();
   });
 
   it("hides model identity until blind comparison is revealed", async () => {

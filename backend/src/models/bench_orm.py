@@ -75,3 +75,28 @@ class BenchResult(Base):
             "error": self.error,
             "created_at": self.created_at,
         }
+
+
+class BenchTemplate(Base):
+    """bench_templates 表——自定义评测套件模板（Step 69）。"""
+
+    __tablename__ = "bench_templates"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, default="")
+    agents_json: Mapped[str] = mapped_column(Text, default="[]")      # [{id, name, mbti, ...}]
+    scenarios_json: Mapped[str] = mapped_column(Text, default="[]")   # [{name, description, ...}]
+    repeats: Mapped[int] = mapped_column(Integer, default=3)
+    created_at: Mapped[str] = mapped_column(
+        String, default=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "agents": json.loads(self.agents_json) if self.agents_json else [],
+            "scenarios": json.loads(self.scenarios_json) if self.scenarios_json else [],
+            "repeats": self.repeats,
+            "created_at": self.created_at,
+        }

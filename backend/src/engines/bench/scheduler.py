@@ -71,7 +71,10 @@ def _build_tick_context(scenario: Scenario, tick: int) -> str:
     )
 
 
-async def run_bench_suite(run_id: str, db: AsyncSession, model_client_factory) -> dict:
+async def run_bench_suite(
+    run_id: str, db: AsyncSession, model_client_factory,
+    custom_agents=None, custom_scenarios=None, repeats=None,
+) -> dict:
     """执行完整评测套件。
 
     model_client_factory: callable(api_key, base_url, model) → model_client
@@ -85,9 +88,27 @@ async def run_bench_suite(run_id: str, db: AsyncSession, model_client_factory) -
 
     all_scores = []
     successful_tasks = 0
-    bench_run.total_tasks = len(STD_AGENTS) * len(STD_SCENARIOS) * REPEAT_COUNT
+    # 69: 自定义套件 or 标准
+    agents = custom_agents or STD_AGENTS
+    scenarios_raw = custom_scenarios or STD_SCENARIOS
+    rep_count = repeats if repeats is not None else REPEAT_COUNT
+
+    def _to_scenario(s):
+        if isinstance(s, Scenario): return s
+        return Scenario(name=s.get("name", ""), description=s.get("description", ""),
+                        time_span=s.get("time_span", "1-8"),
+                        initial_events=s.get("initial_events", []),
+                        environment_params=s.get("environment_params", {}))
+
+    scenarios_list = [_to_scenario(s) for s in scenarios_raw]
+    bench_run.total_tasks = len(agents) * len(scenarios_list) * rep_count
     bench_run.completed_tasks = 0
     await db.commit()
+
+    # 69: 取消检查
+    async def _check_cancel():
+        await db.refresh(bench_run)
+        return bench_run.status == "cancelled"
 
     try:
         model_client = model_client_factory(
@@ -115,7 +136,7 @@ async def run_bench_suite(run_id: str, db: AsyncSession, model_client_factory) -
 
     # 构建任务列表 + 元数据
     task_specs = [
-        (a, s, r) for a in STD_AGENTS for s in STD_SCENARIOS for r in range(REPEAT_COUNT)
+        (a, s, r) for a in agents for s in scenarios_list for r in range(rep_count)
     ]
 
     async def _run_with_meta(agent_tpl, scenario, rep):
@@ -128,7 +149,9 @@ async def run_bench_suite(run_id: str, db: AsyncSession, model_client_factory) -
         agent_tpl, scenario, rep, result_id, scores, error = await coro
         br = BenchResult(
             id=result_id, run_id=run_id,
-            agent_template=agent_tpl["name"], scenario=scenario.name, repeat_index=rep,
+            agent_template=agent_tpl.get("name", agent_tpl.get("id", "?")),
+            scenario=scenario.name if hasattr(scenario, "name") else scenario.get("name", "?"),
+            repeat_index=rep,
             scores_json=json.dumps(scores, ensure_ascii=False),
             status="done" if not error else "failed",
             error=error,
@@ -139,7 +162,11 @@ async def run_bench_suite(run_id: str, db: AsyncSession, model_client_factory) -
             successful_tasks += 1
         db.add(br)
         bench_run.completed_tasks += 1
-        await db.commit()  # 每完成一个立即提交——前端实时轮询
+        await db.commit()
+        # 69: 取消检查
+        if await _check_cancel():
+            logger.info(f"Bench run {run_id} cancelled at {bench_run.completed_tasks}/{bench_run.total_tasks}")
+            break
 
     # 聚合 + 报告
     agg = aggregate_scores(all_scores)
