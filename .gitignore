@@ -77,3 +77,6 @@ backend/data/*.sqlite
 *.ps1
 
 test_output/
+
+# ===== Local planning (not for commit) =====
+docs/agent-improvement-plan.md

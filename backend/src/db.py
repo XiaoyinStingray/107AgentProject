@@ -129,6 +129,22 @@ async def init_db():
             await conn.commit()
             logger.info(f"BUG-014: fixed {fixed} old worlds (world_type group→solo)")
 
+        # BUG-025: Team 创建的 World 使用 world_type='group' → 修正为 'team'
+        result = await conn.execute(
+            _text("SELECT id, name FROM worlds WHERE world_type = 'group' AND name LIKE 'Team: %'")
+        )
+        team_rows = result.fetchall()
+        team_fixed = 0
+        for row in team_rows:
+            await conn.execute(
+                _text("UPDATE worlds SET world_type = 'team' WHERE id = :id"),
+                {"id": row[0]},
+            )
+            team_fixed += 1
+        if team_fixed:
+            await conn.commit()
+            logger.info(f"BUG-025: fixed {team_fixed} old Team worlds (world_type group→team)")
+
     logger.info("Database tables ensured (SQLite)")
 
 

@@ -246,7 +246,7 @@ class TeamEngine:
         world = WorldResponse(
             id=world_id,
             name=f"Team: {self.team['name']}",
-            world_type="group",
+            world_type="team",
             scenario=scenario,
             agent_ids=self.team.get("agent_ids", []),
             current_tick=0,

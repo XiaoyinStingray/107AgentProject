@@ -359,9 +359,35 @@
 
 ---
 
-## BUG-024：M11 侧边栏子项跳转不生效
+## BUG-025：多人剧场加载 Team 的 World，world_type 隔离缺失
 
-- **状态**：📝 已知，暂不修复
+- **状态**：✅ 已修复 (2026-07-29)
+- **优先级**：P1（模块隔离失效——Team 的 World 出现在 GroupSandbox 中）
+- **发现日期**：2026-07-29
+- **环境**：GroupSandbox（多人剧场）M3 + TeamDashboard M9
+- **复现步骤**：
+  1. 在 M9 Agent Team 中创建一个 Team 并执行任务
+  2. 切换到 M3 群体沙盒
+  3. 查看「已有实验」列表
+- **实际结果**：Team 创建的 World 出现在群体沙盒的 World 列表中（因为 Team 使用 `world_type="group"`）
+- **根因**：
+  1. `backend/src/engines/team/engine.py:249` — Team 创建 World 时使用 `world_type="group"`，而非独立的 `"team"`
+  2. `frontend/src/pages/GroupSandbox.tsx:50` — `worlds` 过滤条件为 `w.world_type !== "solo"`，导致 Team World 漏入群体沙盒
+  3. `backend/src/models/world.py:24,34` — `world_type` 字段文档仅标注 `solo | group`，缺少 `team`
+- **修复内容**：
+  1. `world.py` — `world_type` 字段文档更新为 `solo | group | team`
+  2. `team/engine.py` — 创建 World 时 `world_type="team"`
+  3. `world_orm.py` — 默认值注释更新
+  4. `GroupSandbox.tsx` — 过滤条件改为 `w.world_type === "group"`（显式匹配，不留缺口）
+  5. `SoloTheater.tsx` — 确认已过滤 `world_type !== "group"`，Team World 不会漏入
+- **关联位置**：
+  - `backend/src/engines/team/engine.py` — line 249（world_type 赋值）
+  - `frontend/src/pages/GroupSandbox.tsx` — line 50（worlds 过滤）
+  - `backend/src/models/world.py` — line 24, 34（类型文档）
+  - `backend/src/models/world_orm.py` — line 25（DB 列默认值）
+- **影响范围**：
+  - Team Dashboard 创建 World 后不影响 Team 本身的功能
+  - 仅影响多人剧场（M3）的 World 列表展示——用户看到不该出现的 Team World
 - **优先级**：P3
 - **发现日期**：2026-07-28
 - **环境**：M11 侧边栏 → 子项（时间轴与快照/导演模式/叙事导出）

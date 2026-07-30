@@ -22,7 +22,7 @@ class WorldRow(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, default="")
-    world_type: Mapped[str] = mapped_column(String, default="group")  # solo | group
+    world_type: Mapped[str] = mapped_column(String, default="group")  # solo | group | team
     scenario_json: Mapped[str] = mapped_column(String, default="{}")
     agent_ids_json: Mapped[str] = mapped_column(String, default="[]")
     current_tick: Mapped[int] = mapped_column(Integer, default=0)

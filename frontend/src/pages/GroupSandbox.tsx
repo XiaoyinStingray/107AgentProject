@@ -47,7 +47,7 @@ export default function GroupSandbox() {
   const { activeWorldId, setActiveWorld } = useSandboxStore();
   const queryClient = useQueryClient();
   const { data: allWorlds = [] } = useWorlds();
-  const worlds = useMemo(() => allWorlds.filter((w) => w.world_type !== "solo"), [allWorlds]);
+  const worlds = useMemo(() => allWorlds.filter((w) => w.world_type === "group"), [allWorlds]);
   const createWorld = useCreateWorld();
   const startWorld = useStartWorld();
   const pauseWorld = usePauseWorld();

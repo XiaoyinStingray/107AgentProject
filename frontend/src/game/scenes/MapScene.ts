@@ -1,8 +1,22 @@
 import Phaser from "phaser";
 import { ITEM_FRAME, DECOR_FRAME, WALL_DECOR_FRAME, BG_FRAME, FG_FRAME } from "../tileset";
 import { AgentSprite, AgentSpriteData } from "../sprites/AgentSprite";
-import { getDialogue } from "../dialogue";
+import { getDialogue, fetchDialogue } from "../dialogue";
 import { AutonomousMover } from "../AutonomousMover";
+import { emotionEngine, RANDOM_EVENTS } from "../emotion/EmotionEngine";
+import type { EmotionChange, SceneEvent } from "../emotion/EmotionEngine";
+
+/* ── 多轮对话会话 66-S ── */
+interface ConversationSession {
+  a: AgentSprite;
+  b: AgentSprite;
+  nameA: string;
+  nameB: string;
+  totalRounds: number;     // 2-4
+  currentRound: number;    // 0-based
+  context: string[];       // 之前轮次的消息（LLM 上下文）
+  timer: Phaser.Time.TimerEvent | null;
+}
 
 /**
  * MapScene — Phaser 原生 tilemap 渲染。
@@ -64,6 +78,9 @@ export class MapScene extends Phaser.Scene {
   private dialogueTimer: Phaser.Time.TimerEvent | null = null;
   private movers: Map<string, AutonomousMover> = new Map();
   private ready = false;
+  // 66-S: 多轮对话会话
+  private activeSessions: Map<string, ConversationSession> = new Map();
+  private busyAgents: Set<string> = new Set();
 
   constructor() {
     super({ key: "MapScene" });
@@ -85,6 +102,40 @@ export class MapScene extends Phaser.Scene {
     });
     this.startDialogueScanner();
 
+    // ── EmotionEngine 66-S ──
+    emotionEngine.onEmotionChange((changes: EmotionChange[]) => {
+      changes.forEach((c) => {
+        const sprite = this.agentSprites.get(c.agentId);
+        if (!sprite) return;
+        // 只在情绪类型变化 + 有足够强度时才触发视觉特效
+        if (sprite.emotion !== c.emotion) {
+          sprite.setEmotion(c.emotion);
+        }
+        // 随机事件触发全员可见反应
+        if (c.trigger === "random" && c.intensity >= 2) {
+          this.showAgentBubble(c.agentId, "");
+          // 触发粒子爆发
+          import("../sprites/AgentSprite").then(() => {
+            import("../effects/EmoteBurst").then(({ emoteBurst }) => {
+              emoteBurst(this, sprite.x, sprite.y, c.emotion, c.agentId);
+            });
+          });
+        }
+      });
+    });
+    emotionEngine.onRandomEvent((event: SceneEvent) => {
+      this.showEventNotification(event);
+      // 全员事件 → 每个 Agent 头顶短暂闪一下
+      if (event.target === "all") {
+        this.agentSprites.forEach((sprite) => {
+          this.tweens.add({
+            targets: sprite, alpha: 0.4, duration: 150, yoyo: true,
+            onComplete: () => sprite.setAlpha(1),
+          });
+        });
+      }
+    });
+
     // 从 GameCanvas registry 读取初始数据（绕过 getScene 时序问题）
     const agents = this.game.registry.get("pendingAgents") as AgentSpriteData[] | undefined;
     if (agents?.length) this.pendingAgents = agents;
@@ -101,6 +152,14 @@ export class MapScene extends Phaser.Scene {
     this.game.events.off("agent-whisper");
     this.dialogueTimer?.destroy();
     this.dialogueCooldowns.clear();
+    // 清理活跃会话
+    for (const [key, s] of this.activeSessions) {
+      s.timer?.destroy();
+      this.busyAgents.delete(s.a.agentId);
+      this.busyAgents.delete(s.b.agentId);
+    }
+    this.activeSessions.clear();
+    emotionEngine.stop();
     this.destroyScene();
   }
 
@@ -110,6 +169,7 @@ export class MapScene extends Phaser.Scene {
 
   loadMap(mapId: string): void {
     this.destroyScene();
+    emotionEngine.setScene(mapId);
 
     import(`../../data/scenes/${mapId}.json`)
       .then((m) => {
@@ -367,6 +427,10 @@ export class MapScene extends Phaser.Scene {
     }
     // 更新/新增
     for (const d of data) {
+      // 66-S: 新 Agent 注册到情绪引擎
+      if (!this.agentSprites.has(d.agentId)) {
+        emotionEngine.registerAgent(d.agentId, d.name);
+      }
       const existing = this.agentSprites.get(d.agentId);
       if (existing) {
         // sprite 位置是实时真值，不从 React state 覆写
@@ -380,6 +444,11 @@ export class MapScene extends Phaser.Scene {
           (tx, ty) => this.isWalkable(tx, ty),
           (tx, ty) => this.isOccupiedByOther(d.agentId, tx, ty),
           { w: this.mapData?.width ?? 16, h: this.mapData?.height ?? 12 },
+        );
+        // 66-S: 注入物品 + Agent 位置
+        mover.setItems((this.mapData?.items ?? []).map((it) => ({ type: it.type, tileX: it.tileX, tileY: it.tileY })));
+        mover.setAgentLookup(() =>
+          [...this.agentSprites.entries()].map(([id, s]) => ({ agentId: id, tileX: s.tileX, tileY: s.tileY })),
         );
         if (!this.paused) mover.start();
         this.movers.set(d.agentId, mover);
@@ -463,6 +532,12 @@ export class MapScene extends Phaser.Scene {
     this.agentSprites.forEach((s) => s.destroy());
     this.agentSprites.clear();
 
+    // 66-S: 注册 Agent 到情绪引擎 + 启动情绪循环
+    data.forEach((d) => emotionEngine.registerAgent(d.agentId, d.name));
+    emotionEngine.setScene(this.mapData?.id ?? "library");
+    emotionEngine.stop(); // 重置定时器
+    emotionEngine.start();
+
     data.forEach((d) => {
       const sprite = new AgentSprite(this, d);
       sprite.setData("name", d.name);
@@ -476,6 +551,11 @@ export class MapScene extends Phaser.Scene {
         (tx, ty) => this.isWalkable(tx, ty),
         (tx, ty) => this.isOccupiedByOther(d.agentId, tx, ty),
         { w: this.mapData?.width ?? 16, h: this.mapData?.height ?? 12 },
+      );
+      // 66-S: 注入物品位置 + Agent 位置查询
+      mover.setItems((this.mapData?.items ?? []).map((it) => ({ type: it.type, tileX: it.tileX, tileY: it.tileY })));
+      mover.setAgentLookup(() =>
+        [...this.agentSprites.entries()].map(([id, s]) => ({ agentId: id, tileX: s.tileX, tileY: s.tileY })),
       );
       if (!this.paused) mover.start();
       this.movers.set(d.agentId, mover);
@@ -557,12 +637,13 @@ export class MapScene extends Phaser.Scene {
   }
 
   /* ================================================================
-   * Agent 对话引擎（Mock — 64c）
+   * Agent 对话引擎 — 66-S 多轮升级
    * ================================================================ */
 
-  private static readonly SCAN_INTERVAL = 4000;  // 扫描间隔 ms
-  private static readonly PROXIMITY = 2;         // 触发对话的 tile 距离
+  private static readonly SCAN_INTERVAL = 3000;  // 扫描间隔 ms
+  private static readonly PROXIMITY = 5;         // 触发对话的 tile 距离
   private static readonly COOLDOWN = 8000;       // 同对冷却 ms
+  private static readonly ROUND_DELAY = 1200;    // 每轮间隔 ms
 
   private startDialogueScanner(): void {
     this.dialogueTimer?.destroy();
@@ -579,42 +660,241 @@ export class MapScene extends Phaser.Scene {
     if (agents.length < 2) return;
     const now = Date.now();
 
+    // ── 66-S: 物品接近检测 → 触发情绪 ──
+    for (const sprite of agents) {
+      this.checkItemProximity(sprite);
+    }
+
+    // 收集可对话的 pair（按距离排序，最近的优先）
+    const eligible: Array<{ a: AgentSprite; b: AgentSprite; dist: number; pairKey: string }> = [];
+
     for (let i = 0; i < agents.length; i++) {
       for (let j = i + 1; j < agents.length; j++) {
         const a = agents[i];
         const b = agents[j];
+        // 跳过正在对话的 Agent
+        if (this.busyAgents.has(a.agentId) || this.busyAgents.has(b.agentId)) continue;
+
         const dist = Math.abs(a.tileX - b.tileX) + Math.abs(a.tileY - b.tileY);
         if (dist > MapScene.PROXIMITY) continue;
 
         const pairKey = [a.agentId, b.agentId].sort().join("|");
         const last = this.dialogueCooldowns.get(pairKey) ?? 0;
         if (now - last < MapScene.COOLDOWN) continue;
-        this.dialogueCooldowns.set(pairKey, now);
 
-        // 随机选 speaker
-        const [speaker, listener] = Math.random() < 0.5 ? [a, b] : [b, a];
-        const line = getDialogue(
-          speaker.getData("name") ?? "",
-          listener.getData("name") ?? "",
-          this.mapData?.id ?? "library",
-        );
-
-        // speaker 说话
-        this.showAgentBubble(speaker.agentId, line);
-
-        // 对方 1.2s 后回复
-        const replyLine = getDialogue(
-          listener.getData("name") ?? "",
-          speaker.getData("name") ?? "",
-          this.mapData?.id ?? "library",
-        );
-        this.time.delayedCall(1200, () => {
-          this.showAgentBubble(listener.agentId, replyLine);
-        });
-
-        return; // 每次扫描只触发一对对话
+        eligible.push({ a, b, dist, pairKey });
       }
     }
+
+    eligible.sort((x, y) => x.dist - y.dist);
+
+    // 每次扫描最多启动 1 个新会话（已有多轮在进行中）
+    for (const { a, b, dist, pairKey } of eligible) {
+      if (this.activeSessions.size >= 1) break; // 同时最多 1 组对话
+      this.dialogueCooldowns.set(pairKey, now);
+      this.startConversationSession(a, b, dist);
+      break;
+    }
+  }
+
+  /** 启动多轮对话会话 */
+  private startConversationSession(a: AgentSprite, b: AgentSprite, dist: number): void {
+    const nameA: string = a.getData("name") ?? "?";
+    const nameB: string = b.getData("name") ?? "?";
+    const rounds = 2 + Math.floor(Math.random() * 3); // 2-4 轮
+    const pairKey = [a.agentId, b.agentId].sort().join("|");
+
+    // 标记忙碌
+    this.busyAgents.add(a.agentId);
+    this.busyAgents.add(b.agentId);
+
+    // 暂停自主移动
+    const ma = this.movers.get(a.agentId);
+    const mb = this.movers.get(b.agentId);
+    ma?.stop();
+    mb?.stop();
+
+    // 面对面
+    a.setAction("talk");
+    b.setAction("talk");
+
+    const session: ConversationSession = {
+      a, b, nameA, nameB,
+      totalRounds: rounds,
+      currentRound: 0,
+      context: [],
+      timer: null,
+    };
+
+    this.activeSessions.set(pairKey, session);
+
+    // ── 社交共鸣 ──
+    emotionEngine.onProximityCheck([{ a: a.agentId, b: b.agentId, dist }]);
+
+    // 立即开始第一轮
+    this.advanceConversation(pairKey);
+  }
+
+  /** 推进对话一轮 */
+  private advanceConversation(sessionKey: string): void {
+    const session = this.activeSessions.get(sessionKey);
+    if (!session) return;
+
+    const { a, b, nameA, nameB, totalRounds, currentRound, context } = session;
+    const sceneId = this.mapData?.id ?? "library";
+    const isEven = currentRound % 2 === 0;
+    const [speaker, listener] = isEven ? [a, b] : [b, a];
+    const [spkName, lstName] = isEven ? [nameA, nameB] : [nameB, nameA];
+
+    // 异步取对话（LLM 优先 → mock 兜底）
+    fetchDialogue(spkName, lstName, sceneId, context).then((result) => {
+      if (!this.scene || !this.activeSessions.has(sessionKey)) return;
+
+      const msg = result.message;
+      context.push(msg);
+
+      // 说话气泡
+      this.showAgentBubble(speaker.agentId, msg);
+      speaker.setAction("talk");
+      listener.setAction("talk");
+
+      // 情绪触发
+      emotionEngine.onDialogue(speaker.agentId, msg);
+
+      session.currentRound++;
+
+      // 还有下一轮？
+      if (session.currentRound < totalRounds) {
+        session.timer = this.time.delayedCall(MapScene.ROUND_DELAY, () => {
+          this.advanceConversation(sessionKey);
+        });
+      } else {
+        // 对话结束
+        session.timer = this.time.delayedCall(MapScene.ROUND_DELAY, () => {
+          this.endConversationSession(sessionKey);
+        });
+      }
+    });
+  }
+
+  /** 结束对话会话，释放双方 Agent */
+  private endConversationSession(sessionKey: string): void {
+    const session = this.activeSessions.get(sessionKey);
+    if (!session) return;
+
+    const { a, b } = session;
+
+    a.setAction("idle");
+    b.setAction("idle");
+
+    // 恢复自主移动
+    const ma = this.movers.get(a.agentId);
+    const mb = this.movers.get(b.agentId);
+    if (!this.paused) {
+      ma?.start();
+      mb?.start();
+    }
+
+    // 稍微互相远离一步（可选：避免立刻又触发对话）
+    this.stepApart(a, b);
+
+    // 清理
+    this.busyAgents.delete(a.agentId);
+    this.busyAgents.delete(b.agentId);
+    session.timer?.destroy();
+    this.activeSessions.delete(sessionKey);
+  }
+
+  /** 对话结束后让双方各退一步（tween 动画，不瞬移） */
+  private stepApart(a: AgentSprite, b: AgentSprite): void {
+    const dx = a.tileX - b.tileX;
+    const dy = a.tileY - b.tileY;
+    const W = this.mapData?.width ?? 16;
+    const H = this.mapData?.height ?? 12;
+
+    // a 远离 b
+    const txA = Math.max(0, Math.min(W - 1, a.tileX + (dx >= 0 ? 1 : -1)));
+    const tyA = Math.max(0, Math.min(H - 1, a.tileY + (dy >= 0 ? 1 : -1)));
+    if (this.isWalkable(txA, tyA) && !this.isOccupiedByOther(a.agentId, txA, tyA)) {
+      a.action = "walk";
+      this.tweens.add({
+        targets: a,
+        x: txA * TILE_S + TILE_S / 2,
+        y: tyA * TILE_S + TILE_S / 2,
+        duration: 250,
+        ease: "Sine.easeInOut",
+        onComplete: () => {
+          if (!this.scene) return;
+          a.tileX = txA; a.tileY = tyA;
+          a.setAction("idle");
+        },
+      });
+    }
+
+    // b 远离 a
+    const txB = Math.max(0, Math.min(W - 1, b.tileX + (dx >= 0 ? -1 : 1)));
+    const tyB = Math.max(0, Math.min(H - 1, b.tileY + (dy >= 0 ? -1 : 1)));
+    if (this.isWalkable(txB, tyB) && !this.isOccupiedByOther(b.agentId, txB, tyB)) {
+      b.action = "walk";
+      this.tweens.add({
+        targets: b,
+        x: txB * TILE_S + TILE_S / 2,
+        y: tyB * TILE_S + TILE_S / 2,
+        duration: 250,
+        ease: "Sine.easeInOut",
+        onComplete: () => {
+          if (!this.scene) return;
+          b.tileX = txB; b.tileY = tyB;
+          b.setAction("idle");
+        },
+      });
+    }
+  }
+
+  /** 66-S: 检测 Agent 是否靠近物品，触发物品情绪影响 */
+  private checkItemProximity(sprite: AgentSprite): void {
+    const items = this.mapData?.items;
+    if (!items?.length) return;
+    for (const item of items) {
+      const dist = Math.abs(sprite.tileX - item.tileX) + Math.abs(sprite.tileY - item.tileY);
+      if (dist <= 1) {
+        emotionEngine.onNearItem(sprite.agentId, item.type);
+        break; // 只触发一次
+      }
+    }
+  }
+
+  /** 66-S: 显示随机事件通知气泡 */
+  private showEventNotification(event: SceneEvent): void {
+    const W = (this.mapData?.width ?? 16) * TILE_S;
+    // 顶部居中通知
+    const text = this.add.text(W / 2, 40, event.text, {
+      fontSize: "20px",
+      fontFamily: "monospace",
+      color: "#FFE082",
+      backgroundColor: "rgba(0,0,0,0.75)",
+      padding: { x: 16, y: 8 },
+      align: "center",
+    }).setOrigin(0.5).setDepth(50).setAlpha(0);
+
+    this.tweens.add({
+      targets: text,
+      alpha: 1,
+      y: 30,
+      duration: 500,
+      ease: "Back.easeOut",
+      onComplete: () => {
+        this.tweens.add({
+          targets: text,
+          alpha: 0,
+          y: 10,
+          duration: 800,
+          delay: 2500,
+          ease: "Sine.easeIn",
+          onComplete: () => text.destroy(),
+        });
+      },
+    });
   }
 
   /* ================================================================

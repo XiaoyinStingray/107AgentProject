@@ -8,9 +8,12 @@
     DELETE /api/scenes/{scene_id}/agents/{agent_id}  移除单个 Agent
 """
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
+from loguru import logger
 
 from engines.scene.engine import scene_engine, AgentSpriteData
 from models.checkpoint_orm import CheckpointRow
@@ -116,12 +119,15 @@ class InteractRequest(BaseModel):
     to_agent: str = Field(alias="to")
     scene: str
     message: str = ""
+    emotion: str = "neutral"  # 66-S: 说话方的当前情绪
 
 
 class InteractResponse(BaseModel):
     from_agent: str
     to_agent: str
     message: str
+    emotion: Optional[str] = None  # 66-S: 生成的对话触发的情绪
+    source: str = "mock"           # "llm" | "mock"
 
     class Config:
         populate_by_name = True
@@ -130,21 +136,49 @@ class InteractResponse(BaseModel):
 @router.post("/{scene_id}/interact", response_model=InteractResponse)
 async def scene_interact(scene_id: str, body: InteractRequest):
     """
-    Agent 间互动端点（当前 Mock，66-S 切换 LLM）。
-    返回一句符合性格×场景的对话。
+    Agent 间互动端点（66-S 升级：LLM优先 + mock兜底）。
+    返回一句符合性格×场景的对话，附情绪检测结果。
     """
-    mock_replies = {
-        "library": "这里好安静…",
-        "dorm": "外卖什么时候到？",
-        "classroom": "这题你会吗？",
-        "art": "你也在创作吗？",
-        "lab": "数据跑完了吗？",
-        "sakura": "花好美啊…",
-    }
+    logger.info(f"[api] POST /scenes/{scene_id}/interact from={body.from_agent} to={body.to_agent}")
+    result = await scene_engine.generate_dialogue(
+        from_name=body.from_agent,
+        to_name=body.to_agent,
+        scene_id=body.scene,
+        message=body.message,
+        emotion=body.emotion,
+    )
+    logger.info(f"[api] result source={result.get('source','?')}: {result['message'][:40]}...")
     return InteractResponse(
         from_agent=body.from_agent,
         to_agent=body.to_agent,
-        message=mock_replies.get(body.scene, "嗯…"),
+        message=result["message"],
+        emotion=result.get("emotion"),
+        source=result.get("source", "mock"),
+    )
+
+
+# ── 66-S: 随机事件端点 ──
+
+class RandomEventResponse(BaseModel):
+    id: str
+    text: str
+    target: str
+    emotion: str
+    intensity: int
+
+
+@router.get("/{scene_id}/random-event", response_model=Optional[RandomEventResponse])
+async def get_random_event(scene_id: str):
+    """获取场景随机事件（66-S）。前端定时轮询或 SSE 推送。"""
+    event = scene_engine.get_random_event(scene_id)
+    if event is None:
+        return None
+    return RandomEventResponse(
+        id=event.id,
+        text=event.text,
+        target=event.target,
+        emotion=event.emotion,
+        intensity=event.intensity,
     )
 
 

@@ -54,7 +54,7 @@ export default function SoloTheater() {
   const finishWorld = useFinishWorld();
   const { data: allWorlds = [] } = useWorlds();
   // BUG-014: SoloTheater 只展示 solo 类型的 World
-  const worlds = useMemo(() => allWorlds.filter((w) => w.world_type !== "group"), [allWorlds]);
+  const worlds = useMemo(() => allWorlds.filter((w) => w.world_type === "solo"), [allWorlds]);
 
   // 真 SSE 推流——worldId 变化时自动连接/断开
   const { events, connected, disconnect, clear } = useSSE(worldId);

@@ -24,7 +24,8 @@ export function emoteBurst(
 ): void {
   if (!scene) return;
   const key = agentId ?? "global";
-  if (Date.now() - (lastBurst[key] ?? 0) < 2000) return;
+  // 66-S: 加长冷却到 8s，避免过于频繁
+  if (Date.now() - (lastBurst[key] ?? 0) < 8000) return;
   lastBurst[key] = Date.now();
 
   const profile = PROFILES[emotion];
