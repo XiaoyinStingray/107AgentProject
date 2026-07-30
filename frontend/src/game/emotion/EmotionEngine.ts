@@ -133,14 +133,20 @@ const RANDOM_EVENTS: SceneEvent[] = [
   { id:"ev_gen_03", text:"🎂 今天好像是某人的生日？", target:"random", effect:{emotion:"excited",intensity:2} },
 ];
 
-// ── 人格基础情绪倾向 ──
-const PERSONALITY_BASE: Record<string, Emotion> = {
-  "小林": "neutral",
-  "小红": "happy",
-  "小刚": "neutral",
-  "小雪": "neutral",
-  "阿杰": "excited",
-};
+// ── 人格基础情绪倾向（按 MBTI 推导，未知用 hash）──
+function baseEmotionFromName(name: string): Emotion {
+  // 旧 mock Agent 兼容
+  const known: Record<string, Emotion> = {
+    "小林": "neutral", "小红": "happy", "小刚": "neutral",
+    "小雪": "neutral", "阿杰": "excited",
+  };
+  if (known[name]) return known[name];
+  // 新 Agent：name hash → 随机但从 stable 基础情绪
+  const emotions: Emotion[] = ["neutral", "neutral", "happy", "neutral", "excited", "neutral", "tired", "neutral"];
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = ((h << 5) + h + name.charCodeAt(i)) | 0;
+  return emotions[Math.abs(h) % emotions.length];
+}
 
 // ================================================================
 // EmotionEngine
@@ -163,7 +169,7 @@ export class EmotionEngine {
 
   registerAgent(agentId: string, name: string): void {
     if (this.states.has(agentId)) return;
-    const base = PERSONALITY_BASE[name] ?? "neutral";
+    const base = baseEmotionFromName(name);
     this.states.set(agentId, {
       emotion: base,
       intensity: 0,

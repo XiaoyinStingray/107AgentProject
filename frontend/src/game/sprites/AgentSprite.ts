@@ -138,16 +138,48 @@ export class AgentSprite extends Phaser.GameObjects.Container {
       this.add(this.accSprite);
     }
 
-    // 球体：优先用预生成纹理（有渐变），未知 Agent 用纯色 Circle
+    // 球体：优先用预生成纹理（有渐变），未知 Agent 动态生成
     const frame = AVATAR_FRAME[data.agentId];
     if (frame !== undefined && scene.textures.exists("avatars")) {
       this.ball = scene.add.image(0, 0, "avatars", frame).setDisplaySize(CIRCLE_R * 2, CIRCLE_R * 2);
     } else {
-      this.ball = scene.add.circle(
-        0, 0, CIRCLE_R - 2,
-        Phaser.Display.Color.HexStringToColor(data.color).color, 1,
-      );
-      this.ball.setStrokeStyle(2, 0xffffff, 0.25);
+      const texKey = `ball_${data.agentId}`;
+      if (!scene.textures.exists(texKey)) {
+        const dpr = 2;
+        const size = 72;
+        const r = size / 2 - 3;
+        const canvas = document.createElement("canvas");
+        canvas.width = size * dpr;
+        canvas.height = size * dpr;
+        const ctx = canvas.getContext("2d")!;
+        ctx.scale(dpr, dpr);
+
+        // 球体
+        ctx.fillStyle = data.color;
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, r, 0, Math.PI * 2);
+        ctx.fill();
+        // 高光
+        const grad = ctx.createRadialGradient(
+          size / 2 - r * 0.3, size / 2 - r * 0.35, r * 0.1,
+          size / 2, size / 2, r,
+        );
+        grad.addColorStop(0, "rgba(255,255,255,0.35)");
+        grad.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, r, 0, Math.PI * 2);
+        ctx.fill();
+        // 边框
+        ctx.strokeStyle = "rgba(255,255,255,0.2)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, r, 0, Math.PI * 2);
+        ctx.stroke();
+
+        scene.textures.addCanvas(texKey, canvas);
+      }
+      this.ball = scene.add.image(0, 0, texKey).setDisplaySize(CIRCLE_R * 2, CIRCLE_R * 2);
     }
     this.add(this.ball);
 

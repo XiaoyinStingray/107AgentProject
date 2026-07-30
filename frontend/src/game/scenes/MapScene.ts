@@ -5,6 +5,8 @@ import { getDialogue, fetchDialogue } from "../dialogue";
 import { AutonomousMover } from "../AutonomousMover";
 import { emotionEngine, RANDOM_EVENTS } from "../emotion/EmotionEngine";
 import type { EmotionChange, SceneEvent } from "../emotion/EmotionEngine";
+import { playbackQueue } from "../audio/DialoguePlaybackQueue";
+import type { Emotion } from "../sprites/AgentSprite";
 
 /* ── 多轮对话会话 66-S ── */
 interface ConversationSession {
@@ -160,6 +162,8 @@ export class MapScene extends Phaser.Scene {
     }
     this.activeSessions.clear();
     emotionEngine.stop();
+    // 66-A: 清空音频队列（场景切换/卸载不残留声音）
+    playbackQueue.clear();
     this.destroyScene();
   }
 
@@ -481,6 +485,8 @@ export class MapScene extends Phaser.Scene {
     if (this.dialogueTimer) this.dialogueTimer.paused = true;
     // 取消所有进行中的 tween（停止移动动画）
     this.tweens.killTweensOf(this.agentSprites);
+    // 66-A: 暂停音频播放
+    playbackQueue.pause();
   }
 
   resumeSimulation(): void {
@@ -488,6 +494,8 @@ export class MapScene extends Phaser.Scene {
     this.paused = false;
     this.movers.forEach((m) => m.start());
     if (this.dialogueTimer) this.dialogueTimer.paused = false;
+    // 66-A: 恢复音频播放
+    playbackQueue.resume();
   }
 
   /* ================================================================
@@ -512,14 +520,57 @@ export class MapScene extends Phaser.Scene {
     return this.agentSprites.get(agentId);
   }
 
-  /** 显示 Agent 头顶气泡 */
+  /** 显示 Agent 头顶气泡（直接模式，用于非对话通知） */
   showAgentBubble(agentId: string, message: string): void {
+    if (!message) return;
     const sprite = this.agentSprites.get(agentId);
     if (!sprite) return;
-    // 动态 import 避免循环依赖
     import("../sprites/ActionBubble").then(({ ActionBubble }) => {
       const bubble = new ActionBubble(this, message);
       bubble.show(sprite);
+    });
+  }
+
+  /**
+   * 66-A: 通过串行队列播放对话（气泡 + 拟声）。
+   * 替代直接 showAgentBubble，保证：无重叠、分页完整、音频伴音。
+   */
+  private queueDialogue(
+    agentId: string,
+    text: string,
+    emotion: Emotion,
+    onDone?: () => void,
+  ): void {
+    const sprite = this.agentSprites.get(agentId);
+    if (!sprite) { onDone?.(); return; }
+
+    // 跟踪当前活跃气泡（分页更新用）
+    let activeBubble: any = null;
+
+    playbackQueue.enqueue({
+      agentId,
+      name: sprite.getData("name") ?? "",
+      text,
+      emotion,
+      onBubble: (pageText: string, _agentId: string, isFirst: boolean) => {
+        if (isFirst || !activeBubble) {
+          // 第一页：新建气泡
+          import("../sprites/ActionBubble").then(({ ActionBubble }) => {
+            const bubble = new ActionBubble(this, pageText);
+            bubble.show(sprite);
+            activeBubble = bubble;
+          });
+        } else {
+          // 后续页：更新现有气泡文字
+          if (activeBubble?.setText) {
+            activeBubble.setText(pageText);
+          }
+        }
+      },
+      onDone: () => {
+        activeBubble = null;
+        onDone?.();
+      },
     });
   }
 
@@ -735,7 +786,7 @@ export class MapScene extends Phaser.Scene {
     this.advanceConversation(pairKey);
   }
 
-  /** 推进对话一轮 */
+  /** 推进对话一轮（66-A: 通过串行队列播放） */
   private advanceConversation(sessionKey: string): void {
     const session = this.activeSessions.get(sessionKey);
     if (!session) return;
@@ -753,8 +804,6 @@ export class MapScene extends Phaser.Scene {
       const msg = result.message;
       context.push(msg);
 
-      // 说话气泡
-      this.showAgentBubble(speaker.agentId, msg);
       speaker.setAction("talk");
       listener.setAction("talk");
 
@@ -763,17 +812,21 @@ export class MapScene extends Phaser.Scene {
 
       session.currentRound++;
 
-      // 还有下一轮？
-      if (session.currentRound < totalRounds) {
-        session.timer = this.time.delayedCall(MapScene.ROUND_DELAY, () => {
-          this.advanceConversation(sessionKey);
-        });
-      } else {
-        // 对话结束
-        session.timer = this.time.delayedCall(MapScene.ROUND_DELAY, () => {
-          this.endConversationSession(sessionKey);
-        });
-      }
+      // 66-A: 通过串行队列播放（气泡分页 + 拟声），播放完毕后继续下一轮
+      this.queueDialogue(
+        speaker.agentId,
+        msg,
+        speaker.emotion ?? "neutral",
+        () => {
+          // 队列播完 → 继续下一轮或结束会话
+          if (!this.activeSessions.has(sessionKey)) return;
+          if (session.currentRound < totalRounds) {
+            this.advanceConversation(sessionKey);
+          } else {
+            this.endConversationSession(sessionKey);
+          }
+        },
+      );
     });
   }
 

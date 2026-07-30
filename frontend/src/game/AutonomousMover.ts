@@ -16,19 +16,38 @@ export interface MovementProfile {
 }
 
 /**
- * 性格 → 移动模式映射。
- * 后续 66-S 可从 Agent 人格 OCEAN 数据推导。
+ * MBTI 维度 → 移动模式映射。
+ * E/I → 活动频率, N/S → 探索范围, T/F+P/J → 行为倾向
+ * 不使用硬编码 agentId，所有 Agent 按人格推导。
  */
-const PROFILES: Record<string, MovementProfile> = {
-  "agent-1": { intervalMin: 10000, intervalMax: 16000, maxRange: 2, idleChance: 0.5 },  // 小林 INTJ 宅
-  "agent-2": { intervalMin: 5000,  intervalMax: 9000,  maxRange: 3, idleChance: 0.15 }, // 小红 ENFP 活跃
-  "agent-3": { intervalMin: 6000,  intervalMax: 11000, maxRange: 3, idleChance: 0.25 }, // 小刚 ESTJ 巡视
-  "agent-4": { intervalMin: 8000,  intervalMax: 14000, maxRange: 2, idleChance: 0.35 }, // 小雪 INFP 慢悠悠
-  "agent-5": { intervalMin: 4000,  intervalMax: 8000,  maxRange: 3, idleChance: 0.1  }, // 阿杰 ENTP 最闹
+const MBTI_PROFILES: Record<string, MovementProfile> = {
+  // 内向思考型：低频、小范围、高发呆
+  I_T_: { intervalMin: 9000, intervalMax: 16000, maxRange: 2, idleChance: 0.45 },
+  // 内向感受型：中低频、小范围
+  I_F_: { intervalMin: 7000, intervalMax: 13000, maxRange: 2, idleChance: 0.35 },
+  // 外向思考型：高频、大范围
+  E_T_: { intervalMin: 4000, intervalMax: 9000, maxRange: 3, idleChance: 0.15 },
+  // 外向感受型：最高频、大范围
+  E_F_: { intervalMin: 3500, intervalMax: 8000, maxRange: 3, idleChance: 0.1 },
+  // 兜底
+  _default: { intervalMin: 6000, intervalMax: 12000, maxRange: 3, idleChance: 0.3 },
 };
 
-function defaultProfile(): MovementProfile {
-  return { intervalMin: 6000, intervalMax: 12000, maxRange: 3, idleChance: 0.3 };
+function profileFromMBTI(mbti: string): MovementProfile {
+  const key = (mbti.slice(0, 1) === "E" ? "E_" : "I_") + (["T", "F"].includes(mbti.slice(2, 3)) ? mbti.slice(2, 3) + "_" : "T_");
+  return MBTI_PROFILES[key] ?? MBTI_PROFILES._default;
+}
+
+/** 旧 mock agent-1~5 的兼容映射（agentId→MBTI），新 Agent 不受影响 */
+const FALLBACK_MBTI: Record<string, string> = {
+  "agent-1": "INTJ", "agent-2": "ENFP", "agent-3": "ESTJ",
+  "agent-4": "INFP", "agent-5": "ENTP",
+};
+
+function hashAgentId(id: string): number {
+  let h = 5381;
+  for (let i = 0; i < id.length; i++) h = ((h << 5) + h + id.charCodeAt(i)) | 0;
+  return Math.abs(h);
 }
 
 /**
@@ -82,7 +101,20 @@ export class AutonomousMover {
   ) {
     this.sprite = sprite;
     this.scene = scene;
-    this.profile = profile ?? PROFILES[sprite.agentId] ?? defaultProfile();
+    // 66-A: MBTI 推导移动模式，兼容旧 mock agentId
+    if (profile) {
+      this.profile = profile;
+    } else {
+      const mbtiHint = FALLBACK_MBTI[sprite.agentId];
+      if (mbtiHint) {
+        this.profile = profileFromMBTI(mbtiHint);
+      } else {
+        // 新 Agent：agentId hash → 偏 I 或偏 E → 选对应 profile
+        const h = hashAgentId(sprite.agentId);
+        const mbtiFake = h % 2 === 0 ? "INTJ" : "ENFP";
+        this.profile = profileFromMBTI(mbtiFake);
+      }
+    }
   }
 
   /** 启动自主移动 */
