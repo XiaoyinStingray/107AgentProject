@@ -6,6 +6,7 @@ Step 51: 为 Agent Team 模块提供数据层。
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from loguru import logger
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -496,3 +497,101 @@ async def get_team_plan_history(
     )
     rows = result.scalars().all()
     return [row.to_dict() for row in rows]
+
+
+# ── 68: Team 打分 ──
+
+class ScoreRequest(BaseModel):
+    task: str = ""
+
+
+@router.post("/{team_id}/score")
+async def score_team(team_id: str, body: ScoreRequest, db: AsyncSession = Depends(get_db)):
+    """对 Team 最新报告做 LLM 多维评分（8 维雷达图）。"""
+    from models.team_orm import TeamRow
+    from models.plan_orm import PlanRow
+    from llm.client import create_model_client
+    from engines.team.versus import score_team as _score
+
+    result = await db.execute(select(TeamRow).where(TeamRow.id == team_id))
+    team = result.scalar_one_or_none()
+    if not team:
+        raise HTTPException(404, "Team 不存在")
+
+    plan_result = await db.execute(
+        select(PlanRow)
+        .where(PlanRow.team_id == team_id, PlanRow.status == "finished")
+        .order_by(PlanRow.created_at.desc()).limit(1)
+    )
+    row = plan_result.scalar_one_or_none()
+    report = row.to_dict().get("report") if row else {"content": "", "title": ""}
+    task = body.task or row.to_dict().get("task", "") if row else ""
+
+    client = create_model_client("think")
+    return await _score(team.name, report, task, client)
+
+
+# ── 68: Team 对抗 ──
+
+class VersusRequest(BaseModel):
+    team_a_id: str
+    team_b_id: str
+    task: str
+
+
+@router.post("/versus")
+async def team_versus(body: VersusRequest, db: AsyncSession = Depends(get_db)):
+    """双 Team 对抗：LLM 多维评分 + 差异对比。"""
+    from models.team_orm import TeamRow
+    from models.plan_orm import PlanRow
+    from llm.client import create_model_client
+    from engines.team.versus import judge_versus
+
+    teams_data = {}
+    reports = {}
+    for tid in [body.team_a_id, body.team_b_id]:
+        r = await db.execute(select(TeamRow).where(TeamRow.id == tid))
+        t = r.scalar_one_or_none()
+        if not t:
+            raise HTTPException(404, f"Team {tid} 不存在")
+        teams_data[tid] = t.to_dict()
+        pr = await db.execute(
+            select(PlanRow)
+            .where(PlanRow.team_id == tid, PlanRow.status == "finished")
+            .order_by(PlanRow.created_at.desc()).limit(1)
+        )
+        prow = pr.scalar_one_or_none()
+        reports[tid] = prow.to_dict().get("report") if prow else {"content": "", "title": ""}
+
+    client = create_model_client("think")
+    return await judge_versus(
+        team_a=teams_data[body.team_a_id],
+        team_b=teams_data[body.team_b_id],
+        report_a=reports[body.team_a_id],
+        report_b=reports[body.team_b_id],
+        task=body.task,
+        model_client=client,
+    )
+
+
+# ── 68: 学习曲线 ──
+
+@router.get("/{team_id}/learning-curve")
+async def get_learning_curve(team_id: str, db: AsyncSession = Depends(get_db)):
+    """获取 Team 的学习曲线数据。"""
+    from models.team_orm import TeamRow
+    from models.plan_orm import PlanRow
+    from engines.team.learning_curve import compute_learning_curve
+
+    r = await db.execute(select(TeamRow).where(TeamRow.id == team_id))
+    team = r.scalar_one_or_none()
+    if not team:
+        raise HTTPException(404, "Team 不存在")
+
+    pr = await db.execute(
+        select(PlanRow)
+        .where(PlanRow.team_id == team_id)
+        .order_by(PlanRow.created_at.asc())
+    )
+    plans = [row.to_dict() for row in pr.scalars().all()]
+    return {"team_name": team.name, **compute_learning_curve(plans)}

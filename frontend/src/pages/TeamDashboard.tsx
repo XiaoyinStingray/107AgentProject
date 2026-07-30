@@ -13,6 +13,8 @@ import HealthPanel from "./team/HealthPanel";
 import MarketPanel from "./team/MarketPanel";
 import DebatePanel from "./team/DebatePanel";
 import type { DebateState, RoleEvolution } from "./team/DebatePanel";
+import VersusPanel from "./team/VersusPanel";
+import LearningCurve from "./team/LearningCurve";
 
 /* ================================================================
    Step 51–53 — M9 Agent Team 仪表盘
@@ -29,6 +31,7 @@ export default function TeamDashboard() {
   const publishTeam = usePublishTeam();
   const [evaluation, setEvaluation] = useState<string | null>(null);
   const [showMarket, setShowMarket] = useState(false);
+  const [showVersus, setShowVersus] = useState(false);
   const [publishMsg, setPublishMsg] = useState<string | null>(null);
 
   // 看板状态
@@ -295,6 +298,11 @@ export default function TeamDashboard() {
             )}
           </div>
 
+          {/* 68: 已完成 Team 显示学习曲线 */}
+          {activeTeam.status === "finished" && (
+            <div className="mb-3"><LearningCurve teamId={activeTeamId} /></div>
+          )}
+
           {/* 内容区 —— 报告全宽 / 执行中左右分栏 */}
           <div className="flex-1 min-h-0">
             {displayReport ? (
@@ -384,15 +392,20 @@ export default function TeamDashboard() {
       <p className="text-sm text-text-secondary font-mono mb-6">
         把 Agent 组成团队，协作完成产品设计、市场调研、代码开发
       </p>
-      <button
-        type="button"
-        onClick={() => setShowMarket((v) => !v)}
-        className="mb-6 px-4 py-2 text-xs font-mono rounded-lg border border-border text-text-secondary hover:border-text-secondary/40"
-      >
-        {showMarket ? "← 返回列表" : "📦 Team 模板"}
-      </button>
 
       {showMarket && <div className="mb-6"><MarketPanel /></div>}
+      {showVersus && <div className="mb-6"><VersusPanel onClose={() => setShowVersus(false)} /></div>}
+
+      <div className="flex gap-2 mb-6">
+        <button onClick={() => { setShowMarket((v) => !v); setShowVersus(false); }}
+          className="px-3 py-1 text-xs font-mono rounded border border-border text-text-secondary hover:border-text-secondary/40">
+          {showMarket ? "← 返回列表" : "📦 Team 模板"}
+        </button>
+        <button onClick={() => { setShowVersus((v) => !v); setShowMarket(false); }}
+          className="px-3 py-1 text-xs font-mono rounded border border-border text-text-secondary hover:border-text-secondary/40">
+          {showVersus ? "← 返回列表" : "⚔️ Team 对抗"}
+        </button>
+      </div>
       {publishMsg && (
         <div className="mb-3 px-3 py-2 rounded border border-accent-green/40 bg-accent-green/5 text-xs font-mono text-accent-green">{publishMsg}</div>
       )}
