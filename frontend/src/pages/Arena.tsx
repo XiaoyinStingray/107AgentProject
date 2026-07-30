@@ -39,8 +39,15 @@ export default function Arena() {
 }
 
 
+const ARENA_HASH_MAP: Record<string, number> = {
+  duel: 22, battle: 23, report: 24, review: 26,
+};
+
 function parseArenaItemId(hash: string): number | null {
-  if (!/^#item-\d+$/.test(hash)) return null;
-  const itemId = Number.parseInt(hash.slice(6), 10);
-  return Number.isSafeInteger(itemId) ? itemId : null;
+  // 新锚点
+  const key = hash.replace(/^#/, "");
+  if (ARENA_HASH_MAP[key]) return ARENA_HASH_MAP[key];
+  // 兼容旧格式
+  if (/^#item-\d+$/.test(hash)) return Number.parseInt(hash.slice(6), 10);
+  return null;
 }

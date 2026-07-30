@@ -62,19 +62,18 @@ export default function NarrativeFactory() {
     setTimeSpan("5年后");
   }, [styleKey]);
 
-  // 同步 URL hash，让顶部“当前功能”显示正确
+  // 72: hash<->style
+  const HASH_STYLE_MAP: Record<string, NarrativeStyle> = {
+    story: "story", diary: "diary", letter: "letter", podcast: "podcast",
+    parallel: "parallel", microfilm: "microfilm", serial: "serial", selfportrait: "selfportrait",
+  };
   useEffect(() => {
-    const styleToItemId: Record<string, number> = {
-      story: 29,
-      letter: 30,
-      parallel: 31,
-      podcast: 32,
-    };
-    const itemId = styleToItemId[styleKey];
-    if (itemId && window.location.hash !== `#item-${itemId}`) {
-      // 静默更新 hash，不触发页面刷新
-      window.history.replaceState(null, "", `#item-${itemId}`);
-    }
+    const h = window.location.hash?.replace("#", "").replace("item-", "");
+    const match = HASH_STYLE_MAP[h];
+    if (match && match !== styleKey) setStyleKey(match);
+  }, []); // mount
+  useEffect(() => {
+    if (styleKey) window.history.replaceState(null, "", `#${styleKey}`);
   }, [styleKey]);
 
   // 叙事 mutations

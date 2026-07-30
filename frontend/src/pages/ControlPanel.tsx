@@ -6,7 +6,6 @@ import { CONTROL_TABS } from "../mocks/control";
 import { useAgents } from "../api/agents";
 import { useWorlds, useWorldEvents } from "../api/worlds";
 import Badge from "../components/shared/Badge";
-import EmptyState from "../components/shared/EmptyState";
 import AgentDashboard from "../components/control/AgentDashboard";
 import EventHeatmap from "../components/control/EventHeatmap";
 import AgentSearch from "../components/control/AgentSearch";
@@ -26,11 +25,15 @@ export default function ControlPanel() {
   const { data: worlds = [] } = useWorlds();
   const [activeTab, setActiveTab] = useState<ControlTab>("dashboard");
 
-  // 侧边栏 #item-21 → 自动切到 dynamics tab
+  // 72: hash → tab 映射
   useEffect(() => {
-    if (location.hash === "#item-21") {
-      setActiveTab("dynamics");
-    }
+    const h = location.hash?.replace("#", "");
+    const MAP: Record<string, ControlTab> = {
+      dashboard: "dashboard", heatmap: "heatmap", search: "search",
+      dynamics: "dynamics", decisions: "patterns",
+      "item-21": "dynamics", // 旧格式兼容
+    };
+    if (MAP[h]) setActiveTab(MAP[h]);
   }, [location.hash]);
   const [selectedWorldId, setSelectedWorldId] = useState<string | null>(
     worlds[0]?.id ?? null,
@@ -118,15 +121,6 @@ export default function ControlPanel() {
         {activeTab === "search" && <AgentSearch agents={agents} />}
         {activeTab === "patterns" && <DecisionPatterns agents={agents} />}
         {activeTab === "dynamics" && <GroupDynamics />}
-        {(activeTab === "anomaly" ||
-          activeTab === "tracking" ||
-          activeTab === "strategy") && (
-          <EmptyState
-            title={`${activeMeta?.emoji ?? "🚧"} ${activeMeta?.label ?? "建设中"}`}
-            description={activeMeta?.description ?? "此功能尚未实现"}
-            tier="P3"
-          />
-        )}
       </div>
     </div>
   );

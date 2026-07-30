@@ -109,7 +109,7 @@ const EVENTS: SSEEvent[] = MOCK_SANDBOX_EVENTS;
 /* ---------- Layer 1: 组件渲染 + 交互 ---------- */
 
 describe("Step 24 ControlPanel — Tab 栏与切换", () => {
-  it("renders title and all 8 tabs (5 available + 3 P3)", () => {
+  it("renders title and all 5 available tabs", () => {
     renderControlPanel();
 
     // 标题
@@ -122,18 +122,10 @@ describe("Step 24 ControlPanel — Tab 栏与切换", () => {
     expect(screen.getByRole("button", { name: /决策模式识别/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /群体动力学/ })).toBeInTheDocument();
 
-    // 3 个 P3 占位 Tab
-    expect(screen.getByRole("button", { name: /异常检测/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /长期追踪/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /策略提取/ })).toBeInTheDocument();
-  });
-
-  it("disables P3 placeholder tabs", () => {
-    renderControlPanel();
-
-    expect(screen.getByRole("button", { name: /异常检测/ })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /长期追踪/ })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /策略提取/ })).toBeDisabled();
+    // P3 占位已删除
+    expect(screen.queryByRole("button", { name: /异常检测/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /长期追踪/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /策略提取/ })).not.toBeInTheDocument();
   });
 
   it("renders dashboard tab by default", () => {
@@ -168,13 +160,6 @@ describe("Step 24 ControlPanel — Tab 栏与切换", () => {
     expect(screen.getByText("决策风格分布")).toBeInTheDocument();
   });
 
-  it("shows EmptyState for P3 tabs (disabled, cannot click)", () => {
-    renderControlPanel();
-
-    // P3 Tab 是 disabled，无法点击——验证其 disabled 属性
-    const anomalyTab = screen.getByRole("button", { name: /异常检测/ });
-    expect(anomalyTab).toBeDisabled();
-  });
 });
 
 describe("Step 24 — AgentDashboard 组件", () => {
@@ -354,22 +339,11 @@ describe("Step 24 — DecisionPatterns 组件", () => {
 /* ---------- Layer 2: Mock 工具函数 ---------- */
 
 describe("Step 24 — control mocks utilities", () => {
-  it("CONTROL_TABS has 5 available + 3 placeholders", () => {
+  it("CONTROL_TABS has 5 available tabs", () => {
     const available = CONTROL_TABS.filter((t) => t.available);
-    const placeholders = CONTROL_TABS.filter((t) => !t.available);
     expect(available).toHaveLength(5);
-    expect(placeholders).toHaveLength(3);
     expect(available.map((t) => t.key)).toEqual([
-      "dashboard",
-      "heatmap",
-      "search",
-      "patterns",
-      "dynamics",
-    ]);
-    expect(placeholders.map((t) => t.key)).toEqual([
-      "anomaly",
-      "tracking",
-      "strategy",
+      "dashboard", "heatmap", "search", "patterns", "dynamics",
     ]);
   });
 

@@ -119,7 +119,7 @@ describe("Step 23 NarrativeFactory — setup phase", () => {
     expect(generateBtn).toBeDisabled();
 
     // 选 Agent 后仍 disabled（缺 World）
-    fireEvent.click(screen.getByRole("button", { name: /小明/ }));
+    fireEvent.click(screen.getAllByRole("button", { name: /小明/ })[0]);
     expect(generateBtn).toBeDisabled();
 
     // 选 World 后 enabled
@@ -158,7 +158,7 @@ describe("Step 34a NarrativeFactory — generating & result phases", () => {
     renderNarrativeFactory();
 
     // 选 Agent + World + 默认 story 风格
-    fireEvent.click(screen.getByRole("button", { name: /小明/ }));
+    fireEvent.click(screen.getAllByRole("button", { name: /小明/ })[0]);
     selectWorld();
     fireEvent.click(screen.getByRole("button", { name: /生成叙事/ }));
 
@@ -170,7 +170,7 @@ describe("Step 34a NarrativeFactory — generating & result phases", () => {
   it("supports reset back to setup from result", async () => {
     renderNarrativeFactory();
 
-    fireEvent.click(screen.getByRole("button", { name: /小明/ }));
+    fireEvent.click(screen.getAllByRole("button", { name: /小明/ })[0]);
     selectWorld();
     fireEvent.click(screen.getByRole("button", { name: /生成叙事/ }));
     await screen.findByText("图书馆三楼的灯");
@@ -183,7 +183,7 @@ describe("Step 34a NarrativeFactory — generating & result phases", () => {
   it("generates podcast via API", async () => {
     renderNarrativeFactory();
 
-    fireEvent.click(screen.getByRole("button", { name: /小红/ }));
+    fireEvent.click(screen.getAllByRole("button", { name: /小红/ })[0]);
     selectWorld();
     // 切到 podcast 风格
     fireEvent.click(screen.getByRole("button", { name: /播客脚本/ }));

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import {
   Link,
@@ -75,7 +75,7 @@ describe("Step 28 FeatureRouteBoundary", () => {
     renderBoundary("/agents#item-1");
     expect(screen.getByText("铸造厂正文")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(
-      "当前功能：自然语言创建 Agent",
+      "当前功能：创建 Agent",
     );
     expect(screen.getByText("P0")).toBeInTheDocument();
   });
@@ -87,15 +87,6 @@ describe("Step 28 FeatureRouteBoundary", () => {
     expect(screen.getByText("P2")).toBeInTheDocument();
   });
 
-  it("shows a unified placeholder for a P3 feature", () => {
-    renderBoundary("/arena#item-25");
-    expect(screen.getByText("🎯 盲测模式")).toBeInTheDocument();
-    expect(
-      screen.getByText("该功能已保留菜单入口，将在后续版本继续开发。"),
-    ).toBeInTheDocument();
-    expect(screen.queryByText("竞技场正文")).not.toBeInTheDocument();
-  });
-
   it("ignores a feature hash that belongs to another module", () => {
     renderBoundary("/sandbox#item-23");
     expect(screen.getByText("群体沙盒正文")).toBeInTheDocument();
@@ -103,22 +94,8 @@ describe("Step 28 FeatureRouteBoundary", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
-  it("reacts when navigation changes between implemented and P3 items", () => {
-    renderBoundary("/arena#item-22");
-    expect(screen.getByText("竞技场正文")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("当前功能：1v1 对抗");
-
-    fireEvent.click(screen.getByRole("link", { name: "打开盲测" }));
-    expect(screen.getByText("🎯 盲测模式")).toBeInTheDocument();
-    expect(screen.queryByText("竞技场正文")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("link", { name: "打开 1v1" }));
-    expect(screen.getByText("竞技场正文")).toBeInTheDocument();
-  });
-
   it("keeps all menu IDs unique", () => {
     const items = MENU_SECTIONS.flatMap((section) => section.items);
-    expect(items).toHaveLength(59);
-    expect(new Set(items.map((item) => item.id)).size).toBe(59);
+    expect(new Set(items.map((item) => item.id)).size).toBe(items.length);
   });
 });

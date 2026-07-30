@@ -135,7 +135,17 @@ export default function Sidebar() {
                   {section.items.map((item) => (
                     <button
                       key={item.id}
-                      onClick={() => navigate(`${section.route}#${(item as any).anchor || `item-${item.id}`}`)}
+                      onClick={() => {
+                        const it = item as any;
+                        if (it.redirect) {
+                          navigate(it.redirect);
+                        } else if (it.anchor) {
+                          navigate(`${section.route}#${it.anchor}`, { replace: true });
+                        } else {
+                          // 无锚点单页面：强制跳转
+                          window.location.href = section.route;
+                        }
+                      }}
                       className="
                         w-full flex items-center gap-2 pl-10 pr-3 py-1.5 text-sm
                         text-text-secondary hover:text-text-primary hover:bg-bg-card/30
