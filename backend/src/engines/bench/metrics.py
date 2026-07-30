@@ -34,25 +34,32 @@ def calculate_metrics(events: list[dict], persona: dict) -> dict:
 
 
 def aggregate_scores(all_scores: list[dict]) -> dict:
-    """聚合多次评测的分数——计算均值 + 鲁棒性（1 - 变异系数）。"""
+    """聚合多次评测，并以跨任务综合分方差计算鲁棒性。"""
     if not all_scores:
         return _zero_scores()
     dims = ["人格一致性", "决策质量", "交互深度", "鲁棒性", "创造力", "适应性"]
-    result = {}
-    for d in dims:
-        vals = [s.get(d, 0) for s in all_scores]
-        avg = sum(vals) / len(vals) if vals else 0
-        if d == "鲁棒性":
-            # 鲁棒性 = 100 - 变异系数×100
-            if avg > 0 and len(vals) > 1:
-                variance = sum((v - avg) ** 2 for v in vals) / len(vals)
-                cv = math.sqrt(variance) / avg if avg > 0 else 1
-                result[d] = max(0, min(100, 100 - cv * 100))
-            else:
-                result[d] = 85.0  # 单样本默认
-        else:
-            result[d] = round(avg, 1)
-    return result
+    score_dims = [d for d in dims if d != "鲁棒性"]
+    result = {
+        d: round(sum(s.get(d, 0) for s in all_scores) / len(all_scores), 1)
+        for d in score_dims
+    }
+
+    # 单条任务中的“鲁棒性”只是占位值；真正的稳定性必须比较多条任务。
+    sample_scores = [
+        sum(s.get(d, 0) for d in score_dims) / len(score_dims)
+        for s in all_scores
+    ]
+    average = sum(sample_scores) / len(sample_scores)
+    if average == 0:
+        robustness = 0.0
+    elif len(sample_scores) == 1:
+        robustness = 85.0
+    else:
+        variance = sum((v - average) ** 2 for v in sample_scores) / len(sample_scores)
+        cv = math.sqrt(variance) / average
+        robustness = max(0.0, min(100.0, 100.0 - cv * 100.0))
+    result["鲁棒性"] = _round_score(robustness)
+    return {dimension: result[dimension] for dimension in dims}
 
 
 # ── 单维评分函数 ──────────────────────────────────────────
@@ -123,7 +130,7 @@ def _calc_adaptability(thoughts: list[dict], lengths: list[int]) -> float:
     avg = sum(lengths) / len(lengths)
     if avg == 0:
         return 50.0
-    variance = sum((l - avg) ** 2 for l in lengths) / len(lengths)
+    variance = sum((length - avg) ** 2 for length in lengths) / len(lengths)
     cv = math.sqrt(variance) / avg
     # 变异系数适中最佳（有变化但不极端）
     return min(100, max(30, cv * 150))

@@ -236,6 +236,24 @@ class TestDownload:
         resp = client.post("/api/market/fake-id/download")
         assert resp.status_code == 404
 
+    def test_missing_source_team_does_not_increment_downloads(self, client):
+        """原 Team 已删除时，失败下载不能污染下载计数。"""
+        aid = _create_agent(client)
+        tid = _create_team(client, aid)
+        published = client.post(
+            "/api/market",
+            json={"team_id": tid, "name": "失效模板"},
+        )
+        item_id = published.json()["id"]
+        assert client.delete(f"/api/teams/{tid}").status_code == 204
+
+        response = client.post(f"/api/market/{item_id}/download")
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "原始 Team 已被删除"
+        detail = client.get(f"/api/market/{item_id}").json()
+        assert detail["downloads"] == 0
+
 
 # =============================================================================
 # Tests — 评分

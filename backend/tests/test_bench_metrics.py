@@ -3,9 +3,6 @@
 覆盖: calculate_metrics 边界值 + aggregate_scores 聚合 + 单维评分函数。
 """
 
-import math
-import pytest
-
 from engines.bench.metrics import (
     calculate_metrics,
     aggregate_scores,
@@ -234,18 +231,37 @@ class TestAggregateScores:
         assert result["决策质量"] == 75.0
 
     def test_robustness_with_variance(self):
-        """鲁棒性：变异系数越大分数越低。"""
+        """跨任务综合表现波动越大，鲁棒性越低。"""
         scores = [
-            {"人格一致性": 80, "决策质量": 70, "交互深度": 60,
-             "鲁棒性": 50, "创造力": 50, "适应性": 65},
-            {"人格一致性": 80, "决策质量": 70, "交互深度": 60,
-             "鲁棒性": 90, "创造力": 50, "适应性": 65},
-            {"人格一致性": 80, "决策质量": 70, "交互深度": 60,
-             "鲁棒性": 50, "创造力": 50, "适应性": 65},
+            {"人格一致性": 10, "决策质量": 10, "交互深度": 10,
+             "鲁棒性": 80, "创造力": 10, "适应性": 10},
+            {"人格一致性": 90, "决策质量": 90, "交互深度": 90,
+             "鲁棒性": 80, "创造力": 90, "适应性": 90},
+            {"人格一致性": 20, "决策质量": 20, "交互深度": 20,
+             "鲁棒性": 80, "创造力": 20, "适应性": 20},
         ]
         result = aggregate_scores(scores)
-        # 鲁棒性有高方差 → 分数应降低
-        assert result["鲁棒性"] < 80
+        assert result["鲁棒性"] < 50
+
+    def test_robustness_ignores_per_task_placeholder(self):
+        """每条任务稳定一致时，不应被固定占位值扭曲。"""
+        scores = [
+            {"人格一致性": 70, "决策质量": 70, "交互深度": 70,
+             "鲁棒性": value, "创造力": 70, "适应性": 70}
+            for value in (10, 50, 90)
+        ]
+
+        result = aggregate_scores(scores)
+
+        assert result["鲁棒性"] == 100
+
+    def test_all_zero_scores_have_zero_robustness(self):
+        """全部失败的零分任务不能得到默认高鲁棒性。"""
+        zero = _zero_scores()
+
+        result = aggregate_scores([zero, zero, zero])
+
+        assert result == zero
 
 
 # =============================================================================
