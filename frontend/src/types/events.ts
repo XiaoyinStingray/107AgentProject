@@ -16,7 +16,9 @@ export type SSEEventType =
   | "session_end"
   | "plan_updated"
   | "coordinator_nudge"
-  | "report_ready";
+  | "report_ready"
+  | "debate_update"
+  | "role_evolved";
 
 export interface SimEvent {
   id: string;

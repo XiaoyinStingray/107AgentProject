@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMarketList, useDownloadTeam } from "../../api/market";
+import { useMarketList, useDownloadTeam, useDeleteMarketItem } from "../../api/market";
 import { useCreateTeam } from "../../api/teams";
 import type { MarketItemSummary } from "../../types/market";
 import Card from "../../components/shared/Card";
@@ -10,6 +10,7 @@ export default function MarketPanel() {
   const { data: items = [], isLoading } = useMarketList();
   const downloadTeam = useDownloadTeam();
   const createTeam = useCreateTeam();
+  const deleteItem = useDeleteMarketItem();
   const [msg, setMsg] = useState<string | null>(null);
 
   const handleDownload = async (item: MarketItemSummary) => {
@@ -50,14 +51,27 @@ export default function MarketPanel() {
                 </div>
               </div>
               <p className="text-xs text-text-secondary mb-3 line-clamp-2">{item.description}</p>
-              <button
-                type="button"
-                disabled={downloadTeam.isPending}
-                onClick={() => handleDownload(item)}
-                className="text-xs font-mono text-accent-orange hover:text-accent-orange/80 transition-colors"
-              >
-                📋 从模板创建
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  disabled={downloadTeam.isPending}
+                  onClick={() => handleDownload(item)}
+                  className="text-xs font-mono text-accent-orange hover:text-accent-orange/80 transition-colors"
+                >
+                  📋 从模板创建
+                </button>
+                <button
+                  type="button"
+                  disabled={deleteItem.isPending}
+                  onClick={async () => {
+                    try { await deleteItem.mutateAsync(item.id); setMsg("已删除"); setTimeout(() => setMsg(null), 2000); }
+                    catch { setMsg("删除失败"); }
+                  }}
+                  className="text-xs font-mono text-text-secondary/40 hover:text-accent-red transition-colors"
+                >
+                  🗑
+                </button>
+              </div>
             </Card>
           ))}
         </div>

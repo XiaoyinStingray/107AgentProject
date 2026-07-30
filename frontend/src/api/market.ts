@@ -54,3 +54,12 @@ export function useRateItem() {
     onSuccess: () => qc.invalidateQueries({ queryKey: marketKeys.all }),
   });
 }
+
+export function useDeleteMarketItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (itemId: string) =>
+      client.delete(`/market/${itemId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: marketKeys.all }),
+  });
+}

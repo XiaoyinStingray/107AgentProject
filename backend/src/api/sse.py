@@ -192,15 +192,40 @@ async def _world_event_generator(
                 if hasattr(engine, "team_plan") and engine.team_plan:
                     plan = engine.team_plan
                     await plan.check_progress(tick_count, tick_events)
-                    # 同步到 DB——确保退出重进不丢状态
+
+                    # 67: 调 team_engine.on_tick（辩论检测 + 角色演化）
+                    debate_state = None
+                    evolutions: list[dict] = []
                     if hasattr(engine, "team_engine") and engine.team_engine:
+                        extra_events = await engine.team_engine.on_tick(
+                            tick_count, tick_events,
+                        )
                         await engine.team_engine._sync_plan_to_db()
-                    # 发射 plan_updated 事件——前端看板实时更新
+                        # 提取辩论+演化数据，嵌入 plan_updated
+                        for ev in extra_events:
+                            if ev.get("type") == "debate_update":
+                                debate_state = ev.get("data")
+                            elif ev.get("type") == "role_evolved":
+                                evolutions = ev.get("data", {}).get("evolutions", [])
+
+                    # 发射 plan_updated 事件（67: 含辩论+角色数据）
+                    plan_data = plan.to_dict()
+                    plan_data["debate"] = debate_state
+                    plan_data["evolutions"] = evolutions
+                    # 角色：优先用演化后的，fallback 到初始分配
+                    te = getattr(engine, "team_engine", None)
+                    roles_src = getattr(engine, "team_agent_roles", {}) or {}
+                    if te and te._evolved_roles:
+                        roles_src = {**roles_src, **te._evolved_roles}
+                    plan_data["agent_roles"] = [
+                        {"id": aid, "name": name_map.get(aid, aid), "role": roles_src.get(aid, "成员")}
+                        for aid in engine.agents.keys()
+                    ]
                     yield _sse_event({
                         "type": "plan_updated",
                         "world_id": world_id,
                         "tick": engine.current_tick,
-                        "data": plan.to_dict(),
+                        "data": plan_data,
                     })
                     # 协调器催促（连续多轮未推进）
                     step = plan.current_step()
@@ -232,9 +257,23 @@ async def _world_event_generator(
                             "tick": engine.current_tick,
                             "data": report,
                         })
-                        # 持久化报告到 PlanRow
+                        # 持久化报告 + 标记 Team/Plan/World 全部完成
                         if hasattr(engine, "team_engine") and engine.team_engine:
                             await engine.team_engine._save_report(report)
+                        try:
+                            from models.team_orm import TeamRow
+                            from models.world_orm import WorldRow
+                            from sqlalchemy import update as _upd
+                            # 标记 Team finished
+                            if hasattr(engine, "team_engine"):
+                                tid = engine.team_engine.team.get("id", "")
+                                if tid:
+                                    await db.execute(_upd(TeamRow).where(TeamRow.id == tid).values(status="finished"))
+                            # 标记 World finished（确保不重连）
+                            await db.execute(_upd(WorldRow).where(WorldRow.id == world_id).values(status="finished"))
+                            await db.commit()
+                        except Exception:
+                            pass
                         break
             elif engine.world.status == "paused":
                 yield _sse_event({

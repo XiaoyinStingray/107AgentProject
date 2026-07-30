@@ -119,3 +119,15 @@ async def rate_item(item_id: str, body: dict, db: AsyncSession = Depends(get_db)
     item.rating_count += 1
     await db.commit()
     return {"rating": item.rating, "rating_count": item.rating_count}
+
+
+@router.delete("/{item_id}")
+async def delete_market_item(item_id: str, db: AsyncSession = Depends(get_db)):
+    """删除模板（67: 补充缺失的删除端点）"""
+    result = await db.execute(select(MarketItem).where(MarketItem.id == item_id))
+    item = result.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="市场条目不存在")
+    await db.delete(item)
+    await db.commit()
+    return {"ok": True}
