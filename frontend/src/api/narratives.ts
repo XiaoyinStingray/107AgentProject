@@ -98,3 +98,31 @@ export function useGenerateReport() {
       client.post<ReportResponse>("/narratives/report", req),
   });
 }
+
+// 71: P3 叙事风格
+export function useGenerateMicrofilm() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (req: NarrativeGenRequest) =>
+      client.post<NarrativeResponse>("/narratives/microfilm", req),
+    onSuccess: () => qc.invalidateQueries({ queryKey: narrativeKeys.all }),
+  });
+}
+
+export function useGenerateSerial() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (req: NarrativeGenRequest) =>
+      client.post<NarrativeResponse>("/narratives/serial", req),
+    onSuccess: () => qc.invalidateQueries({ queryKey: narrativeKeys.all }),
+  });
+}
+
+export function useGenerateSelfportrait() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (req: NarrativeGenRequest) =>
+      client.post<NarrativeResponse>("/narratives/selfportrait", req),
+    onSuccess: () => qc.invalidateQueries({ queryKey: narrativeKeys.all }),
+  });
+}

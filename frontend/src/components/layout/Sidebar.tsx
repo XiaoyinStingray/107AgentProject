@@ -135,7 +135,7 @@ export default function Sidebar() {
                   {section.items.map((item) => (
                     <button
                       key={item.id}
-                      onClick={() => navigate(`${section.route}#item-${item.id}`)}
+                      onClick={() => navigate(`${section.route}#${(item as any).anchor || `item-${item.id}`}`)}
                       className="
                         w-full flex items-center gap-2 pl-10 pr-3 py-1.5 text-sm
                         text-text-secondary hover:text-text-primary hover:bg-bg-card/30

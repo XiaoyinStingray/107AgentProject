@@ -8,6 +8,7 @@ export interface SubItem {
   emoji: string;
   label: string;
   priority: "P0" | "P1" | "P2" | "P3";
+  anchor?: string;
 }
 
 export interface MenuSection {
@@ -135,9 +136,9 @@ export const MENU_SECTIONS: MenuSection[] = [
     title: "M11 游戏化场景",
     route: "/scene",
     items: [
-      { id: 57, emoji: "⏪", label: "时间轴与快照", priority: "P2" },
-      { id: 58, emoji: "🎬", label: "导演模式", priority: "P2" },
-      { id: 59, emoji: "📖", label: "叙事导出", priority: "P3" },
+      { id: 57, emoji: "💾", label: "存档系统", priority: "P2", anchor: "checkpoints" },
+      { id: 58, emoji: "🎬", label: "导演模式", priority: "P2", anchor: "director" },
+      { id: 59, emoji: "📖", label: "叙事导出", priority: "P3", anchor: "export" },
     ],
   },
 ];

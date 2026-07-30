@@ -132,6 +132,17 @@ export default function GameScenePage() {
   const [paused, setPaused] = useState(false);
   const [weather, setWeather] = useState("clear");
   const syncMutation = useSyncSceneState();
+  // 71: 对话日志（叙事导出用）
+  // hash 跳转到对应面板
+  const checkpointsRef = useRef<HTMLDivElement>(null);
+  const directorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const hash = window.location.hash?.slice(1);
+    if (hash) {
+      const el = document.getElementById(`section-${hash}`);
+      el?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, []);
   const mountedRef = useRef(false);
   const gameRef = useRef<Phaser.Game | null>(null);
   const [gameReady, setGameReady] = useState(false);
@@ -459,7 +470,7 @@ export default function GameScenePage() {
 
       {/* 导演面板 (Step 66) */}
       <Card className="p-3">
-        <p className="text-xs font-mono text-text-secondary mb-2">导演模式</p>
+        <p className="text-xs font-mono text-text-secondary mb-2" ref={directorRef}>导演模式</p>
         <DirectorPanel
           weather={weather}
           onWeatherChange={handleWeatherChange}
@@ -467,11 +478,13 @@ export default function GameScenePage() {
           onMoodAll={handleMoodAll}
           paused={paused}
         />
+
+        {/* 71: 叙事导出 */}
       </Card>
 
       {/* 存档面板 */}
       <Card className="p-3">
-        <p className="text-xs font-mono text-text-secondary mb-2">存档管理</p>
+        <p className="text-xs font-mono text-text-secondary mb-2" ref={checkpointsRef}>存档管理</p>
         <CheckpointPanel
           checkpoints={checkpoints}
           count={checkpoints.length}

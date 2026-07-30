@@ -11,6 +11,9 @@ import {
   useGenerateLetter,
   useGeneratePodcast,
   useGenerateParallel,
+  useGenerateMicrofilm,
+  useGenerateSerial,
+  useGenerateSelfportrait,
 } from "../api/narratives";
 import type { NarrativeGenRequest } from "../api/narratives";
 import {
@@ -80,6 +83,9 @@ export default function NarrativeFactory() {
   const generateLetter = useGenerateLetter();
   const generatePodcast = useGeneratePodcast();
   const generateParallel = useGenerateParallel();
+  const generateMicrofilm = useGenerateMicrofilm();
+  const generateSerial = useGenerateSerial();
+  const generateSelfportrait = useGenerateSelfportrait();
   const isPending =
     generateStory.isPending ||
     generateDiary.isPending ||
@@ -132,7 +138,10 @@ export default function NarrativeFactory() {
       else if (styleKey === "diary") apiResult = await generateDiary.mutateAsync(req);
       else if (styleKey === "letter") apiResult = await generateLetter.mutateAsync(req);
       else if (styleKey === "podcast") apiResult = await generatePodcast.mutateAsync(req);
-      else apiResult = await generateParallel.mutateAsync(req);
+      else if (styleKey === "parallel") apiResult = await generateParallel.mutateAsync(req);
+      else if (styleKey === "microfilm") apiResult = await generateMicrofilm.mutateAsync(req);
+      else if (styleKey === "serial") apiResult = await generateSerial.mutateAsync(req);
+      else apiResult = await generateSelfportrait.mutateAsync(req);
 
       setResult({
         title: apiResult.title,
@@ -677,11 +686,9 @@ export default function NarrativeFactory() {
 /** 风格 key → 中文标签（用于 result 阶段展示） */
 function styleLabel(style: NarrativeStyle): string {
   const map: Record<NarrativeStyle, string> = {
-    story: "小说",
-    diary: "日记",
-    letter: "信件",
-    podcast: "播客",
-    parallel: "平行对话",
+    story: "小说", diary: "日记", letter: "信件",
+    podcast: "播客", parallel: "平行对话",
+    microfilm: "微电影", serial: "连载", selfportrait: "自画像",
   };
   return map[style] ?? style;
 }

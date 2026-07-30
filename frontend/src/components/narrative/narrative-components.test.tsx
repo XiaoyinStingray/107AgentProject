@@ -66,6 +66,18 @@ vi.mock("../../api/narratives", () => ({
     mutateAsync: () => Promise.resolve(narrativeMockResult),
     isPending: false,
   }),
+  useGenerateMicrofilm: () => ({
+    mutateAsync: () => Promise.resolve(narrativeMockResult),
+    isPending: false,
+  }),
+  useGenerateSerial: () => ({
+    mutateAsync: () => Promise.resolve(narrativeMockResult),
+    isPending: false,
+  }),
+  useGenerateSelfportrait: () => ({
+    mutateAsync: () => Promise.resolve(narrativeMockResult),
+    isPending: false,
+  }),
 }));
 
 const testQueryClient = new QueryClient({
@@ -94,7 +106,7 @@ describe("Step 23 NarrativeFactory — setup phase", () => {
     expect(screen.getByRole("button", { name: /未来的信/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /播客脚本/ })).toBeInTheDocument();
 
-    // 3 个 P3 占位
+    // 3 个新增 P2 风格
     expect(screen.getByRole("button", { name: /微电影大纲/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /自动连载/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Agent 自画像/ })).toBeInTheDocument();
@@ -115,12 +127,10 @@ describe("Step 23 NarrativeFactory — setup phase", () => {
     expect(generateBtn).toBeEnabled();
   });
 
-  it("disables P3 placeholder style tabs", () => {
+  it("enables all 8 style tabs including P3 upgrades", () => {
     renderNarrativeFactory();
-
-    // P3 占位项应该是 disabled button
     const microFilm = screen.getByRole("button", { name: /微电影大纲/ });
-    expect(microFilm).toBeDisabled();
+    expect(microFilm).toBeEnabled();
   });
 
   it("shows target input only for letter and podcast styles", () => {
@@ -209,17 +219,14 @@ describe("Step 23 — narrative mocks utilities", () => {
     expect(countWords("  \n\t ")).toBe(0);
   });
 
-  it("NARRATIVE_STYLES has 5 available + 3 placeholder entries", () => {
+  it("NARRATIVE_STYLES has 8 available + 0 placeholder entries", () => {
     const available = NARRATIVE_STYLES.filter((s) => s.available);
     const placeholders = NARRATIVE_STYLES.filter((s) => !s.available);
-    expect(available).toHaveLength(5);
-    expect(placeholders).toHaveLength(3);
+    expect(available).toHaveLength(8);
+    expect(placeholders).toHaveLength(0);
     expect(available.map((s) => s.key)).toEqual([
-      "story",
-      "diary",
-      "letter",
-      "podcast",
-      "parallel",
+      "story", "diary", "letter", "podcast", "parallel",
+      "microfilm", "serial", "selfportrait",
     ]);
   });
 

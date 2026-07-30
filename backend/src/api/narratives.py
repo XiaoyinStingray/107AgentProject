@@ -275,3 +275,23 @@ async def generate_report(
         world_id=req.world_id,
         generated_at=result.generated_at,
     )
+
+
+# ── 71: P3 叙事风格 ──
+
+@router.post("/microfilm", response_model=NarrativeGenResponse)
+async def generate_microfilm(req: NarrativeGenRequest):
+    """微电影大纲"""
+    return await _generate_narrative(req, NarrativeStyle.MICROFILM)
+
+
+@router.post("/serial", response_model=NarrativeGenResponse)
+async def generate_serial(req: NarrativeGenRequest):
+    """连载小说"""
+    return await _generate_narrative(req, NarrativeStyle.SERIAL)
+
+
+@router.post("/selfportrait", response_model=NarrativeGenResponse)
+async def generate_selfportrait(req: NarrativeGenRequest):
+    """Agent 自画像"""
+    return await _generate_narrative(req, NarrativeStyle.SELFPORTRAIT)

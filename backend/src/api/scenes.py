@@ -248,3 +248,5 @@ async def delete_checkpoint(scene_id: str, checkpoint_id: str, db: AsyncSession 
     if not ok:
         raise HTTPException(404, "存档不存在")
     return {"ok": True}
+
+

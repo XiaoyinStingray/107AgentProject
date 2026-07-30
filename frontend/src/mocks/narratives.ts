@@ -8,7 +8,7 @@ import type { AgentResponse } from "../types/agent";
    ================================================================ */
 
 /** 叙事风格——与后端 NarrativeStyle StrEnum 一一对应 */
-export type NarrativeStyle = "story" | "diary" | "letter" | "podcast" | "parallel";
+export type NarrativeStyle = "story" | "diary" | "letter" | "podcast" | "parallel" | "microfilm" | "serial" | "selfportrait";
 
 /** 叙事结果——与后端 NarrativeResponse 对齐 */
 export interface NarrativeResult {
@@ -96,39 +96,29 @@ export const NARRATIVE_STYLES: NarrativeStyleMeta[] = [
     priority: "P2",
     available: true,
   },
-  // —— P3 占位项（与 menuData M5 模块后 3 项对齐）——
   {
-    key: "story", // 占位复用 story key，但 available=false 不会进入生成流程
+    key: "microfilm",
     label: "微电影大纲",
     emoji: "🎬",
-    description: "将 Agent 经历改编为微电影分镜大纲",
-    needsTarget: false,
-    targetLabel: "",
-    targetPlaceholder: "",
-    priority: "P3",
-    available: false,
+    description: "将 Agent 经历改编为微电影分镜大纲，5-7 个镜头",
+    needsTarget: false, targetLabel: "", targetPlaceholder: "",
+    priority: "P2", available: true,
   },
   {
-    key: "story",
+    key: "serial",
     label: "自动连载",
     emoji: "📔",
-    description: "跨多个 Tick 的连续章节自动生成",
-    needsTarget: false,
-    targetLabel: "",
-    targetPlaceholder: "",
-    priority: "P3",
-    available: false,
+    description: "连载小说第一章，设置悬念与伏笔，800-1200 字",
+    needsTarget: false, targetLabel: "", targetPlaceholder: "",
+    priority: "P2", available: true,
   },
   {
-    key: "story",
+    key: "selfportrait",
     label: "Agent 自画像",
     emoji: "🎨",
-    description: "Agent 用文字描绘心中的自我形象",
-    needsTarget: false,
-    targetLabel: "",
-    targetPlaceholder: "",
-    priority: "P3",
-    available: false,
+    description: "Agent 用文字描绘内心世界，文学性自我反思",
+    needsTarget: false, targetLabel: "", targetPlaceholder: "",
+    priority: "P2", available: true,
   },
 ];
 
