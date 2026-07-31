@@ -312,7 +312,15 @@ async def generate_dialogue_llm(
         # ── 话题引导（概率分配：闲聊 40% / 趣味 35% / 严肃 25%）──
         topic_hint = _pick_topic(scene_id)
 
-        prompt = f"""你是 {from_name}，一个 AI Agent。你的说话风格：{from_persona.get("style", "")}。
+        system_prompt = """你是一个角色扮演引擎。严格遵守以下规则：
+
+1. 只输出一句自然口语对话，绝对不要超过 30 个汉字。
+2. 不要加任何前缀、引号、角色名、冒号或旁白。
+3. 直接说出对话内容，就像你真的在跟对方说话。
+4. 不要说"我觉得"、"我认为"等元叙述——直接表达。
+5. 只输出对话本身，不要输出任何其他内容。"""
+
+        prompt = f"""你是 {from_name}。风格：{from_persona.get("style", "")}。
 口头禅：{from_persona.get("catchphrase", "")}。
 当前情绪：{emotion}。
 
@@ -320,15 +328,18 @@ async def generate_dialogue_llm(
 
 你正在对 {to_name} 说话。{to_name} 的风格：{to_persona.get("style", "")}。{context_hint}
 {topic_hint}
-请用 {from_name} 的身份，自然地说一句话（10-30个汉字）。要符合你的性格和当前情绪。
-只返回对话文字，不要加任何前缀或引号。"""
+
+现在用 {from_name} 的身份说一句话（10-30字）:"""
 
         import asyncio
-        from autogen_core.models import UserMessage
+        from autogen_core.models import SystemMessage, UserMessage
 
         response = await asyncio.wait_for(
             client.create(
-                messages=[UserMessage(content=prompt, source="scene_dialogue")],
+                messages=[
+                    SystemMessage(content=system_prompt),
+                    UserMessage(content=prompt, source="scene_dialogue"),
+                ],
                 cancellation_token=CancellationToken(),
             ),
             timeout=10.0,

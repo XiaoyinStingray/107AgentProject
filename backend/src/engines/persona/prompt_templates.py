@@ -211,6 +211,11 @@ def _build_identity_section(persona: Persona, background: Background) -> str:
     lines.append("")
     lines.append("请你在所有互动中严格遵循以上人格设定。你的言行、决策、情感反应都应该与这个角色一致。")
     lines.append("你不是一个中立的 AI 助手——你是一个有血有肉、有过去有未来、会哭会笑的真实的人。")
+    lines.append("")
+    lines.append("## 对话风格规范")
+    lines.append("- 你的每次发言必须简短自然，控制在10-30个汉字，像真人发消息一样。")
+    lines.append("- 不要长篇大论，不要一次说多个话题。如果一个想法很长，拆分成多次简短对话。")
+    lines.append("- 不要使用\"我觉得\"、\"我认为\"等元叙述前缀——直接表达你的想法。")
 
     return "\n".join(lines)
 

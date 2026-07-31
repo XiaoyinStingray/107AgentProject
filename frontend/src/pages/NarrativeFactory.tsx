@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
 import StatusDot from "../components/shared/StatusDot";
@@ -62,16 +63,17 @@ export default function NarrativeFactory() {
     setTimeSpan("5年后");
   }, [styleKey]);
 
-  // 72: hash<->style
+  // 72: hash<->style — use location.hash so sidebar clicks re-trigger
+  const location = useLocation();
   const HASH_STYLE_MAP: Record<string, NarrativeStyle> = {
     story: "story", diary: "diary", letter: "letter", podcast: "podcast",
     parallel: "parallel", microfilm: "microfilm", serial: "serial", selfportrait: "selfportrait",
   };
   useEffect(() => {
-    const h = window.location.hash?.replace("#", "").replace("item-", "");
+    const h = location.hash?.replace("#", "").replace("item-", "");
     const match = HASH_STYLE_MAP[h];
     if (match && match !== styleKey) setStyleKey(match);
-  }, []); // mount
+  }, [location.hash]); // re-run when hash changes
   useEffect(() => {
     if (styleKey) window.history.replaceState(null, "", `#${styleKey}`);
   }, [styleKey]);

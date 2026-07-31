@@ -528,6 +528,38 @@
 
 ---
 
+## 2026-07-31: State 4 回归修复 + Worker 补丁
+
+### BUG-039：场景启动 Crash — WorldRow 传入不存在的 scenario_id 参数
+
+- **状态**：✅ 已修复 (2026-07-31)
+- **优先级**：P0（场景启动 500 错误，M11 完全不可用）
+- **根因**：scenes.py 构造 WorldRow 时传入不存在的 scenario_id 列
+- **修复**：scenario_id=... → scenario_json=json.dumps({...})
+- **关联位置**：`backend/src/api/scenes.py` — lines 302, 315
+
+### BUG-040：AI 驱动场景对话过长
+
+- **状态**：✅ 已修复 (2026-07-31)
+- **优先级**：P1（State 4 回归——system prompt 无对话长度约束）
+- **现象**：AI 驱动模式下 Agent 对话超长，偶发 TimeoutError
+- **根因**：两条路径均缺长度约束——
+  Path A（interact 端点）：generate_dialogue_llm 无 SystemMessage
+  Path B（WorldEngine+SceneBridge）：build_core_system_message 鼓励"有血有肉的人"但无长度限制；GroupChat task 也无
+- **修复（3 处）**：
+  1. `scene/engine.py`：新增 system_prompt 硬约束（≤30字、禁止前缀/旁白/元叙述），[SystemMessage, UserMessage] 结构
+  2. `persona/prompt_templates.py`：`_build_identity_section` 新增"对话风格规范"（10-30字、拆分长想法、禁止元叙述）——对所有 LifeAgent 生效
+  3. `world/messages.py`：`_build_group_task` 新增长度约束（10-30字、拆分长对话）——对每 tick GroupChat 生效
+- **关联位置**：`engines/scene/engine.py`, `engines/persona/prompt_templates.py`, `engines/world/messages.py`
+
+### BUG-041：M5 侧边栏点击后主面板风格不更新
+
+- **状态**：✅ 已修复 (2026-07-31)
+- **优先级**：P1（侧边栏导航完全无效）
+- **根因**：NarrativeFactory hash→style useEffect 依赖[]（仅 mount），同路由内 hash 变化不 remount
+- **修复**：改用 useLocation().hash 作为依赖
+- **关联位置**：`frontend/src/pages/NarrativeFactory.tsx` — lines 66-78
+
 ## 2026-07-31: State 5 — Worker + scenes bug 修复
 
 ### BUG-039：场景启动 Crash — WorldRow 传入不存在的 scenario_id 参数
