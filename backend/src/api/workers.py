@@ -75,6 +75,10 @@ class WorkerExecuteRequest(BaseModel):
         default_factory=dict,
         description="工作区配置——本地: {path}，云端: {host, port, user, key, path}",
     )
+    reuse_run_id: str = Field(
+        default="",
+        description="复用已有工作区——用于追加对话。空字符串则创建新工作区",
+    )
 
 
 class WorkerStatusResponse(BaseModel):
@@ -166,12 +170,19 @@ async def execute_worker_task(req: WorkerExecuteRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"无法创建 Agent: {e}")
 
-    # 创建 Workspace
-    workspace = _create_workspace(
-        req.workspace_type,
-        req.workspace_config or {},
-        req.agent_id,
-    )
+    # 创建 Workspace——如果 reuse_run_id 指定且已有工作区，则复用
+    workspace = None
+    if req.reuse_run_id:
+        existing = _active_workers.get(req.reuse_run_id)
+        if existing:
+            workspace = existing["worker"]._workspace
+            logger.info(f"Reusing workspace from run {req.reuse_run_id}")
+    if workspace is None:
+        workspace = _create_workspace(
+            req.workspace_type,
+            req.workspace_config or {},
+            req.agent_id,
+        )
 
     # 创建 Worker
     worker = AgentWorker(agent=agent, workspace=workspace, base_dir=req.workspace_config.get("path"))

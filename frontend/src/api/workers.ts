@@ -34,6 +34,7 @@ export interface WorkerExecuteRequest {
   task: string;
   workspace_type?: "local" | "cloud";
   workspace_config?: Record<string, unknown>;
+  reuse_run_id?: string;  // 追加对话时复用已有工作区
 }
 
 // =============================================================================

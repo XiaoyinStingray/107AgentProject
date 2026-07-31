@@ -99,24 +99,22 @@ export default function WorkerBench() {
     return () => controller.abort();
   }, []);
 
-  // 执行任务
+  // 构建通用请求体
+  const buildRequest = useCallback((taskText: string, reuse: boolean) => ({
+    agent_id: effectiveAgentId,
+    task: taskText,
+    workspace_type: workspaceConfig.type,
+    workspace_config: workspaceConfig.type === "cloud"
+      ? { host: workspaceConfig.host, port: workspaceConfig.port, user: workspaceConfig.user, key: workspaceConfig.key, path: workspaceConfig.path }
+      : { path: workspaceConfig.path },
+    reuse_run_id: reuse && currentRunId ? currentRunId : undefined,
+  }), [effectiveAgentId, workspaceConfig, currentRunId]);
+
+  // 执行新任务（新工作区）
   const handleExecute = useCallback(() => {
     if (!task.trim()) return;
-    execute({
-      agent_id: effectiveAgentId,
-      task: task.trim(),
-      workspace_type: workspaceConfig.type,
-      workspace_config: workspaceConfig.type === "cloud"
-        ? {
-            host: workspaceConfig.host,
-            port: workspaceConfig.port,
-            user: workspaceConfig.user,
-            key: workspaceConfig.key,
-            path: workspaceConfig.path,
-          }
-        : { path: workspaceConfig.path },
-    });
-  }, [task, agentId, execute]);
+    execute(buildRequest(task.trim(), false));
+  }, [task, execute, buildRequest]);
 
   // 停止
   const handleCancel = useCallback(() => {
@@ -125,26 +123,20 @@ export default function WorkerBench() {
 
   const [followUp, setFollowUp] = useState("");
 
-  // 重置
+  // 重置 = 新任务（清空工作区，下次执行用新 workspace）
   const handleReset = useCallback(() => {
     reset();
     setTask("");
     setFollowUp("");
+    setCurrentRunId(null);
   }, [reset]);
 
-  // 追加对话——用当前 workspace 重新执行
+  // 追加对话——复用当前工作区
   const handleFollowUp = useCallback(() => {
     if (!followUp.trim() || !currentRunId) return;
-    execute({
-      agent_id: effectiveAgentId,
-      task: followUp.trim(),
-      workspace_type: workspaceConfig.type,
-      workspace_config: workspaceConfig.type === "cloud"
-        ? { host: workspaceConfig.host, port: workspaceConfig.port, user: workspaceConfig.user, key: workspaceConfig.key, path: workspaceConfig.path }
-        : { path: workspaceConfig.path },
-    });
+    execute(buildRequest(followUp.trim(), true));
     setFollowUp("");
-  }, [followUp, currentRunId, effectiveAgentId, workspaceConfig, execute]);
+  }, [followUp, currentRunId, execute, buildRequest]);
 
   // 使用示例任务
   const handleExample = useCallback(
