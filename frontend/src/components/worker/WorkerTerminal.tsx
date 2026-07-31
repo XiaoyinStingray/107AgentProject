@@ -353,7 +353,14 @@ export default function WorkerTerminal({
       </div>
 
       {/* 完成卡片 */}
-      {done && <CompletionCard events={events} onAccept={onAccept} onRevise={onRevise} onNewTask={onNewTask} />}
+      {done ? (
+        <CompletionCard events={events} onAccept={onAccept} onRevise={onRevise} onNewTask={onNewTask} />
+      ) : events.length > 0 ? (
+        <div className="px-4 py-1 border-t border-border bg-bg-secondary text-xs text-text-muted font-mono">
+          DEBUG: done={String(done)} connected={String(connected)} events={events.length}
+          lastEvent={events[events.length-1]?.type}
+        </div>
+      ) : null}
     </div>
   );
 }

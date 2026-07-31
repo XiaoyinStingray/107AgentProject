@@ -255,14 +255,20 @@ async def execute_worker_task(req: WorkerExecuteRequest):
         try:
             async for event in worker.execute(req.task):
                 yield event
-                # 保存事件供重连回放
+                # 保存解析后的事件供重连回放（去掉 "data: " 前缀，解析 JSON）
                 if entry and entry.get("events") is not None:
-                    entry["events"].append(event)
+                    try:
+                        if event.startswith("data: "):
+                            entry["events"].append(json.loads(event[6:]))
+                    except Exception:
+                        pass  # 解析失败静默跳过
         except Exception as e:
             logger.exception(f"Worker SSE error: {e}")
-            err = f"data: {json.dumps({'type': 'worker.error', 'data': {'message': str(e)}, 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
+            err_data = {"type": "worker.error", "data": {"message": str(e)}, "timestamp": datetime.now(timezone.utc).isoformat()}
+            err_sse = f"data: {json.dumps(err_data)}\n\n"
             if entry and entry.get("events") is not None:
-                entry["events"].append(err)
+                entry["events"].append(err_data)
+            yield err_sse
             yield err
         finally:
             if entry:
