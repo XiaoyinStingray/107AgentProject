@@ -111,6 +111,7 @@ async def _persist_worker_state(entry: dict):
             "running": entry.get("running", False),
             "state": worker.state.value if hasattr(worker.state, 'value') else str(worker.state),
             "steps": worker._step_index,
+            "accepted": entry.get("accepted", False),
             "created_at": entry["created_at"],
         }
         import json
@@ -137,10 +138,11 @@ async def _restore_workers_from_disk(base_dir: str = None):
             state = _json.loads(state_file.read_text(encoding='utf-8'))
             state["running"] = False  # 重启后标记为非运行
             _active_workers[state["run_id"]] = {
-                "worker": None,  # 无活跃 engine，仅元数据
+                "worker": None,
                 "agent_name": state.get("agent_name", "?"),
                 "task": state.get("task", ""),
                 "running": False,
+                "accepted": state.get("accepted", False),
                 "events": [],
                 "created_at": state.get("created_at", ""),
             }
@@ -332,6 +334,7 @@ async def list_worker_history():
                     if p.is_file():
                         rel = str(p.relative_to(ws_dir)).replace("\\", "/")
                         files.append({"path": rel, "size": p.stat().st_size})
+        accepted = e.get("accepted", False)
         history.append({
             "run_id": rid,
             "agent_name": e["agent_name"],
@@ -340,6 +343,7 @@ async def list_worker_history():
             "state": worker_state,
             "steps": steps,
             "files": files,
+            "accepted": accepted,
             "created_at": e["created_at"],
         })
     history.sort(key=lambda h: h["created_at"], reverse=True)
@@ -407,10 +411,21 @@ async def get_worker_events(run_id: str):
     entry = _active_workers.get(run_id)
     if not entry:
         raise HTTPException(status_code=404, detail=f"Worker {run_id!r} 未找到")
+    events = entry.get("events", [])
+    if not events:
+        # 尝试从磁盘加载
+        from pathlib import Path
+        events_file = Path.home() / "workspaces" / run_id / "worker_events.json"
+        if events_file.exists():
+            try:
+                events = json.loads(events_file.read_text(encoding='utf-8'))
+            except Exception:
+                pass
     return {
         "run_id": run_id,
-        "events": entry.get("events", [])[-500:],
+        "events": events[-500:],
         "running": entry.get("running", False),
+        "accepted": entry.get("accepted", False),
     }
 
 
@@ -452,6 +467,35 @@ async def unlock_worker_file(run_id: str, path: str = ""):
     if worker is not None:
         worker.unlock_file(path)
     return {"path": path, "locked": False}
+
+
+@router.post("/{run_id}/accept")
+async def accept_worker(run_id: str):
+    """认可交付——持久化事件并标记为已验收。"""
+    entry = _active_workers.get(run_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Worker {run_id!r} 未找到")
+    entry["accepted"] = True
+    # 持久化到磁盘
+    await _persist_worker_state(entry)
+    # 额外保存事件文件供历史回放
+    await _save_events_file(entry)
+    return {"run_id": run_id, "accepted": True}
+
+
+async def _save_events_file(entry: dict):
+    """保存完整事件列表到工作区目录。"""
+    try:
+        worker = entry.get("worker")
+        if worker is None:
+            return
+        from pathlib import Path
+        events_file = Path(worker._workspace._root) / "worker_events.json"
+        import json as _json
+        events_file.write_text(_json.dumps(entry.get("events", []), ensure_ascii=False), encoding='utf-8')
+        logger.info(f"Saved {len(entry.get('events', []))} events for {worker.run_id}")
+    except Exception:
+        pass
 
 
 @router.delete("/{run_id}")

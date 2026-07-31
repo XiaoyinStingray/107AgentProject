@@ -85,7 +85,7 @@ export default function WorkerBench() {
   const [history, setHistory] = useState<Array<{
     run_id: string; agent_name: string; task: string; running: boolean;
     state: string; steps: number; files: Array<{path: string; size: number}>;
-    created_at: string;
+    accepted: boolean; created_at: string;
   }>>([]);
 
   // 追踪 runId——从 events 中保持最新值
@@ -174,10 +174,13 @@ export default function WorkerBench() {
     setAccepted(false);
   }, [reset]);
 
-  // 认可交付
-  const handleAccept = useCallback(() => {
+  // 认可交付——持久化到后端
+  const handleAccept = useCallback(async () => {
     setAccepted(true);
-  }, []);
+    if (currentRunId) {
+      try { await fetch(`/api/workers/${currentRunId}/accept`, { method: "POST" }); } catch {}
+    }
+  }, [currentRunId]);
 
   // 追加对话——复用当前工作区（直接传 currentRunId，不绕 buildRequest）
   const handleFollowUp = useCallback((instruction: string) => {
@@ -453,8 +456,19 @@ export default function WorkerBench() {
               <div key={h.run_id}
                    className="flex items-center gap-3 px-4 py-2 border-b border-border/50
                               hover:bg-bg-primary/50 transition-colors cursor-pointer"
-                   onClick={() => setCurrentRunId(h.run_id)}>
-                <span className={`w-2 h-2 rounded-full shrink-0 ${h.running ? "bg-emerald-400 animate-pulse" : "bg-text-muted"}`} />
+                   onClick={async () => {
+                     setCurrentRunId(h.run_id);
+                     // 加载该 Worker 的聊天记录
+                     try {
+                       const evResp = await fetch(`/api/workers/${h.run_id}/events`);
+                       if (evResp.ok) {
+                         const evData = await evResp.json();
+                         if (evData.events?.length > 0) hydrate(evData.events);
+                       }
+                     } catch {}
+                   }}>
+                <span className={`w-2 h-2 rounded-full shrink-0 ${h.running ? "bg-emerald-400 animate-pulse" : h.accepted ? "bg-emerald-500" : "bg-text-muted"}`} />
+                {h.accepted && <span className="text-xs text-emerald-500 font-mono shrink-0">✓</span>}
                 <span className="text-xs font-mono text-text-secondary w-20 truncate">{h.agent_name}</span>
                 <span className="text-xs font-mono text-text-muted flex-1 truncate">{h.task}</span>
                 <span className="text-xs font-mono text-text-muted">{h.steps} 步</span>
