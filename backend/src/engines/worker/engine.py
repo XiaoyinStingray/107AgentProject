@@ -257,7 +257,8 @@ class AgentWorker:
             # ── 主循环（状态机驱动）──
             while True:
                 if self._cancel_requested:
-                    for ev in self._handle_cancel():
+                    cancel_events = await self._handle_cancel()
+                    for ev in cancel_events:
                         yield ev
                     return
 
@@ -271,7 +272,8 @@ class AgentWorker:
                             yield event
                         # deciding 可能直接转换到 DONE
                         if self._state == WorkerState.DONE:
-                            for ev in self._handle_done():
+                            done_events = await self._handle_done()
+                            for ev in done_events:
                                 yield ev
                             return
 
@@ -284,12 +286,14 @@ class AgentWorker:
                             yield event
 
                     case WorkerState.DONE:
-                        for ev in self._handle_done():
+                        done_events = await self._handle_done()
+                        for ev in done_events:
                             yield ev
                         return
 
                     case WorkerState.ERROR:
-                        for ev in self._handle_error():
+                        error_events = await self._handle_error()
+                        for ev in error_events:
                             yield ev
                         return
 

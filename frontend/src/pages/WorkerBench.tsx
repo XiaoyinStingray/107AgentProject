@@ -5,7 +5,7 @@
  * 顶部: 任务输入栏 + 执行/停止按钮 + 状态指示器
  */
 
-import React, { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import React, { useState, useCallback, useEffect, useMemo } from "react";
 import { useWorkerExecute } from "../api/workers";
 import WorkerTerminal from "../components/worker/WorkerTerminal";
 import WorkspacePanel from "../components/worker/WorkspacePanel";
@@ -62,19 +62,15 @@ export default function WorkerBench() {
 
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   const [reconnectNotice, setReconnectNotice] = useState<string | null>(null);
-  const prevConnectedRef = useRef(false);
 
-  // 追踪 runId：connected 从 false→true 时记录
+  // 追踪 runId——从第一个 worker.started 事件中提取
   useEffect(() => {
-    if (connected && !prevConnectedRef.current) {
-      // 从最近事件中提取 run_id
-      const started = events.find((e) => e.type === "worker.started");
-      if (started) {
-        setCurrentRunId(started.data?.run_id as string ?? null);
-      }
+    if (currentRunId) return; // 已设置
+    const started = events.find((e) => e.type === "worker.started");
+    if (started?.data?.run_id) {
+      setCurrentRunId(started.data.run_id as string);
     }
-    prevConnectedRef.current = connected;
-  }, [connected, events]);
+  }, [events, currentRunId]);
 
   // unmount 时不 cancel——worker 后台继续跑
   // 用户点"停止"才 cancel
