@@ -242,6 +242,30 @@ async def update_pipeline(pipeline_id: str, req: PipelineCreateRequest):
     return {"id": pipeline_id, "name": req.name, "node_count": len(nodes)}
 
 
+@router.get("/{pipeline_id}/files")
+async def list_pipeline_files(pipeline_id: str):
+    """列出管线工作区中的产出文件。"""
+    from pathlib import Path
+    ws_dir = Path.home() / "workspaces" / f"pipeline-{pipeline_id}" / "files"
+    files = []
+    if ws_dir.exists():
+        for p in ws_dir.rglob("*"):
+            if p.is_file():
+                files.append({"path": str(p.relative_to(ws_dir)).replace("\\", "/"), "size": p.stat().st_size})
+    return {"pipeline_id": pipeline_id, "files": sorted(files, key=lambda f: f["size"], reverse=True)}
+
+
+@router.get("/{pipeline_id}/files/{path:path}")
+async def read_pipeline_file(pipeline_id: str, path: str):
+    """读取管线工作区中的文件内容。"""
+    from pathlib import Path
+    file_path = Path.home() / "workspaces" / f"pipeline-{pipeline_id}" / "files" / path
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"文件不存在: {path}")
+    content = file_path.read_text(encoding='utf-8')
+    return {"path": path, "content": content, "size": len(content)}
+
+
 @router.delete("/{pipeline_id}")
 async def delete_pipeline(pipeline_id: str):
     if pipeline_id not in _pipelines:

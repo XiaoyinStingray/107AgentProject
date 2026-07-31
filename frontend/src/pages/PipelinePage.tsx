@@ -20,6 +20,8 @@ export default function PipelinePage() {
   const abortRef = useRef<AbortController|null>(null);
   const [msg, setMsg] = useState<string|null>(null);
   const [completedRuns, setCompletedRuns] = useState<Set<string>>(new Set());
+  const [runFiles, setRunFiles] = useState<Array<{path:string;size:number;content?:string}>>([]);
+  const [viewingFile, setViewingFile] = useState<{path:string;content:string}|null>(null);
 
   const load = useCallback(async () => {
     try { const r=await fetch("/api/pipelines/"); if(r.ok) setTemplates(await r.json()); } catch {}
@@ -103,7 +105,13 @@ export default function PipelinePage() {
             const ev = JSON.parse(line.slice(6));
             const isDone = ev.type==="pipeline.done";
             setRun(prev => ({...prev, events:[...prev.events,ev], nodes:ev.type==="pipeline.node_status"?{...prev.nodes,[ev.data.node_id]:ev.data.status}:prev.nodes, running:!isDone, finished:isDone}));
-            if (isDone && selected) setCompletedRuns(prev => new Set(prev).add(selected));
+            if (isDone && selected) {
+              setCompletedRuns(prev => new Set(prev).add(selected));
+              // 加载产出文件列表
+              fetch(`/api/pipelines/${selected}/files`).then(r=>r.json()).then(d=>{
+                if (d.files) setRunFiles(d.files);
+              }).catch(()=>{});
+            }
           } catch {}
         }
         buf = buf.includes("\n") ? buf.slice(buf.lastIndexOf("\n")+1) : buf;
@@ -254,6 +262,33 @@ export default function PipelinePage() {
                   </div>
                 ))}
               </div>
+              {/* 产出文件 */}
+              {run.finished && runFiles.length>0 && (
+                <div className="p-3 border border-border rounded bg-bg-primary">
+                  <h4 className="text-xs font-mono text-text-secondary mb-2">📁 产出文件 ({runFiles.length})</h4>
+                  {viewingFile ? (
+                    <div>
+                      <button onClick={()=>setViewingFile(null)}
+                              className="text-xs font-mono text-text-muted hover:text-text-primary mb-2 px-2 py-0.5 border border-border rounded">← 返回</button>
+                      <pre className="text-xs font-mono text-text-secondary whitespace-pre-wrap bg-bg-primary p-3 rounded border border-border max-h-80 overflow-y-auto">{viewingFile.content}</pre>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      {runFiles.map(f=>(
+                        <div key={f.path} className="flex items-center gap-2 py-0.5">
+                          <span className="text-xs font-mono text-cyan-400 cursor-pointer hover:underline"
+                                onClick={async()=>{try{const r=await fetch(`/api/pipelines/${selected}/files/${encodeURIComponent(f.path)}`);if(r.ok)setViewingFile(await r.json())}catch{}}}>
+                            📄 {f.path}
+                          </span>
+                          <span className="text-xs text-text-muted">({(f.size/1024).toFixed(1)}KB)</span>
+                          <a href="#" onClick={async e=>{e.preventDefault();try{const r=await fetch(`/api/pipelines/${selected}/files/${encodeURIComponent(f.path)}`);if(r.ok){const d=await r.json();const b=new Blob([d.content]);const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download=f.path;a.click();URL.revokeObjectURL(u)}}catch{}}}
+                             className="text-xs text-text-muted hover:text-cyan-400 underline">下载</a>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               {/* 运行结果 */}
               {(run.running||run.events.length>0) && (
                 <div className="space-y-3">
