@@ -178,12 +178,21 @@ export default function WorkerBench() {
     setAccepted(true);
   }, []);
 
-  // 追加对话——复用当前工作区
+  // 追加对话——复用当前工作区（直接传 currentRunId，不绕 buildRequest）
   const handleFollowUp = useCallback((instruction: string) => {
-    if (!instruction.trim() || !currentRunId) return;
+    const rid = currentRunId;  // 闭包捕获当前值
+    if (!instruction.trim() || !rid) return;
     setAccepted(false);
-    execute(buildRequest(instruction.trim(), true));
-  }, [currentRunId, execute, buildRequest]);
+    execute({
+      agent_id: effectiveAgentId,
+      task: instruction.trim(),
+      workspace_type: workspaceConfig.type,
+      workspace_config: workspaceConfig.type === "cloud"
+        ? { host: workspaceConfig.host, port: workspaceConfig.port, user: workspaceConfig.user, key: workspaceConfig.key, path: workspaceConfig.path }
+        : { path: workspaceConfig.path },
+      reuse_run_id: rid,
+    });
+  }, [currentRunId, effectiveAgentId, workspaceConfig, execute]);
 
   // 使用示例任务
   const handleExample = useCallback(

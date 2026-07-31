@@ -366,8 +366,17 @@ async def read_worker_file(run_id: str, path: str):
     entry = _active_workers.get(run_id)
     if not entry:
         raise HTTPException(status_code=404, detail=f"Worker {run_id!r} 未找到")
+    worker = entry.get("worker")
+    if worker is None:
+        # 磁盘恢复的条目——直接从文件系统读
+        from pathlib import Path
+        file_path = Path.home() / "workspaces" / run_id / "files" / path
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"文件不存在: {path}")
+        content = file_path.read_text(encoding='utf-8')
+        return {"path": path, "content": content, "size": len(content)}
     try:
-        content = await entry["worker"]._workspace.read_file(path)
+        content = await worker._workspace.read_file(path)
         return {"path": path, "content": content, "size": len(content)}
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"文件不存在: {path}")
@@ -422,7 +431,9 @@ async def unlock_worker_file(run_id: str, path: str = ""):
     entry = _active_workers.get(run_id)
     if not entry:
         raise HTTPException(status_code=404, detail=f"Worker {run_id!r} 未找到")
-    entry["worker"].unlock_file(path)
+    worker = entry.get("worker")
+    if worker is not None:
+        worker.unlock_file(path)
     return {"path": path, "locked": False}
 
 
