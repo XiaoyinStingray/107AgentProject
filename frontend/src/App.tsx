@@ -19,6 +19,7 @@ const Archive = lazy(() => import("./pages/Archive"));
 const TeamDashboard = lazy(() => import("./pages/TeamDashboard"));
 const BenchLab = lazy(() => import("./pages/BenchLab"));
 const GameScenePage = lazy(() => import("./pages/GameScene"));
+const WorkerBench = lazy(() => import("./pages/WorkerBench"));
 
 /** Suspense 占位——加载中显示 */
 function PageFallback() {
@@ -196,6 +197,16 @@ export default function App() {
             element={
               <Suspense fallback={<PageFallback />}>
                 <GameScenePage />
+              </Suspense>
+            }
+          />
+
+          {/* M12 Worker 工作台 */}
+          <Route
+            path="worker"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <WorkerBench />
               </Suspense>
             }
           />

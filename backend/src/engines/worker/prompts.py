@@ -6,7 +6,6 @@ Agent 决策 Prompt 模板 — Worker 引擎的核心协议。
     这是从 Team 模式学到的关键教训——GroupChat 中 Agent 的自由文本
     发言模式导致解析不可控。Worker 模式强制结构化输出。
   - JSON 字段名在 Phase 22 冻结，后续实现不得修改。
-    如需修改，同步更新前端解析逻辑和后端重试逻辑。
   - 工具列表从 ToolSpec 注册表动态生成，不在 prompt 中硬编码。
 
 Phase 22: 定义 prompt 模板和决策 JSON schema。
@@ -17,44 +16,7 @@ from engines.worker.tools import build_tool_list_text, ToolSpec
 
 
 # =============================================================================
-# Agent 决策 JSON 格式（设计冻结——不得修改字段名）
-# =============================================================================
-#
-# Agent 每步输出必须是以下格式的 JSON 对象，不包含任何额外文字:
-#
-# {
-#   "decision": "tool_call" | "deliverable" | "done",
-#   "tool_name": "web_search" | "run_python" | "write_file" | "read_file" | "list_files" | null,
-#   "tool_args": {...} | null,
-#   "deliverable_summary": "..." | null,
-#   "reason": "为什么做这个决定（一句话，会显示在终端的 step_decision 事件中）"
-# }
-#
-# decision 取值含义:
-#   "tool_call"   → Agent 要调用工具。tool_name 和 tool_args 必须非空。
-#   "deliverable" → Agent 产出阶段性成果。deliverable_summary 描述产出物。
-#   "done"        → Agent 判断任务已完成。所有产出物已保存到文件。
-
-
-# =============================================================================
-# Agent 反思 JSON 格式
-# =============================================================================
-#
-# {
-#   "satisfied": true | false,
-#   "plan_changed": true | false,
-#   "thought": "对上一步结果的评估（一句话）",
-#   "next_action": "continue" | "revise" | "done"
-# }
-#
-# next_action 取值含义:
-#   "continue" → 按原计划继续下一步
-#   "revise"   → 需要调整计划，回到 PLANNING 状态
-#   "done"     → 已完成，进入 DONE 状态
-
-
-# =============================================================================
-# 系统 Prompt —— Agent 角色定义
+# 系统 Prompt
 # =============================================================================
 
 WORKER_SYSTEM_PROMPT = """你是一个自主工作 Agent。你的职责是：接收用户任务，制定计划，逐步执行，产出可交付的文件。
@@ -133,3 +95,70 @@ RETRY_HINT = """
 2. 所有字符串用双引号 ""
 3. 不要尾随逗号
 4. 确保花括号配对"""
+
+
+# =============================================================================
+# 反思 Prompt 模板
+# =============================================================================
+
+REFLECTION_PROMPT_TEMPLATE = """你上一步执行了工具 **{tool_name}**，结果如下：
+
+{result_summary}
+
+请评估：
+1. 上一步结果是否满足预期？
+2. 后续计划是否需要调整？
+3. 下一步应该做什么？
+
+用以下 JSON 格式回复（**只输出 JSON**）:
+
+{{
+  "satisfied": true | false,
+  "plan_changed": true | false,
+  "thought": "你的反思（一句话）",
+  "next_action": "continue" | "revise" | "done"
+}}"""
+
+
+# =============================================================================
+# 构建函数
+# =============================================================================
+
+def build_decision_prompt(
+    step_index: int,
+    task: str,
+    plan_summary: str,
+    completed_steps: str,
+    file_list: str,
+    last_action: str,
+    last_result: str,
+    tools: list[ToolSpec] | None = None,
+) -> str:
+    """构建 Agent 决策 prompt。"""
+    from engines.worker.tools import WORKER_TOOLS as DEFAULT_TOOLS
+
+    tool_list = build_tool_list_text(tools or DEFAULT_TOOLS)
+
+    prompt = DECISION_PROMPT_TEMPLATE.format(
+        step_index=step_index,
+        task=task,
+        plan_summary=plan_summary,
+        completed_steps=completed_steps,
+        file_list=file_list or "（空）",
+        last_action=last_action or "（无——这是第一步）",
+        last_result=last_result or "（无）",
+        tool_list=tool_list,
+    )
+
+    if step_index == 1:
+        prompt += f"\n\n{PLANNING_HINT}"
+
+    return prompt
+
+
+def build_reflection_prompt(tool_name: str, result_summary: str) -> str:
+    """构建 Agent 反思 prompt。"""
+    return REFLECTION_PROMPT_TEMPLATE.format(
+        tool_name=tool_name,
+        result_summary=result_summary[:1000],
+    )

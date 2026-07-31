@@ -99,6 +99,14 @@ export const MENU_SECTIONS: MenuSection[] = [
       { id: 58, emoji: "🎬", label: "导演模式", priority: "P2", anchor: "director" },
     ],
   },
+  {
+    title: "M12 Worker", route: "/worker",
+    items: [
+      { id: 59, emoji: "⚡", label: "终端工作台", priority: "P0" },
+      { id: 60, emoji: "🔗", label: "管道编辑器", priority: "P2" },
+      { id: 61, emoji: "📁", label: "文件浏览器", priority: "P2" },
+    ],
+  },
 ];
 
 export function findItemById(id: number): (SubItem & { sectionTitle: string }) | undefined {
