@@ -174,13 +174,17 @@ export default function WorkerBench() {
     setAccepted(false);
   }, [reset]);
 
-  // 认可交付——持久化到后端
+  // 认可交付——持久化到后端，避免状态抖动
+  const [accepting, setAccepting] = useState(false);
   const handleAccept = useCallback(async () => {
-    setAccepted(true);
+    if (accepting) return;
+    setAccepting(true);
     if (currentRunId) {
       try { await fetch(`/api/workers/${currentRunId}/accept`, { method: "POST" }); } catch {}
     }
-  }, [currentRunId]);
+    setAccepted(true);
+    setAccepting(false);
+  }, [currentRunId, accepting]);
 
   // 追加对话——复用当前工作区（直接传 currentRunId，不绕 buildRequest）
   const handleFollowUp = useCallback((instruction: string) => {
@@ -449,8 +453,21 @@ export default function WorkerBench() {
       {/* 历史面板 */}
       {showHistory && (
         <div className="border-b border-border max-h-48 overflow-y-auto bg-bg-secondary">
+          <div className="px-4 py-1.5 border-b border-border/50 flex items-center justify-between">
+            <span className="text-xs font-mono text-text-muted">
+              历史记录 — 点击可加载聊天
+            </span>
+            <div className="flex items-center gap-3 text-xs text-text-muted/50 font-mono">
+              <span>🟢 已验收</span>
+              <span>⚫ 未验收</span>
+            </div>
+          </div>
           {history.length === 0 ? (
-            <p className="px-4 py-3 text-xs text-text-muted font-mono">暂无历史记录</p>
+            <div className="px-4 py-6 text-center">
+              <span className="text-2xl block mb-2">📋</span>
+              <p className="text-xs font-mono text-text-muted">暂无历史记录</p>
+              <p className="text-xs font-mono text-text-muted/50 mt-1">完成任务并点击"认可交付"后，记录会出现在这里</p>
+            </div>
           ) : (
             history.map((h) => (
               <div key={h.run_id}

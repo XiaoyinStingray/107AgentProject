@@ -383,11 +383,27 @@ function CompletionCard({
     return (
       <div className="border-t-2 border-emerald-700/50 bg-emerald-900/10">
         <div className="p-3 flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <span className="text-lg">🏁</span>
             <span className="text-sm font-mono text-emerald-400 font-semibold">
               已验收 — {String(steps)} 步, {files.length} 个文件
             </span>
+            {files.length > 0 && (
+              <span className="text-xs text-text-muted font-mono">
+                {files.map((f, i) => (
+                  <span key={f}>{i > 0 && " · "}
+                    <a href="#" onClick={async (e) => {
+                      e.preventDefault();
+                      try {
+                        const rid = (events.find(ev => ev.type === "worker.started")?.data as any)?.run_id;
+                        const resp = await fetch(`/api/workers/${rid}/files/${encodeURIComponent(f)}`);
+                        if (resp.ok) { const d = await resp.json(); const b = new Blob([d.content]); const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href=u; a.download=f.split("/").pop()||f; a.click(); URL.revokeObjectURL(u); }
+                      } catch {}
+                    }} className="text-cyan-400 hover:underline">{f.split("/").pop()}</a> ⬇
+                  </span>
+                ))}
+              </span>
+            )}
           </div>
           <button onClick={onNewTask}
                   className="px-3 py-1 bg-bg-secondary hover:bg-bg-primary text-text-secondary
@@ -446,7 +462,29 @@ function CompletionCard({
           <div className="ml-7 pt-2 border-t border-border/50">
             <div className="text-xs font-mono text-text-muted mb-1">产出文件：</div>
             {files.map((f: string) => (
-              <div key={f} className="text-xs font-mono text-cyan-400 ml-2">📄 {f}</div>
+              <div key={f} className="flex items-center gap-2 ml-2 py-0.5">
+                <span className="text-xs font-mono text-cyan-400">📄 {f}</span>
+                <a href={`/api/workers/${(events.find(e => e.type === "worker.started")?.data as any)?.run_id}/files/${encodeURIComponent(f)}`}
+                   download={f.split("/").pop()}
+                   onClick={async (e) => {
+                     e.preventDefault();
+                     try {
+                       const rid = (events.find(ev => ev.type === "worker.started")?.data as any)?.run_id;
+                       const resp = await fetch(`/api/workers/${rid}/files/${encodeURIComponent(f)}`);
+                       if (resp.ok) {
+                         const data = await resp.json();
+                         const blob = new Blob([data.content], { type: "text/plain;charset=utf-8" });
+                         const url = URL.createObjectURL(blob);
+                         const a = document.createElement("a");
+                         a.href = url; a.download = f.split("/").pop() || f; a.click();
+                         URL.revokeObjectURL(url);
+                       }
+                     } catch {}
+                   }}
+                   className="text-xs text-text-muted hover:text-cyan-400 font-mono underline cursor-pointer">
+                  下载
+                </a>
+              </div>
             ))}
           </div>
         )}
