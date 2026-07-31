@@ -343,10 +343,10 @@ async def execute_team(
                 world_engine = await _build_world_engine(world)
                 world_engine.world.status = "running"
                 world_engine.current_tick = 0
-                # 替换为 Team 专用 tools（含 complete_step，无 observe/set_goal）
-                from engines.agent_factory.tools import TEAM_AGENT_TOOLS
-                for agent in world_engine.agents.values():
-                    agent.replace_tools(TEAM_AGENT_TOOLS)
+                # 替换为 Team 专用闭包 tools（含 submit_deliverable/finish_task，访问 PlanManager）
+                from engines.agent_factory.tools import make_team_tools
+                for agent_id, agent in world_engine.agents.items():
+                    agent._patch_tools(make_team_tools(world_engine, agent_id))
                 # Team 任务上下文——替换默认场景上下文
                 world_engine.team_task = team.get("description") or team.get("name")
                 world_engine.team_agent_steps = {

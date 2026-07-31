@@ -83,6 +83,10 @@ export class AutonomousMover {
   /** 66-S: 获取其他 Agent 的位置（回调，避免循环引用） */
   private getOtherAgents: (() => Array<{ agentId: string; tileX: number; tileY: number }>) | null = null;
 
+  /** State 4 Step 81: SSE 驱动模式——外部命令队列 */
+  private sseDriven = false;
+  private commandQueue: Array<{ tileX: number; tileY: number }> = [];
+
   /**
    * @param sprite   要驱动的 Agent 精灵
    * @param scene    Phaser 场景（用于 timer + tweens）
@@ -146,6 +150,28 @@ export class AutonomousMover {
     this.getOtherAgents = fn;
   }
 
+  /** State 4 Step 81: 切换到 SSE 驱动模式——停止自主决策，只执行外部命令 */
+  setSseDriven(enabled: boolean): void {
+    this.sseDriven = enabled;
+    if (enabled) {
+      this.commandQueue = [];
+      // 不停止 timer——保留作为 SSE 断线时的 fallback
+    }
+  }
+
+  /** State 4 Step 81: 外部推送移动命令（来自 SSE move_to 事件） */
+  pushCommand(tileX: number, tileY: number): void {
+    this.commandQueue.push({ tileX, tileY });
+    // 限制队列长度防堆积
+    if (this.commandQueue.length > 5) {
+      this.commandQueue = this.commandQueue.slice(-3);
+    }
+    // 立即尝试执行（如果当前不在移动中）
+    if (this.sprite.action !== "walk") {
+      this.executeNextCommand();
+    }
+  }
+
   /* ================================================================
    * 内部
    * ================================================================ */
@@ -161,10 +187,17 @@ export class AutonomousMover {
   }
 
   private tick(): void {
-    // 概率跳过
-    if (Math.random() < this.profile.idleChance) return;
     // 正在拖拽中不抢移动
     if (this.sprite.action === "walk") return;
+
+    // State 4 Step 81: SSE 驱动模式——优先执行命令队列
+    if (this.sseDriven && this.commandQueue.length > 0) {
+      this.executeNextCommand();
+      return;
+    }
+
+    // Fallback: 本地自主决策（SSE 断线或无命令时）
+    if (Math.random() < this.profile.idleChance) return;
 
     const target = this.decideTarget();
     if (!target) return;
@@ -195,6 +228,34 @@ export class AutonomousMover {
         this.sprite.tileY = target.ty;
         this.sprite.setAction("idle");
         this.scene.game.events.emit("agent-moved", this.sprite.agentId, target.tx, target.ty);
+      },
+    });
+  }
+
+  /** State 4 Step 81: 执行下一个 SSE 命令 */
+  private executeNextCommand(): void {
+    const cmd = this.commandQueue.shift();
+    if (!cmd) return;
+
+    this.sprite.action = "walk";
+    const px = cmd.tileX * 64 + 32;
+    const py = cmd.tileY * 64 + 32;
+    const duration = 300;
+    this.scene.tweens.add({
+      targets: this.sprite,
+      x: px, y: py,
+      duration,
+      ease: "Sine.easeInOut",
+      onComplete: () => {
+        if (!this.scene || !this.active) return;
+        this.sprite.tileX = cmd.tileX;
+        this.sprite.tileY = cmd.tileY;
+        this.sprite.setAction("idle");
+        this.scene.game.events.emit("agent-moved", this.sprite.agentId, cmd.tileX, cmd.tileY);
+        // 队列中还有命令则继续执行
+        if (this.commandQueue.length > 0) {
+          this.scene.time.delayedCall(100, () => this.executeNextCommand());
+        }
       },
     });
   }

@@ -79,3 +79,4 @@ class AgentResponse(MutableTimestamped):
     goals: list[Goal] = Field(default_factory=list)
     emotional_state: EmotionalState = Field(default_factory=EmotionalState)
     energy: float = Field(default=100.0)
+    notes: list[dict] = Field(default_factory=list)  # Step 78: 私有笔记 [{tick, content}]

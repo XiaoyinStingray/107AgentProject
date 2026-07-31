@@ -138,6 +138,38 @@ export class MapScene extends Phaser.Scene {
       }
     });
 
+    // ── State 4 Step 81: SSE Brain 联动 ──
+    // SSE move_to → 驱动精灵移动
+    this.game.events.on("sse-move-to", (agentId: string, tileX: number, tileY: number) => {
+      const mover = this.movers.get(agentId);
+      if (mover) {
+        mover.setSseDriven(true);
+        mover.pushCommand(tileX, tileY);
+      }
+    });
+    // SSE dialogue → 显示对话气泡
+    this.game.events.on("sse-dialogue", (data: {
+      fromId: string; fromName: string; message: string; targetIds: string[];
+    }) => {
+      // 发言者气泡
+      this.showAgentBubble(data.fromId, data.message, "talk");
+      // 目标气泡（如果有）
+      data.targetIds?.forEach((tid) => {
+        this.showAgentBubble(tid, "", "listen");
+      });
+    });
+    // SSE emotion → 更新精灵情绪
+    this.game.events.on("sse-emotion", (agentId: string, emotion: string) => {
+      const sprite = this.agentSprites.get(agentId);
+      if (sprite) {
+        sprite.setEmotion(emotion as Emotion);
+      }
+    });
+    // Brain 开关 → 切换对话数据源
+    this.game.events.on("brain-toggle", (enabled: boolean) => {
+      (this as any)._brainEnabled = enabled;
+    });
+
     // 从 GameCanvas registry 读取初始数据（绕过 getScene 时序问题）
     const agents = this.game.registry.get("pendingAgents") as AgentSpriteData[] | undefined;
     if (agents?.length) this.pendingAgents = agents;
@@ -707,6 +739,8 @@ export class MapScene extends Phaser.Scene {
 
   private scanAndDialogue(): void {
     if (!this.scene.isActive()) return;
+    // State 4: Brain 模式下跳过本地对话扫描（对话由 SSE 驱动）
+    if ((this as any)._brainEnabled) return;
     const agents = [...this.agentSprites.values()];
     if (agents.length < 2) return;
     const now = Date.now();

@@ -136,6 +136,79 @@ class PlanManager:
                 s["status"] = "active"; s["progress"] = 0.1
                 break
 
+    # ── Step 80: 动态重规划 ─────────────────────────────
+
+    def revise_plan(self, step_title: str, new_title: str, reason: str) -> dict:
+        """Agent 主动修订计划步骤——由 revise_plan tool 调用。
+
+        Args:
+            step_title: 当前步骤标题（用于定位）
+            new_title: 新步骤标题
+            reason: 修订原因
+
+        Returns:
+            修订后的步骤 dict，如果未找到返回 None
+        """
+        for i, step in enumerate(self.steps):
+            if step.get("title") == step_title:
+                old_title = step["title"]
+                history = step.get("revision_history", [])
+                history.append({
+                    "tick": self._ticks_on_step,
+                    "reason": reason,
+                    "old_title": old_title,
+                    "new_title": new_title,
+                })
+                step["title"] = new_title
+                step["revision_history"] = history
+                logger.info(
+                    f"PlanManager.revise_plan: '{old_title}' → '{new_title}' "
+                    f"(reason: {reason[:60]})"
+                )
+                if self._on_event:
+                    self._on_event("plan_revised", {
+                        "step_index": i,
+                        "old_title": old_title,
+                        "new_title": new_title,
+                        "reason": reason,
+                        "steps": self.steps,
+                    })
+                return step
+        return None
+
+    def insert_step(self, after_index: int, title: str, assignee: str = "",
+                    description: str = "") -> dict:
+        """在指定位置后插入新步骤。"""
+        new_step = {
+            "title": title,
+            "description": description,
+            "assignee": assignee,
+            "status": "pending",
+            "progress": 0.0,
+        }
+        self.steps.insert(after_index + 1, new_step)
+        logger.info(f"PlanManager.insert_step: '{title}' after index {after_index}")
+        if self._on_event:
+            self._on_event("plan_updated", self.to_dict())
+        return new_step
+
+    def mark_blocked(self, step_title: str, reason: str) -> dict | None:
+        """标记某步骤为阻塞状态。"""
+        for step in self.steps:
+            if step.get("title") == step_title:
+                step["status"] = "blocked"
+                step["blocked_reason"] = reason
+                logger.info(f"PlanManager.mark_blocked: '{step_title}' — {reason[:60]}")
+                if self._on_event:
+                    self._on_event("plan_revised", {
+                        "step_title": step_title,
+                        "status": "blocked",
+                        "reason": reason,
+                        "steps": self.steps,
+                    })
+                return step
+        return None
+
     async def _llm_check(self, step: dict) -> str:
         """返回 'yes'（完成）、'drift'（跑偏）、'no'（继续）。"""
         conv = "\n".join(self._recent_msgs[-8:])

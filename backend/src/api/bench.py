@@ -242,6 +242,36 @@ async def get_fingerprint(run_id: str, db: AsyncSession = Depends(get_db)):
     return diagnose_scores(results)
 
 
+# ── State 4 Step 83: Agent 行为指纹 ──
+
+@router.get("/agents/{agent_id}/fingerprint")
+async def get_agent_fingerprint(agent_id: str, db: AsyncSession = Depends(get_db)):
+    """获取单个 Agent 的运行时行为指纹。
+
+    State 4 Step 83: 从 AgentRow.fingerprint_json 读取 WorldEngine
+    运行时采集的行为指纹（tool分布、情绪轨迹、社交网络、决策模式）。
+    如果 Agent 从未参与过模拟，返回空指纹。
+    """
+    import json as _json
+    from models.agent_orm import AgentRow
+
+    result = await db.execute(select(AgentRow).where(AgentRow.id == agent_id))
+    row = result.scalar_one_or_none()
+    if not row:
+        raise HTTPException(404, f"Agent {agent_id!r} not found")
+
+    try:
+        fp = _json.loads(row.fingerprint_json)
+    except (_json.JSONDecodeError, TypeError):
+        fp = {}
+
+    return {
+        "agent_id": agent_id,
+        "agent_name": row.name,
+        "fingerprint": fp,
+    }
+
+
 # ── 70: 劣化检测 ──
 
 @router.get("/degradation")

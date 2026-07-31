@@ -70,6 +70,15 @@ async def _rebuild_agents_from_db(agent_ids: list[str]) -> list:
         agent.energy = row.energy
         agent.created_at = row.created_at
         agent.updated_at = row.updated_at
+        # State 4 Step 78: 恢复私有笔记
+        notes_raw = data.get("notes_json", "[]")
+        if isinstance(notes_raw, str):
+            try:
+                agent._notes = json.loads(notes_raw)
+            except (json.JSONDecodeError, TypeError):
+                agent._notes = []
+        elif isinstance(notes_raw, list):
+            agent._notes = notes_raw
         agents.append(agent)
 
     if not agents:

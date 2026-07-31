@@ -145,3 +145,56 @@ class TestPlanManager:
 
         await pm.check_progress(1, [])  # 激活 → plan_updated
         assert "plan_updated" in events_fired
+
+
+# =============================================================================
+# Step 80: 动态重规划测试
+# =============================================================================
+
+
+def test_revise_plan_updates_title():
+    """revise_plan 更新步骤标题并记录修订历史。"""
+    steps = _make_steps(3)
+    events_fired = []
+    pm = PlanManager(steps, on_event=lambda t, d: events_fired.append((t, d)))
+
+    result = pm.revise_plan("步骤1", "快速竞品扫描", "原方案太耗时")
+
+    assert result is not None
+    assert result["title"] == "快速竞品扫描"
+    assert len(result.get("revision_history", [])) == 1
+    assert result["revision_history"][0]["old_title"] == "步骤1"
+    assert result["revision_history"][0]["new_title"] == "快速竞品扫描"
+    assert events_fired[-1][0] == "plan_revised"
+
+
+def test_revise_plan_returns_none_for_missing_step():
+    """revise_plan 找不到步骤时返回 None。"""
+    pm = PlanManager(_make_steps(2))
+    result = pm.revise_plan("不存在的步骤", "新步骤", "原因")
+    assert result is None
+
+
+def test_insert_step_adds_after_index():
+    """insert_step 在指定位置后插入新步骤。"""
+    pm = PlanManager(_make_steps(3))
+    pm.insert_step(1, "新插入的步骤", assignee="小红")
+
+    assert len(pm.steps) == 4
+    assert pm.steps[2]["title"] == "新插入的步骤"
+    assert pm.steps[2]["assignee"] == "小红"
+    assert pm.steps[2]["status"] == "pending"
+
+
+def test_mark_blocked_sets_status():
+    """mark_blocked 标记步骤为阻塞状态。"""
+    steps = _make_steps(3)
+    events_fired = []
+    pm = PlanManager(steps, on_event=lambda t, d: events_fired.append((t, d)))
+
+    result = pm.mark_blocked("步骤2", "依赖的步骤1未完成")
+
+    assert result is not None
+    assert result["status"] == "blocked"
+    assert result["blocked_reason"] == "依赖的步骤1未完成"
+    assert any(t == "plan_revised" for t, _ in events_fired)

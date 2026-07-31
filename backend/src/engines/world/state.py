@@ -188,7 +188,15 @@ class WorldStateMixin:
         return handler(event)
 
     def _handle_send_message(self, event: SimEvent) -> list[SimEvent]:
-        """Turn send_message into a targeted agent_message event."""
+        """Turn send_message into a targeted agent_message event。
+
+        State 4: 如果 tool 闭包已处理（_handled_actions 中有记录），
+        跳过——避免重复生成事件。仅在 stub 模式（Arena/Bench）下才在此创建事件。
+        """
+        source_id = event.source_agent_id or ""
+        handled = getattr(self, "_handled_actions", set())
+        if (source_id, "send_message") in handled:
+            return []
         target = event.data.get("target") or event.data.get("target_name", "")
         if not target:
             return []
@@ -203,21 +211,26 @@ class WorldStateMixin:
         return [message]
 
     def _handle_set_goal(self, event: SimEvent) -> list[SimEvent]:
-        """Set or update an active goal for the source Agent."""
+        """Set or update an active goal for the source Agent。
+
+        State 4: 如果 tool 闭包已经创建了该目标（agent.goals 中存在匹配项），
+        跳过——避免重复创建。仅在 stub 模式（Arena/Bench）下才在此创建目标。
+        """
         from models.agent import Goal
 
         agent = self.agents.get(event.source_agent_id or "")
         if not agent:
             return []
         desc = event.data.get("description", event.description)
-        # 同名目标 → 更新（防止重复）
+        # 检查 tool 闭包是否已经创建了同名目标
         for g in agent.goals:
             if g.description == desc:
+                # 目标已存在——重置状态和进度（Agent 重新确认）
                 g.status = "active"
                 g.progress = 0.0
-                logger.info(f"WorldEngine._handle_set_goal: agent={agent.id} re-set goal='{desc}'")
+                logger.debug(f"WorldEngine._handle_set_goal: agent={agent.id} goal re-set '{desc}'")
                 return []
-        # 新目标
+        # 未找到——stub 模式（Arena/Bench），在此创建
         agent.goals.append(
             Goal(
                 id=f"g{len(agent.goals) + 1}",
@@ -227,7 +240,7 @@ class WorldStateMixin:
                 progress=0.0,
             )
         )
-        logger.info(f"WorldEngine._handle_set_goal: agent={agent.id} new goal='{desc}'")
+        logger.info(f"WorldEngine._handle_set_goal: agent={agent.id} new goal='{desc}' (stub mode)")
         return []
 
     def _handle_observe(self, event: SimEvent) -> list[SimEvent]:
@@ -236,7 +249,14 @@ class WorldStateMixin:
         return [self._make_derived_event("thought_stream", event, description)]
 
     def _handle_think_aloud(self, event: SimEvent) -> list[SimEvent]:
-        """Turn think_aloud into a thought_stream event."""
+        """Turn think_aloud into a thought_stream event。
+
+        State 4: 如果 tool 闭包已处理——跳过，避免重复。
+        """
+        source_id = event.source_agent_id or ""
+        handled = getattr(self, "_handled_actions", set())
+        if (source_id, "think_aloud") in handled:
+            return []
         description = event.data.get("thought", event.description)
         return [self._make_derived_event("thought_stream", event, description)]
 

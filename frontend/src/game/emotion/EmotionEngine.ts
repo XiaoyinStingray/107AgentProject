@@ -425,6 +425,14 @@ export class EmotionEngine {
     return this.applyEmotionChange(agentId, emotion, intensity, "manual", "手动设置");
   }
 
+  /** State 4 Step 81: 从 SSE emotion_update 事件更新情绪并触发回调 */
+  pushSseEmotion(agentId: string, emotion: string): void {
+    const change = this.setEmotion(agentId, emotion as Emotion, 2);
+    if (change && this.onChange) {
+      this.onChange([change]);
+    }
+  }
+
   // ── 核心：情绪变更逻辑 ──
 
   /**

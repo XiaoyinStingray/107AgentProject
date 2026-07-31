@@ -466,5 +466,98 @@ class SceneEngine:
         return await generate_dialogue_llm(from_name, to_name, scene_id, message, emotion)
 
 
+# ── Step 81: SceneBridge —— 场景 ↔ Brain 桥接 ──
+
+
+class SceneBridge:
+    """场景 ↔ WorldEngine 桥接器。
+
+    将 SceneEngine 的视觉状态（精灵位置/动作/情绪）
+    与 WorldEngine 的 Agent 心智模型双向同步。
+
+    用法:
+        bridge = SceneBridge(scene_id, world_engine)
+        bridge.sync_to_scene()   # WorldEngine → SceneEngine
+        bridge.sync_to_world()   # SceneEngine → WorldEngine
+    """
+
+    def __init__(self, scene_id: str, world_engine):
+        self.scene_id = scene_id
+        self._engine = world_engine
+
+    # ── WorldEngine → SceneEngine（Agent 自主决策后更新精灵）──
+
+    def sync_to_scene(self) -> list[AgentSpriteData]:
+        """将 WorldEngine 中 Agent 的状态同步到 SceneEngine 精灵数据。"""
+        sprites: list[AgentSpriteData] = []
+        for agent_id, agent in self._engine.agents.items():
+            name = agent.persona.name or agent_id[:8]
+            emoji = getattr(agent.persona, "emoji", "🤖") or "🤖"
+            color = getattr(agent.persona, "color", "#8888cc") or "#8888cc"
+
+            position = getattr(agent, "position", None) or {}
+            tile_x = position.get("tile_x", 0)
+            tile_y = position.get("tile_y", 0)
+
+            sprite = AgentSpriteData(
+                agentId=agent_id,
+                name=name,
+                emoji=emoji,
+                color=color,
+                tileX=tile_x,
+                tileY=tile_y,
+                action="idle",
+                emotion=agent.emotional_state.label,
+            )
+            sprites.append(sprite)
+
+        # 写入 SceneEngine
+        scene_engine.update_state(self.scene_id, sprites)
+        return sprites
+
+    # ── SceneEngine → WorldEngine（前端投放精灵 → Agent 位置）──
+
+    def sync_to_world(self):
+        """将 SceneEngine 中的精灵位置同步回 WorldEngine Agent。"""
+        agents = scene_engine.get_state(self.scene_id)
+        for sprite in agents:
+            if sprite.agentId in self._engine.agents:
+                agent = self._engine.agents[sprite.agentId]
+                if not hasattr(agent, "position") or agent.position is None:
+                    agent.position = {}
+                agent.position["tile_x"] = sprite.tileX
+                agent.position["tile_y"] = sprite.tileY
+
+    # ── 移动 Agent ──
+
+    def move_agent(self, agent_id: str, tile_x: int, tile_y: int) -> bool:
+        """更新 Agent 的场景位置。"""
+        agent = self._engine.agents.get(agent_id)
+        if agent is None:
+            return False
+        if not hasattr(agent, "position") or agent.position is None:
+            agent.position = {}
+        agent.position["tile_x"] = tile_x
+        agent.position["tile_y"] = tile_y
+        # 同步到 SceneEngine
+        self.sync_to_scene()
+        return True
+
+    # ── 随机事件 ──
+
+    def try_random_event(self) -> dict | None:
+        """尝试触发场景随机事件。返回事件 dict 或 None。"""
+        event = scene_engine.get_random_event(self.scene_id)
+        if event is None:
+            return None
+        return {
+            "id": event.id,
+            "text": event.text,
+            "target": event.target,
+            "emotion": event.emotion,
+            "intensity": event.intensity,
+        }
+
+
 # 全局单例
 scene_engine = SceneEngine()

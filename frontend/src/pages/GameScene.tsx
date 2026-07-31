@@ -9,10 +9,11 @@ import type { Personality } from "../components/scene/PersonaTamper";
 import CheckpointPanel from "../components/scene/CheckpointPanel";
 import DirectorPanel from "../components/scene/DirectorPanel";
 import AudioControls from "../components/scene/AudioControls";
-import { useSyncSceneState, useCheckpoints, useCreateCheckpoint, useDeleteCheckpoint } from "../api/scenes";
+import { useSyncSceneState, useCheckpoints, useCreateCheckpoint, useDeleteCheckpoint, useStartScene } from "../api/scenes";
 import { useAgents } from "../api/agents";
 import type { AgentResponse } from "../types/agent";
 import { pickAccessoryId } from "../game/accessories";
+import { useSSE } from "../hooks/useSSE";
 
 /* —— 场景列表 —— */
 const SCENES = [
@@ -146,6 +147,87 @@ export default function GameScenePage() {
   const mountedRef = useRef(false);
   const gameRef = useRef<Phaser.Game | null>(null);
   const [gameReady, setGameReady] = useState(false);
+
+  // ── State 4 Step 81: 场景 Brain 联动 ──
+  const [sceneWorldId, setSceneWorldId] = useState<string | null>(null);
+  const [brainEnabled, setBrainEnabled] = useState(false);
+  const startScene = useStartScene();
+  const sseRef = useRef<EventSource | null>(null);
+
+  // SSE 连接：监听 move_to / agent_message 事件 → 转发到 Phaser
+  useEffect(() => {
+    if (!sceneWorldId || !brainEnabled) return;
+    const es = new EventSource(`/api/worlds/${sceneWorldId}/stream`);
+    sseRef.current = es;
+
+    es.onmessage = (e) => {
+      try {
+        const evt = JSON.parse(e.data);
+        if (!gameRef.current) return;
+
+        if (evt.type === "move_to" || (evt.type === "agent_action" && evt.action === "move_to")) {
+          const tx = evt.data?.tile_x ?? evt.tile_x;
+          const ty = evt.data?.tile_y ?? evt.tile_y;
+          const aid = evt.agent_id;
+          if (tx != null && ty != null && aid) {
+            gameRef.current.events.emit("sse-move-to", aid, tx, ty);
+          }
+        }
+
+        if (evt.type === "agent_message" && evt.content) {
+          const fromId = evt.agent_id;
+          const msg = evt.message || evt.content;
+          const targetIds = evt.data?.target_agent_ids || [];
+          gameRef.current.events.emit("sse-dialogue", {
+            fromId,
+            fromName: evt.agent_name || fromId,
+            message: msg,
+            targetIds,
+          });
+        }
+
+        if (evt.type === "emotion_update" && evt.agent_id && evt.data?.emotion) {
+          gameRef.current.events.emit("sse-emotion", evt.agent_id, evt.data.emotion);
+        }
+      } catch { /* ignore parse errors */ }
+    };
+
+    es.onerror = () => {
+      // EventSource 自动重连，但超时后降级为本地模式
+      setTimeout(() => {
+        if (es.readyState === EventSource.CLOSED) {
+          setBrainEnabled(false);
+        }
+      }, 10000);
+    };
+
+    return () => {
+      es.close();
+      sseRef.current = null;
+    };
+  }, [sceneWorldId, brainEnabled]);
+
+  // 场景启动：有 Agent 且 Brain 启用时，请求后端创建 WorldEngine
+  const startBrain = useCallback(async () => {
+    if (agents.length === 0) return;
+    try {
+      const result = await startScene.mutateAsync({
+        sceneId: mapId,
+        agentIds: agents.map((a) => a.agentId),
+      });
+      setSceneWorldId(result.world_id);
+      setBrainEnabled(true);
+    } catch {
+      // 后端不可用时保持本地模式
+      setBrainEnabled(false);
+    }
+  }, [agents, mapId, startScene]);
+
+  // 场景切换时断开 SSE
+  useEffect(() => {
+    setSceneWorldId(null);
+    setBrainEnabled(false);
+  }, [mapId]);
 
   // ── 真实 Agent 池（与 SoloTheater 同源，后端不可用时 mock 兜底）──
   const { data: realAgents = [] } = useAgents();
@@ -401,6 +483,32 @@ export default function GameScenePage() {
         </div>
       </Card>
 
+        {/* State 4: Brain 开关 */}
+        <Card className="p-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-mono text-text-secondary">
+              🧠 AI 驱动
+            </span>
+            <button
+              type="button"
+              onClick={() => brainEnabled ? setBrainEnabled(false) : startBrain()}
+              disabled={agents.length === 0 || startScene.isPending}
+              className={`px-3 py-1 text-xs font-mono rounded border transition-colors ${
+                brainEnabled
+                  ? "border-green-500/60 bg-green-500/10 text-green-400"
+                  : "border-border text-text-secondary hover:border-text-secondary/40"
+              } disabled:opacity-40 disabled:cursor-not-allowed`}
+            >
+              {startScene.isPending ? "⏳" : brainEnabled ? "ON ✓" : "OFF"}
+            </button>
+          </div>
+          {brainEnabled && sceneWorldId && (
+            <div className="mt-1 text-[10px] font-mono text-text-secondary truncate">
+              World: {sceneWorldId.slice(0, 12)}...
+            </div>
+          )}
+        </Card>
+
       </div>
 
       {/* ── 右侧画布区 ── */}
@@ -408,10 +516,11 @@ export default function GameScenePage() {
         <GameCanvas
           mapId={mapId}
           agents={agents}
+          brainEnabled={brainEnabled}
           onAgentClick={handleAgentClick}
           onAgentMove={handleAgentMove}
           onAgentDoubleClick={handleAgentDoubleClick}
-          onGameReady={(g) => { gameRef.current = g; }}
+          onGameReady={(g) => { gameRef.current = g; setGameReady(true); }}
         />
       </div>
 

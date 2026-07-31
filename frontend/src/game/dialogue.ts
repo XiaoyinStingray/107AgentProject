@@ -1,12 +1,13 @@
 /**
- * 对话引擎 — 66-S 升级：多轮对话 + LLM 驱动 + mock 兜底。
+ * 对话引擎 — 66-S 升级 → State 4 Step 81 降级。
  *
- * 三层策略：
- *   1. POST /api/scenes/{id}/interact → LLM 生成（优先）
- *   2. 扩展 mock 池 → 性格×场景对话（兜底）
- *   3. 场景通用 fallback → 不冷场
+ * State 4: fetchDialogue 降级为 SSE 断线时的 fallback。
+ * 当 Brain 模式激活时，MapScene.scanAndDialogue() 会跳过此模块，
+ * 对话由 WorldEngine GroupChat 通过 SSE drive。
  *
- * 防重复：同一组合按顺序轮转，不在同一会话中重复。
+ * 保留策略：
+ *   1. mock 池 → SSE 断线时使用
+ *   2. fetchDialogue → 仅在 Brain 未启用时调用
  */
 
 type SceneName = "library" | "dorm" | "classroom" | "art" | "lab" | "sakura";

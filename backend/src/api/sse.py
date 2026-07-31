@@ -203,12 +203,20 @@ async def _world_event_generator(
                                 tick_count, tick_events,
                             )
                         await engine.team_engine._sync_plan_to_db()
-                        # 提取辩论+演化数据，嵌入 plan_updated
+                        # 提取辩论+演化+重规划数据，嵌入 plan_updated
                         for ev in extra_events:
                             if ev.get("type") == "debate_update":
                                 debate_state = ev.get("data")
                             elif ev.get("type") == "role_evolved":
                                 evolutions = ev.get("data", {}).get("evolutions", [])
+                            elif ev.get("type") == "plan_revised":
+                                # Step 80: Agent 主动修订计划 → 立即发射 plan_revised 事件
+                                yield _sse_event({
+                                    "type": "plan_revised",
+                                    "world_id": world_id,
+                                    "tick": engine.current_tick,
+                                    "data": ev.get("data", {}),
+                                })
 
                     # 发射 plan_updated 事件（67: 含辩论+角色数据）
                     plan_data = plan.to_dict()
@@ -229,9 +237,9 @@ async def _world_event_generator(
                         "tick": engine.current_tick,
                         "data": plan_data,
                     })
-                    # 协调器催促（连续多轮未推进）
+                    # 协调器催促（连续 8 tick 无进展 → Step 80）
                     step = plan.current_step()
-                    if step and plan._ticks_on_step >= 5:
+                    if step and plan._ticks_on_step >= 8:
                         drift = getattr(plan, "_drift_count", 0)
                         msg = (
                             f"⚠️ 协调器：当前阶段「{step['title']}」已讨论{plan._ticks_on_step}轮。"
@@ -247,6 +255,21 @@ async def _world_event_generator(
                     if plan.all_done:
                         engine.world.status = "finished"
                         await _finish_engine_simulation(engine)
+                        # State 4 D1+D2: SSE 路径也需触发固化+指纹持久化
+                        if hasattr(engine, "_consolidate_memories"):
+                            await engine._consolidate_memories(engine.events)
+                        if hasattr(engine, "_persist_fingerprints"):
+                            await engine._persist_fingerprints()
+                        # Step 82: 发射 memory_consolidated 事件
+                        pending_cons = getattr(engine, "_pending_consolidation_events", [])
+                        for cons in pending_cons:
+                            yield _sse_event({
+                                "type": "memory_consolidated",
+                                "world_id": world_id,
+                                "tick": engine.current_tick,
+                                "data": cons,
+                            })
+                        engine._pending_consolidation_events = []
                         yield _sse_event({
                             "type": "session_end",
                             "world_id": world_id,
@@ -263,19 +286,23 @@ async def _world_event_generator(
                         if hasattr(engine, "team_engine") and engine.team_engine:
                             await engine.team_engine._save_report(report)
                         try:
+                            from db import async_session
                             from models.team_orm import TeamRow
                             from models.world_orm import WorldRow
                             from sqlalchemy import update as _upd
-                            # 标记 Team finished
-                            if hasattr(engine, "team_engine"):
-                                tid = engine.team_engine.team.get("id", "")
-                                if tid:
-                                    await db.execute(_upd(TeamRow).where(TeamRow.id == tid).values(status="finished"))
-                            # 标记 World finished（确保不重连）
-                            await db.execute(_upd(WorldRow).where(WorldRow.id == world_id).values(status="finished"))
-                            await db.commit()
-                        except Exception:
-                            pass
+                            async with async_session() as _db:
+                                # 标记 Team finished
+                                if hasattr(engine, "team_engine"):
+                                    tid = engine.team_engine.team.get("id", "")
+                                    if tid:
+                                        await _db.execute(_upd(TeamRow).where(TeamRow.id == tid).values(status="finished"))
+                                # 标记 World finished（确保不重连）
+                                await _db.execute(_upd(WorldRow).where(WorldRow.id == world_id).values(status="finished"))
+                                await _db.commit()
+                        except Exception as _db_err:
+                            logger.warning(
+                                f"SSE: failed to mark Team/World finished: {_db_err}"
+                            )
                         break
             elif engine.world.status == "paused":
                 yield _sse_event({

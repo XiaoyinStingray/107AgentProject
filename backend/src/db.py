@@ -107,6 +107,27 @@ async def init_db():
             pass
         await conn.commit()
 
+        # 2026-07-31 (Step 78): agents 表加 notes_json 列
+        try:
+            await conn.execute(_text("ALTER TABLE agents ADD COLUMN notes_json TEXT DEFAULT '[]'"))
+        except Exception:
+            pass
+        await conn.commit()
+
+        # 2026-07-31 (Step 82): memories 表加 memory_type 列
+        try:
+            await conn.execute(_text("ALTER TABLE memories ADD COLUMN memory_type TEXT DEFAULT 'episodic'"))
+        except Exception:
+            pass
+        await conn.commit()
+
+        # 2026-07-31 (Step 83): agents 表加 fingerprint_json 列
+        try:
+            await conn.execute(_text("ALTER TABLE agents ADD COLUMN fingerprint_json TEXT DEFAULT '{}'"))
+        except Exception:
+            pass
+        await conn.commit()
+
         # BUG-014: 修正历史 World——单 Agent → solo
         import json as _json
         result = await conn.execute(
