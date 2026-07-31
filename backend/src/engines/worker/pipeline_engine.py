@@ -249,6 +249,15 @@ class PipelineEngine:
             "duration_ms": total_ms,
         })
 
+        # 持久化到工作区目录
+        from api.pipelines import _save_pipeline_run
+        await _save_pipeline_run(pipeline.id, {
+            "nodes": node_summary,
+            "errors": run._errors,
+            "duration_ms": total_ms,
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+        })
+
         logger.info(f"Pipeline DONE: {pipeline.name} — {run.status.value}, {total_ms}ms")
 
 

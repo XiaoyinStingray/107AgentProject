@@ -24,11 +24,52 @@ export default function PipelinePage() {
   const [viewingFile, setViewingFile] = useState<{path:string;content:string}|null>(null);
 
   const load = useCallback(async () => {
-    try { const r=await fetch("/api/pipelines/"); if(r.ok) setTemplates(await r.json()); } catch {}
-  }, []);
-  useEffect(() => { load(); }, [load]);
+    try {
+      const r=await fetch("/api/pipelines/");
+      if(r.ok) {
+        const list = await r.json();
+        setTemplates(list);
+        // 恢复已完成的管线
+        const done = new Set<string>();
+        for (const t of list) {
+          try {
+            const rr = await fetch(`/api/pipelines/${t.id}/runs`);
+            if (rr.ok) {
+              const rd = await rr.json();
+              if (rd.runs?.length > 0) {
+                done.add(t.id);
+                // 恢复最近一次运行的节点状态
+                const last = rd.runs[rd.runs.length-1];
+                if (t.id === selected && last.nodes) {
+                  setRun(prev => ({...prev, nodes: last.nodes, finished: true, running: false, events: prev.events}));
+                  setRunFiles([]);  // 文件从磁盘读取
+                }
+              }
+            }
+          } catch {}
+        }
+        setCompletedRuns(done);
+      }
+    } catch {}
+  }, [selected]);
+  useEffect(() => { load(); }, []);
 
   const selectedPipe = useMemo(() => templates.find(t=>t.id===selected), [templates,selected]);
+
+  // 选择管线时加载文件列表（如果已完成）
+  useEffect(() => {
+    if (selected && completedRuns.has(selected)) {
+      fetch(`/api/pipelines/${selected}/files`).then(r=>r.json()).then(d=>{
+        if (d.files) setRunFiles(d.files);
+      }).catch(()=>{});
+      // 恢复节点状态
+      fetch(`/api/pipelines/${selected}/runs`).then(r=>r.json()).then(d=>{
+        if (d.runs?.length > 0 && d.runs[d.runs.length-1].nodes) {
+          setRun(prev => ({...prev, nodes: d.runs[d.runs.length-1].nodes, finished: true, running: false}));
+        }
+      }).catch(()=>{});
+    }
+  }, [selected, completedRuns]);
 
   // LLM 建议
   const suggest = async () => {

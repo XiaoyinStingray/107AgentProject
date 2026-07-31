@@ -242,6 +242,38 @@ async def update_pipeline(pipeline_id: str, req: PipelineCreateRequest):
     return {"id": pipeline_id, "name": req.name, "node_count": len(nodes)}
 
 
+@router.get("/{pipeline_id}/runs")
+async def list_pipeline_runs(pipeline_id: str):
+    """列出管线的历史运行记录。"""
+    from pathlib import Path
+    import json as _json
+    runs = []
+    run_file = Path.home() / "workspaces" / f"pipeline-{pipeline_id}" / "_pipeline_runs.json"
+    if run_file.exists():
+        try:
+            runs = _json.loads(run_file.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+    return {"pipeline_id": pipeline_id, "runs": runs}
+
+
+async def _save_pipeline_run(pipeline_id: str, run_data: dict):
+    """保存管线运行结果到工作区目录。"""
+    from pathlib import Path
+    import json as _json
+    run_file = Path.home() / "workspaces" / f"pipeline-{pipeline_id}" / "_pipeline_runs.json"
+    runs = []
+    if run_file.exists():
+        try:
+            runs = _json.loads(run_file.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+    runs.append(run_data)
+    runs = runs[-10:]  # 最多保留 10 次运行
+    run_file.parent.mkdir(parents=True, exist_ok=True)
+    run_file.write_text(_json.dumps(runs, ensure_ascii=False, indent=2), encoding='utf-8')
+
+
 @router.get("/{pipeline_id}/files")
 async def list_pipeline_files(pipeline_id: str):
     """列出管线工作区中的产出文件。"""
