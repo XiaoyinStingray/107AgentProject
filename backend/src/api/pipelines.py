@@ -254,6 +254,12 @@ async def list_pipeline_runs(pipeline_id: str):
             runs = _json.loads(run_file.read_text(encoding='utf-8'))
         except Exception:
             pass
+    # 补充 node_events 信息（如果 runs 中没有）
+    for run_entry in runs:
+        if "node_events" not in run_entry:
+            run_entry["node_events"] = {}
+            for nid, status in run_entry.get("nodes", {}).items():
+                run_entry["node_events"][nid] = {"title": nid, "status": status}
     return {"pipeline_id": pipeline_id, "runs": runs}
 
 

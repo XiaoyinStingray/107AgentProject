@@ -256,6 +256,7 @@ class PipelineEngine:
             "errors": run._errors,
             "duration_ms": total_ms,
             "finished_at": datetime.now(timezone.utc).isoformat(),
+            "node_events": _collect_node_summaries(run),
         })
 
         logger.info(f"Pipeline DONE: {pipeline.name} — {run.status.value}, {total_ms}ms")
@@ -264,6 +265,21 @@ class PipelineEngine:
 # =============================================================================
 # 辅助函数
 # =============================================================================
+
+
+def _collect_node_summaries(run) -> dict:
+    """收集每个节点的摘要信息（任务、步骤数、状态）。"""
+    summaries = {}
+    for nid, status in run.node_statuses.items():
+        node = next((n for n in run.pipeline.nodes if n.id == nid), None)
+        worker = run.node_workers.get(nid)
+        summaries[nid] = {
+            "title": node.title if node else nid,
+            "task": node.task if node else "",
+            "status": status.value,
+            "steps": worker._step_index if worker and hasattr(worker, '_step_index') else 0,
+        }
+    return summaries
 
 
 def _pipeline_event(event_type: str, data: dict) -> str:

@@ -52,7 +52,7 @@ export default function PipelinePage() {
       }
     } catch {}
   }, [selected]);
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [selected]);
 
   const selectedPipe = useMemo(() => templates.find(t=>t.id===selected), [templates,selected]);
 
