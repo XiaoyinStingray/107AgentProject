@@ -134,7 +134,7 @@ export default function WorkspaceSelector({
             onChange={(e) => onChange({ ...value, path: e.target.value })}
             placeholder="~/projects/my-workspace"
             disabled={disabled}
-            className="w-full bg-surface border border-border rounded px-3 py-1.5
+            className="w-full bg-bg-secondary border border-border rounded px-3 py-1.5
                        text-xs font-mono text-text-primary placeholder-text-muted
                        focus:outline-none focus:border-cyan-700/50"
           />
@@ -155,7 +155,7 @@ export default function WorkspaceSelector({
                 onChange={(e) => onChange({ ...value, host: e.target.value })}
                 placeholder="192.168.1.100"
                 disabled={disabled}
-                className="w-full bg-surface border border-border rounded px-2 py-1
+                className="w-full bg-bg-secondary border border-border rounded px-2 py-1
                            text-xs font-mono text-text-primary placeholder-text-muted
                            focus:outline-none focus:border-cyan-700/50"
               />
@@ -171,7 +171,7 @@ export default function WorkspaceSelector({
                   onChange({ ...value, port: parseInt(e.target.value) || 22 })
                 }
                 disabled={disabled}
-                className="w-full bg-surface border border-border rounded px-2 py-1
+                className="w-full bg-bg-secondary border border-border rounded px-2 py-1
                            text-xs font-mono text-text-primary
                            focus:outline-none focus:border-cyan-700/50"
               />
@@ -188,7 +188,7 @@ export default function WorkspaceSelector({
               onChange={(e) => onChange({ ...value, user: e.target.value })}
               placeholder="ubuntu"
               disabled={disabled}
-              className="w-full bg-surface border border-border rounded px-3 py-1.5
+              className="w-full bg-bg-secondary border border-border rounded px-3 py-1.5
                          text-xs font-mono text-text-primary placeholder-text-muted
                          focus:outline-none focus:border-cyan-700/50"
             />
@@ -204,7 +204,7 @@ export default function WorkspaceSelector({
               placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;..."
               rows={3}
               disabled={disabled}
-              className="w-full bg-surface border border-border rounded px-3 py-1.5
+              className="w-full bg-bg-secondary border border-border rounded px-3 py-1.5
                          text-xs font-mono text-text-primary placeholder-text-muted
                          resize-none focus:outline-none focus:border-cyan-700/50"
             />
@@ -220,7 +220,7 @@ export default function WorkspaceSelector({
               onChange={(e) => onChange({ ...value, path: e.target.value })}
               placeholder="/data/workspaces"
               disabled={disabled}
-              className="w-full bg-surface border border-border rounded px-3 py-1.5
+              className="w-full bg-bg-secondary border border-border rounded px-3 py-1.5
                          text-xs font-mono text-text-primary placeholder-text-muted
                          focus:outline-none focus:border-cyan-700/50"
             />

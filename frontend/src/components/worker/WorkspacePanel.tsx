@@ -80,7 +80,7 @@ function TreeNode({
       <div>
         <button
           onClick={() => setExpanded(!expanded)}
-          className="flex items-center gap-1 w-full text-left py-0.5 hover:bg-surface-dark/50
+          className="flex items-center gap-1 w-full text-left py-0.5 hover:bg-bg-primary/50
                      transition-colors"
           style={{ paddingLeft: `${depth * 12 + 4}px` }}
         >
@@ -104,7 +104,7 @@ function TreeNode({
 
   return (
     <div
-      className={`flex items-center justify-between py-0.5 hover:bg-surface-dark/50
+      className={`flex items-center justify-between py-0.5 hover:bg-bg-primary/50
                  transition-colors ${isNew ? "animate-pulse" : ""}`}
       style={{ paddingLeft: `${depth * 12 + 4}px`, paddingRight: "4px" }}
     >

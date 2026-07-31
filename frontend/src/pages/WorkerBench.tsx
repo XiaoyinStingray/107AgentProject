@@ -206,8 +206,8 @@ export default function WorkerBench() {
                 <button
                   onClick={() => setShowAgentDropdown(!showAgentDropdown)}
                   disabled={connected}
-                  className="flex items-center gap-2 px-2 py-1 bg-surface border border-border
-                             rounded text-xs font-mono text-text-secondary
+                  className="flex items-center gap-2 px-2 py-1 bg-bg-card border border-border
+                             rounded text-xs font-mono text-text-primary
                              hover:border-cyan-700/30 transition-colors min-w-[180px]
                              disabled:opacity-50"
                 >
@@ -221,14 +221,15 @@ export default function WorkerBench() {
 
                 {showAgentDropdown && (
                   <div className="absolute top-full left-0 mt-1 w-80 max-h-60 overflow-y-auto
-                                  bg-surface border border-border rounded shadow-lg z-50">
+                                  bg-bg-card border border-border rounded shadow-2xl z-50"
+                       style={{boxShadow: "0 0 20px rgba(0,0,0,0.6)"}}>
                     {agentOptions.map((agent) => (
                       <button
                         key={agent.id}
                         onClick={() => { setAgentId(agent.id); setShowAgentDropdown(false); }}
                         className={`w-full text-left px-3 py-2 text-xs font-mono
-                                    hover:bg-cyan-900/20 transition-colors
-                                    ${agent.id === agentId ? "bg-cyan-900/10 border-l-2 border-cyan-500" : ""}`}
+                                    hover:bg-bg-primary transition-colors
+                                    ${agent.id === agentId ? "bg-bg-primary border-l-2 border-accent-green" : ""}`}
                       >
                         <div className="flex items-center gap-2">
                           <span className={agent.id === "__builtin__"
@@ -250,16 +251,17 @@ export default function WorkerBench() {
                       </button>
                     ))}
                     {/* 自定义 ID 输入 */}
-                    <div className="border-t border-border px-3 py-2">
+                    <div className="border-t border-border px-3 py-2 bg-bg-secondary/50">
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-text-muted">或输入 ID:</span>
+                        <span className="text-xs text-text-muted shrink-0">或输入 ID:</span>
                         <input
                           type="text"
                           value={customAgentId}
                           onChange={(e) => { setCustomAgentId(e.target.value); if (e.target.value) setAgentId(e.target.value); }}
                           placeholder="手动输入 Agent ID"
-                          className="flex-1 bg-transparent border-b border-border text-xs font-mono
-                                     text-text-secondary placeholder-text-muted px-1
+                          className="flex-1 bg-bg-primary border border-border rounded px-2 py-1
+                                     text-xs font-mono text-text-secondary
+                                     placeholder-text-muted/50
                                      focus:outline-none focus:border-cyan-700/50"
                         />
                       </div>
@@ -271,7 +273,7 @@ export default function WorkerBench() {
               {/* 关闭下拉的遮罩 */}
               {showAgentDropdown && (
                 <div
-                  className="fixed inset-0 z-40"
+                  className="fixed inset-0 z-40 bg-black/30"
                   onClick={() => setShowAgentDropdown(false)}
                 />
               )}
@@ -294,7 +296,7 @@ export default function WorkerBench() {
 
             {/* 工作区配置面板 */}
             {showWorkspaceConfig && (
-              <div className="mt-2 p-3 border border-border rounded bg-surface">
+              <div className="mt-2 p-3 border border-border rounded bg-bg-primary">
                 <WorkspaceSelector
                   value={workspaceConfig}
                   onChange={setWorkspaceConfig}
