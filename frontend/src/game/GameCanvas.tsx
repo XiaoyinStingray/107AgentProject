@@ -5,14 +5,15 @@ import { MapScene } from "./scenes/MapScene";
 import type { AgentSpriteData } from "./sprites/AgentSprite";
 
 const TILE = 64;
-const COLS = 12;
-const ROWS = 8;
-const W = COLS * TILE; // 768
-const H = ROWS * TILE; // 512
+const COLS = 16;
+const ROWS = 12;
+const W = COLS * TILE; // 1024
+const H = ROWS * TILE; // 768
 
 interface Props {
   mapId: string;
   agents: AgentSpriteData[];
+  brainEnabled?: boolean;
   onAgentClick?: (agentId: string) => void;
   onAgentMove?: (agentId: string, tileX: number, tileY: number) => void;
   onAgentDoubleClick?: (agentId: string) => void;
@@ -24,7 +25,7 @@ interface Props {
  * agents prop 变更 → MapScene.setAgents()
  * Phaser 交互事件 → onAgentClick / onAgentMove → React
  */
-export default function GameCanvas({ mapId, agents, onAgentClick, onAgentMove, onAgentDoubleClick, onGameReady }: Props) {
+export default function GameCanvas({ mapId, agents, brainEnabled, onAgentClick, onAgentMove, onAgentDoubleClick, onGameReady }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<Phaser.Game | null>(null);
   const prevMapRef = useRef<string>("");
@@ -74,12 +75,23 @@ export default function GameCanvas({ mapId, agents, onAgentClick, onAgentMove, o
     game.events.on("agent-doubleclicked", (agentId: string) => {
       cbRef.current.onAgentDoubleClick?.(agentId);
     });
+    // State 4: brain 模式切换事件
+    game.events.on("brain-toggle", (enabled: boolean) => {
+      game.registry.set("brainEnabled", enabled);
+    });
 
     return () => {
       game.destroy(true);
       gameRef.current = null;
     };
   }, []);
+
+  // State 4: brain 状态同步 → Phaser
+  useEffect(() => {
+    if (!gameRef.current) return;
+    gameRef.current.registry.set("brainEnabled", brainEnabled ?? false);
+    gameRef.current.events.emit("brain-toggle", brainEnabled ?? false);
+  }, [brainEnabled]);
 
   // 切换场景 → 更新 registry（MapScene 内部读取）
   useEffect(() => {

@@ -18,7 +18,7 @@ export interface ControlTabMeta {
   label: string;
   emoji: string;
   description: string;
-  priority: "P1" | "P2" | "P3";
+  priority: "P1" | "P2";
   available: boolean;
 }
 
@@ -63,31 +63,6 @@ export const CONTROL_TABS: ControlTabMeta[] = [
     description: "LLM 分析群体互动：领导、孤立、氛围、转折点",
     priority: "P2",
     available: true,
-  },
-  // —— P3 占位 ——
-  {
-    key: "anomaly",
-    label: "异常检测",
-    emoji: "⚠️",
-    description: "自动识别异常行为模式（精力骤降、情绪突变等）",
-    priority: "P3",
-    available: false,
-  },
-  {
-    key: "tracking",
-    label: "长期追踪",
-    emoji: "📈",
-    description: "跨多个模拟的 Agent 成长曲线",
-    priority: "P3",
-    available: false,
-  },
-  {
-    key: "strategy",
-    label: "策略提取",
-    emoji: "🎯",
-    description: "从行为序列中提取可复用策略模板",
-    priority: "P3",
-    available: false,
   },
 ];
 

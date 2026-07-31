@@ -29,9 +29,6 @@ export const ARCHIVE_TABS: ArchiveTabMeta[] = [
   { key: "templates", label: "实验模板", emoji: "🧪", priority: "P2", available: true },
   { key: "achievements", label: "成就系统", emoji: "🎖️", priority: "P2", available: true },
   { key: "export", label: "研究报告导出", emoji: "📄", priority: "P2", available: true },
-  { key: "market", label: "Agent 市场", emoji: "📦", priority: "P3", available: false },
-  { key: "dashboard", label: "社区数据大屏", emoji: "📊", priority: "P3", available: false },
-  { key: "api", label: "API 开放", emoji: "🔌", priority: "P3", available: false },
 ];
 
 /** Mock 精彩回放记录 */

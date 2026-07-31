@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
 import StatusDot from "../components/shared/StatusDot";
@@ -11,6 +12,9 @@ import {
   useGenerateLetter,
   useGeneratePodcast,
   useGenerateParallel,
+  useGenerateMicrofilm,
+  useGenerateSerial,
+  useGenerateSelfportrait,
 } from "../api/narratives";
 import type { NarrativeGenRequest } from "../api/narratives";
 import {
@@ -59,19 +63,19 @@ export default function NarrativeFactory() {
     setTimeSpan("5年后");
   }, [styleKey]);
 
-  // 同步 URL hash，让顶部“当前功能”显示正确
+  // 72: hash<->style — use location.hash so sidebar clicks re-trigger
+  const location = useLocation();
+  const HASH_STYLE_MAP: Record<string, NarrativeStyle> = {
+    story: "story", diary: "diary", letter: "letter", podcast: "podcast",
+    parallel: "parallel", microfilm: "microfilm", serial: "serial", selfportrait: "selfportrait",
+  };
   useEffect(() => {
-    const styleToItemId: Record<string, number> = {
-      story: 29,
-      letter: 30,
-      parallel: 31,
-      podcast: 32,
-    };
-    const itemId = styleToItemId[styleKey];
-    if (itemId && window.location.hash !== `#item-${itemId}`) {
-      // 静默更新 hash，不触发页面刷新
-      window.history.replaceState(null, "", `#item-${itemId}`);
-    }
+    const h = location.hash?.replace("#", "").replace("item-", "");
+    const match = HASH_STYLE_MAP[h];
+    if (match && match !== styleKey) setStyleKey(match);
+  }, [location.hash]); // re-run when hash changes
+  useEffect(() => {
+    if (styleKey) window.history.replaceState(null, "", `#${styleKey}`);
   }, [styleKey]);
 
   // 叙事 mutations
@@ -80,6 +84,9 @@ export default function NarrativeFactory() {
   const generateLetter = useGenerateLetter();
   const generatePodcast = useGeneratePodcast();
   const generateParallel = useGenerateParallel();
+  const generateMicrofilm = useGenerateMicrofilm();
+  const generateSerial = useGenerateSerial();
+  const generateSelfportrait = useGenerateSelfportrait();
   const isPending =
     generateStory.isPending ||
     generateDiary.isPending ||
@@ -132,7 +139,10 @@ export default function NarrativeFactory() {
       else if (styleKey === "diary") apiResult = await generateDiary.mutateAsync(req);
       else if (styleKey === "letter") apiResult = await generateLetter.mutateAsync(req);
       else if (styleKey === "podcast") apiResult = await generatePodcast.mutateAsync(req);
-      else apiResult = await generateParallel.mutateAsync(req);
+      else if (styleKey === "parallel") apiResult = await generateParallel.mutateAsync(req);
+      else if (styleKey === "microfilm") apiResult = await generateMicrofilm.mutateAsync(req);
+      else if (styleKey === "serial") apiResult = await generateSerial.mutateAsync(req);
+      else apiResult = await generateSelfportrait.mutateAsync(req);
 
       setResult({
         title: apiResult.title,
@@ -677,11 +687,9 @@ export default function NarrativeFactory() {
 /** 风格 key → 中文标签（用于 result 阶段展示） */
 function styleLabel(style: NarrativeStyle): string {
   const map: Record<NarrativeStyle, string> = {
-    story: "小说",
-    diary: "日记",
-    letter: "信件",
-    podcast: "播客",
-    parallel: "平行对话",
+    story: "小说", diary: "日记", letter: "信件",
+    podcast: "播客", parallel: "平行对话",
+    microfilm: "微电影", serial: "连载", selfportrait: "自画像",
   };
   return map[style] ?? style;
 }

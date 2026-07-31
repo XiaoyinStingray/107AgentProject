@@ -8,7 +8,11 @@ import PersonaTamper, { DEFAULT_PERSONALITY } from "../components/scene/PersonaT
 import type { Personality } from "../components/scene/PersonaTamper";
 import CheckpointPanel from "../components/scene/CheckpointPanel";
 import DirectorPanel from "../components/scene/DirectorPanel";
-import { useSyncSceneState, useCheckpoints, useCreateCheckpoint, useDeleteCheckpoint } from "../api/scenes";
+import AudioControls from "../components/scene/AudioControls";
+import { useSyncSceneState, useCheckpoints, useCreateCheckpoint, useDeleteCheckpoint, useStartScene } from "../api/scenes";
+import { useAgents } from "../api/agents";
+import type { AgentResponse } from "../types/agent";
+import { pickAccessoryId } from "../game/accessories";
 
 /* —— 场景列表 —— */
 const SCENES = [
@@ -20,23 +24,66 @@ const SCENES = [
   { id: "sakura", name: "🌸 樱花大道" },
 ];
 
-/* —— 可用 Agent 模板 —— */
-const AGENT_POOL = [
-  { agentId: "agent-1", label: "小林 👨‍💻", emoji: "👨‍💻", color: "#5588CC" },
-  { agentId: "agent-2", label: "小红 👩‍🎨", emoji: "👩‍🎨", color: "#EE8899" },
-  { agentId: "agent-3", label: "小刚 👨‍💼", emoji: "👨‍💼", color: "#DD9944" },
-  { agentId: "agent-4", label: "小雪 👩‍🔬", emoji: "👩‍🔬", color: "#66AA88" },
-  { agentId: "agent-5", label: "阿杰 🧑‍🎤", emoji: "🧑‍🎤", color: "#8866CC" },
+/* —— Agent 池条目（部署用）—— */
+interface AgentPoolEntry {
+  agentId: string;
+  label: string;   // 显示标签
+  name: string;    // 短名（气泡用）
+  emoji: string;
+  color: string;
+}
+
+/* MBTI → emoji 映射 */
+const MBTI_EMOJI: Record<string, string> = {
+  INTJ: "👨‍💻", INTP: "🧑‍🔬", ENTJ: "👨‍💼", ENTP: "🧑‍🎤",
+  INFJ: "🧘", INFP: "🧑‍🎨", ENFJ: "👩‍🏫", ENFP: "👩‍🎨",
+  ISTJ: "👨‍🔧", ISFJ: "👩‍⚕️", ESTJ: "👨‍💼", ESFJ: "🤝",
+  ISTP: "👨‍🔬", ISFP: "👩‍🎨", ESTP: "🕵️", ESFP: "🎭",
+};
+
+/** agentId → 稳定 hex 颜色（12 色调色板） */
+const COLOR_PALETTE = [
+  "#5588CC", "#EE8899", "#DD9944", "#66AA88", "#8866CC",
+  "#CC6655", "#5599AA", "#AA77BB", "#88AA55", "#CC8866",
+  "#5588AA", "#BB7799",
+];
+function agentColor(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+  return COLOR_PALETTE[Math.abs(h) % COLOR_PALETTE.length];
+}
+
+/** AgentResponse → AgentPoolEntry */
+function toPoolEntry(a: AgentResponse): AgentPoolEntry {
+  const mbti = a.persona?.mbti ?? "";
+  const emoji = MBTI_EMOJI[mbti.toUpperCase()] ?? "🤖";
+  const shortName = a.name.length > 2 ? a.name.slice(0, 2) : a.name;
+  return {
+    agentId: a.id,
+    label: `${a.name} ${emoji}`,
+    name: shortName,
+    emoji,
+    color: agentColor(a.id),
+  };
+}
+
+/* —— Mock 兜底（后端不可用时）—— */
+const MOCK_POOL: AgentPoolEntry[] = [
+  { agentId: "agent-1", label: "小林 👨‍💻", name: "小林", emoji: "👨‍💻", color: "#5588CC" },
+  { agentId: "agent-2", label: "小红 👩‍🎨", name: "小红", emoji: "👩‍🎨", color: "#EE8899" },
+  { agentId: "agent-3", label: "小刚 👨‍💼", name: "小刚", emoji: "👨‍💼", color: "#DD9944" },
+  { agentId: "agent-4", label: "小雪 👩‍🔬", name: "小雪", emoji: "👩‍🔬", color: "#66AA88" },
+  { agentId: "agent-5", label: "阿杰 🧑‍🎤", name: "阿杰", emoji: "🧑‍🎤", color: "#8866CC" },
 ];
 
-/* —— 每场景的投放坐标 —— */
+/* —— 每场景的投放坐标（8 个，支持更多 Agent）—— */
 const SPAWN_SLOTS: Record<string, { tileX: number; tileY: number }[]> = {
-  library:    [{ tileX: 2, tileY: 3 }, { tileX: 4, tileY: 3 }, { tileX: 8, tileY: 3 }, { tileX: 6, tileY: 5 }, { tileX: 9, tileY: 5 }],
-  dorm:       [{ tileX: 3, tileY: 3 }, { tileX: 6, tileY: 3 }, { tileX: 9, tileY: 3 }, { tileX: 4, tileY: 5 }, { tileX: 8, tileY: 5 }],
-  classroom:  [{ tileX: 2, tileY: 2 }, { tileX: 4, tileY: 2 }, { tileX: 6, tileY: 2 }, { tileX: 8, tileY: 4 }, { tileX: 10, tileY: 4 }],
-  art:        [{ tileX: 2, tileY: 4 }, { tileX: 5, tileY: 3 }, { tileX: 7, tileY: 5 }, { tileX: 9, tileY: 4 }, { tileX: 4, tileY: 6 }],
-  lab:        [{ tileX: 3, tileY: 3 }, { tileX: 7, tileY: 3 }, { tileX: 5, tileY: 5 }, { tileX: 9, tileY: 5 }, { tileX: 2, tileY: 6 }],
-  sakura:     [{ tileX: 2, tileY: 2 }, { tileX: 5, tileY: 3 }, { tileX: 7, tileY: 4 }, { tileX: 9, tileY: 5 }, { tileX: 3, tileY: 6 }],
+  library:    [{ tileX: 3, tileY: 4 }, { tileX: 6, tileY: 4 }, { tileX: 10, tileY: 4 }, { tileX: 13, tileY: 4 }, { tileX: 5, tileY: 7 }, { tileX: 8, tileY: 7 }, { tileX: 11, tileY: 7 }, { tileX: 2, tileY: 9 }],
+  dorm:       [{ tileX: 2, tileY: 3 }, { tileX: 6, tileY: 3 }, { tileX: 10, tileY: 3 }, { tileX: 14, tileY: 3 }, { tileX: 4, tileY: 6 }, { tileX: 8, tileY: 6 }, { tileX: 12, tileY: 6 }, { tileX: 7, tileY: 9 }],
+  classroom:  [{ tileX: 2, tileY: 3 }, { tileX: 5, tileY: 3 }, { tileX: 8, tileY: 3 }, { tileX: 12, tileY: 3 }, { tileX: 3, tileY: 6 }, { tileX: 7, tileY: 6 }, { tileX: 10, tileY: 6 }, { tileX: 13, tileY: 8 }],
+  art:        [{ tileX: 3, tileY: 3 }, { tileX: 7, tileY: 3 }, { tileX: 11, tileY: 3 }, { tileX: 14, tileY: 4 }, { tileX: 5, tileY: 6 }, { tileX: 9, tileY: 6 }, { tileX: 13, tileY: 6 }, { tileX: 4, tileY: 9 }],
+  lab:        [{ tileX: 3, tileY: 3 }, { tileX: 7, tileY: 3 }, { tileX: 11, tileY: 3 }, { tileX: 14, tileY: 4 }, { tileX: 5, tileY: 6 }, { tileX: 9, tileY: 6 }, { tileX: 12, tileY: 8 }, { tileX: 3, tileY: 9 }],
+  sakura:     [{ tileX: 2, tileY: 3 }, { tileX: 6, tileY: 3 }, { tileX: 10, tileY: 3 }, { tileX: 13, tileY: 4 }, { tileX: 4, tileY: 6 }, { tileX: 8, tileY: 6 }, { tileX: 12, tileY: 7 }, { tileX: 5, tileY: 9 }],
 };
 
 const SCENE_KEY = "m11-current-scene";
@@ -85,9 +132,123 @@ export default function GameScenePage() {
   const [paused, setPaused] = useState(false);
   const [weather, setWeather] = useState("clear");
   const syncMutation = useSyncSceneState();
+  // 71: 对话日志（叙事导出用）
+  // hash 跳转到对应面板
+  const checkpointsRef = useRef<HTMLDivElement>(null);
+  const directorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const hash = window.location.hash?.slice(1);
+    if (hash) {
+      const el = document.getElementById(`section-${hash}`);
+      el?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, []);
   const mountedRef = useRef(false);
   const gameRef = useRef<Phaser.Game | null>(null);
   const [gameReady, setGameReady] = useState(false);
+
+  // ── State 4 Step 81: 场景 Brain 联动 ──
+  const [sceneWorldId, setSceneWorldId] = useState<string | null>(null);
+  const [brainEnabled, setBrainEnabled] = useState(false);
+  const startScene = useStartScene();
+  const sseRef = useRef<EventSource | null>(null);
+  const sseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // SSE 连接：监听 move_to / agent_message 事件 → 转发到 Phaser
+  useEffect(() => {
+    if (!sceneWorldId || !brainEnabled) return;
+    const es = new EventSource(`/api/worlds/${sceneWorldId}/stream`);
+    sseRef.current = es;
+
+    es.onmessage = (e) => {
+      try {
+        const evt = JSON.parse(e.data);
+        if (!gameRef.current) return;
+
+        if (evt.type === "move_to" || (evt.type === "agent_action" && evt.action === "move_to")) {
+          const tx = evt.data?.tile_x ?? evt.tile_x;
+          const ty = evt.data?.tile_y ?? evt.tile_y;
+          const aid = evt.agent_id;
+          if (tx != null && ty != null && aid) {
+            gameRef.current.events.emit("sse-move-to", aid, tx, ty);
+          }
+        }
+
+        if (evt.type === "agent_message" && evt.content) {
+          const fromId = evt.agent_id;
+          const msg = evt.message || evt.content;
+          const targetIds = evt.data?.target_agent_ids || [];
+          gameRef.current.events.emit("sse-dialogue", {
+            fromId,
+            fromName: evt.agent_name || fromId,
+            message: msg,
+            targetIds,
+          });
+        }
+
+        if (evt.type === "emotion_update" && evt.agent_id && evt.data?.emotion) {
+          gameRef.current.events.emit("sse-emotion", evt.agent_id, evt.data.emotion);
+        }
+      } catch { /* ignore parse errors */ }
+    };
+
+    es.onerror = () => {
+      // EventSource 自动重连，但超时后降级为本地模式
+      if (sseTimeoutRef.current) clearTimeout(sseTimeoutRef.current);
+      sseTimeoutRef.current = setTimeout(() => {
+        if (es.readyState === EventSource.CLOSED) {
+          setBrainEnabled(false);
+        }
+      }, 10000);
+    };
+
+    return () => {
+      if (sseTimeoutRef.current) clearTimeout(sseTimeoutRef.current);
+      es.close();
+      sseRef.current = null;
+    };
+  }, [sceneWorldId, brainEnabled]);
+
+  // 场景启动：有 Agent 且 Brain 启用时，请求后端创建 WorldEngine
+  const startBrain = useCallback(async () => {
+    if (agents.length === 0) return;
+    try {
+      const result = await startScene.mutateAsync({
+        sceneId: mapId,
+        agentIds: agents.map((a) => a.agentId),
+      });
+      setSceneWorldId(result.world_id);
+      setBrainEnabled(true);
+    } catch {
+      // 后端不可用时保持本地模式
+      setBrainEnabled(false);
+    }
+  }, [agents, mapId, startScene]);
+
+  // 场景切换时断开 SSE
+  useEffect(() => {
+    setSceneWorldId(null);
+    setBrainEnabled(false);
+  }, [mapId]);
+
+  // ── 真实 Agent 池（与 SoloTheater 同源，后端不可用时 mock 兜底）──
+  const { data: realAgents = [] } = useAgents();
+  const agentPool: AgentPoolEntry[] = useMemo(
+    () => realAgents.length > 0 ? realAgents.map(toPoolEntry) : MOCK_POOL,
+    [realAgents],
+  );
+
+  // 66-A 迁移：清理 localStorage 中不在当前池的旧 Agent（mock agent-1~5 等）
+  useEffect(() => {
+    const poolIds = new Set(agentPool.map((a) => a.agentId));
+    for (const scene of SCENES) {
+      const stored = loadAgents(scene.id);
+      const filtered = stored.filter((a) => poolIds.has(a.agentId));
+      if (filtered.length !== stored.length) {
+        saveAgents(scene.id, filtered);
+      }
+    }
+  }, [agentPool]);
 
   // 存档 API
   const { data: checkpoints = [] } = useCheckpoints(mapId);
@@ -264,7 +425,7 @@ export default function GameScenePage() {
 
   /** 部署时初始化人格 */
   const deployAgent = useCallback(
-    (def: (typeof AGENT_POOL)[number]) => {
+    (def: AgentPoolEntry) => {
       setAgents((prev) => {
         if (prev.find((a) => a.agentId === def.agentId)) return prev;
         const slots = SPAWN_SLOTS[mapId] ?? SPAWN_SLOTS.library;
@@ -273,13 +434,14 @@ export default function GameScenePage() {
           ...prev,
           {
             agentId: def.agentId,
-            name: def.label.slice(0, 2),
+            name: def.name,
             emoji: def.emoji,
             color: def.color,
             tileX: slot.tileX,
             tileY: slot.tileY,
             action: "idle" as const,
             emotion: "neutral" as const,
+            accessory: pickAccessoryId(),
           },
         ];
         saveAgents(mapId, next);
@@ -300,6 +462,7 @@ export default function GameScenePage() {
       {/* ── 左侧控制栏 ── */}
       <div className="w-72 shrink-0 overflow-y-auto p-4 space-y-3 border-r border-border">
         <h1 className="text-lg font-mono text-accent-orange">M11 游戏化场景</h1>
+        <AudioControls />
 
         {/* 场景选择器 */}
         <Card className="p-3">
@@ -322,6 +485,32 @@ export default function GameScenePage() {
         </div>
       </Card>
 
+        {/* State 4: Brain 开关 */}
+        <Card className="p-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-mono text-text-secondary">
+              🧠 AI 驱动
+            </span>
+            <button
+              type="button"
+              onClick={() => brainEnabled ? setBrainEnabled(false) : startBrain()}
+              disabled={agents.length === 0 || startScene.isPending}
+              className={`px-3 py-1 text-xs font-mono rounded border transition-colors ${
+                brainEnabled
+                  ? "border-green-500/60 bg-green-500/10 text-green-400"
+                  : "border-border text-text-secondary hover:border-text-secondary/40"
+              } disabled:opacity-40 disabled:cursor-not-allowed`}
+            >
+              {startScene.isPending ? "⏳" : brainEnabled ? "ON ✓" : "OFF"}
+            </button>
+          </div>
+          {brainEnabled && sceneWorldId && (
+            <div className="mt-1 text-[10px] font-mono text-text-secondary truncate">
+              World: {sceneWorldId.slice(0, 12)}...
+            </div>
+          )}
+        </Card>
+
       </div>
 
       {/* ── 右侧画布区 ── */}
@@ -329,10 +518,11 @@ export default function GameScenePage() {
         <GameCanvas
           mapId={mapId}
           agents={agents}
+          brainEnabled={brainEnabled}
           onAgentClick={handleAgentClick}
           onAgentMove={handleAgentMove}
           onAgentDoubleClick={handleAgentDoubleClick}
-          onGameReady={(g) => { gameRef.current = g; }}
+          onGameReady={(g) => { gameRef.current = g; setGameReady(true); }}
         />
       </div>
 
@@ -359,10 +549,10 @@ export default function GameScenePage() {
       {/* Agent 投放面板 */}
       <Card className="mt-4 p-3">
         <p className="text-xs font-mono text-text-secondary mb-2">
-          投放 Agent（{agents.length}/{AGENT_POOL.length}）
+          投放 Agent（{agents.length}/{agentPool.length}）
         </p>
         <div className="flex flex-wrap gap-2">
-          {AGENT_POOL.map((def) => {
+          {agentPool.map((def) => {
             const deployed = agents.find((a) => a.agentId === def.agentId);
             return (
               <button
@@ -381,7 +571,7 @@ export default function GameScenePage() {
                   className="inline-block w-2.5 h-2.5 rounded-full mr-1.5 align-middle"
                   style={{ backgroundColor: def.color }}
                 />
-                {def.label.slice(0, 2)}
+                {def.name}
                 {deployed ? " ✓" : " +"}
               </button>
             );
@@ -391,7 +581,7 @@ export default function GameScenePage() {
 
       {/* 导演面板 (Step 66) */}
       <Card className="p-3">
-        <p className="text-xs font-mono text-text-secondary mb-2">导演模式</p>
+        <p className="text-xs font-mono text-text-secondary mb-2" ref={directorRef}>导演模式</p>
         <DirectorPanel
           weather={weather}
           onWeatherChange={handleWeatherChange}
@@ -399,11 +589,13 @@ export default function GameScenePage() {
           onMoodAll={handleMoodAll}
           paused={paused}
         />
+
+        {/* 71: 叙事导出 */}
       </Card>
 
       {/* 存档面板 */}
       <Card className="p-3">
-        <p className="text-xs font-mono text-text-secondary mb-2">存档管理</p>
+        <p className="text-xs font-mono text-text-secondary mb-2" ref={checkpointsRef}>存档管理</p>
         <CheckpointPanel
           checkpoints={checkpoints}
           count={checkpoints.length}

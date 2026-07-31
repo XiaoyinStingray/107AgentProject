@@ -117,6 +117,7 @@ class MemoryRetriever:
             id=str(uuid.uuid4()),
             agent_id=agent_id,
             type=type_,
+            memory_type=type_,  # State 4: 同步 memory_type 列
             content=content,
             importance=importance,
             keywords=keywords,
@@ -140,56 +141,67 @@ class MemoryRetriever:
         agent_id: str,
         context: str,
         top_k: int = 5,
+        types: list[str] | None = None,
     ) -> list[MemoryResponse]:
         """检索与上下文相关的记忆。
 
         P0 算法:
             1. 从 context 中提取关键词
             2. SQL LIKE 匹配 content 或 keywords 字段
-            3. 按 importance DESC, created_at DESC 排序
-            4. 返回 top_k 条
+            3. 可选按 memory_type 过滤（types=["lesson", "episodic"] 或 None=全部）
+            4. lesson 类型优先展示（importance 更高）
+            5. 按 importance DESC, created_at DESC 排序
+            6. 返回 top_k 条
 
         Args:
             agent_id: Agent ID
-            context: 检索上下文（如当前对话主题或事件描述）
+            context: 检索上下文
             top_k: 返回条数（默认 5）
+            types: memory_type 过滤列表（可选，None=全部）
 
         Returns:
-            相关记忆列表，按重要性 × 时间排序
+            相关记忆列表，lesson 类型优先
         """
         keywords = _extract_keywords(context)
 
         if not keywords:
-            # 没有可用的关键词 → 回退到最近的记忆
             logger.debug(f"MemoryRetriever.retrieve: no keywords from context, "
                          f"falling back to recent for agent={agent_id}")
-            return await self.get_recent(agent_id, limit=top_k)
+            return await self.get_recent(agent_id, limit=top_k, types=types)
 
-        # 构建 LIKE 条件: (content LIKE '%kw%' OR keywords LIKE '%kw%')
+        # 构建 LIKE 条件
         conditions = []
         for kw in keywords:
-            safe_kw = kw.replace("'", "''")  # SQL 注入防护
+            safe_kw = kw.replace("'", "''")
             conditions.append(
                 f"(content LIKE '%{safe_kw}%' OR keywords LIKE '%{safe_kw}%')"
             )
 
         where_clause = " OR ".join(conditions)
+
+        # types 过滤
+        type_filter = ""
+        if types:
+            escaped = [f"'{t.replace(chr(39), chr(39)+chr(39))}'" for t in types]
+            type_filter = f" AND memory_type IN ({','.join(escaped)})"
+
+        # lesson 类型优先排序
         sql = (
-            f"SELECT * FROM memories "
-            f"WHERE agent_id = :agent_id AND ({where_clause}) "
-            f"ORDER BY importance DESC, created_at DESC "
+            f"SELECT *, CASE WHEN memory_type = 'lesson' THEN 1 ELSE 0 END AS _lesson_priority "
+            f"FROM memories "
+            f"WHERE agent_id = :agent_id AND ({where_clause}){type_filter} "
+            f"ORDER BY _lesson_priority DESC, importance DESC, created_at DESC "
             f"LIMIT :limit"
         )
 
         logger.debug(f"MemoryRetriever.retrieve: agent={agent_id}, "
-                      f"keywords={keywords}, top_k={top_k}")
+                      f"keywords={keywords}, top_k={top_k}, types={types}")
 
         result = await self._session.execute(
             text(sql), {"agent_id": agent_id, "limit": top_k}
         )
         rows = result.fetchall()
 
-        # 转为 Pydantic 响应
         memories = [
             MemoryResponse(
                 id=row.id,
@@ -198,16 +210,15 @@ class MemoryRetriever:
                 content=row.content,
                 importance=row.importance,
                 keywords=row.keywords,
+                memory_type=getattr(row, "memory_type", "episodic"),
                 created_at=row.created_at,
             )
             for row in rows
         ]
 
-        # 关键词匹配无结果 → 回退到最近记忆
         if not memories:
-            logger.debug("MemoryRetriever.retrieve: no keyword matches, "
-                         "falling back to recent")
-            return await self.get_recent(agent_id, limit=top_k)
+            logger.debug("MemoryRetriever.retrieve: no keyword matches, falling back to recent")
+            return await self.get_recent(agent_id, limit=top_k, types=types)
 
         logger.debug(f"MemoryRetriever.retrieve: found {len(memories)} memories")
         return memories
@@ -217,26 +228,36 @@ class MemoryRetriever:
     # -------------------------------------------------------------------------
 
     async def get_recent(
-        self, agent_id: str, limit: int = 10
+        self, agent_id: str, limit: int = 10,
+        types: list[str] | None = None,
     ) -> list[MemoryResponse]:
         """获取最近 N 条记忆（按时间降序）。
 
         Args:
             agent_id: Agent ID
             limit: 最多返回条数
+            types: memory_type 过滤（可选，None=全部）
 
         Returns:
             最近的记忆列表
         """
+        type_filter = ""
+        params: dict = {"agent_id": agent_id, "limit": limit}
+        if types:
+            # 用参数化避免 SQL 注入
+            placeholders = ", ".join([f":type_{i}" for i in range(len(types))])
+            type_filter = f" AND memory_type IN ({placeholders})"
+            for i, t in enumerate(types):
+                params[f"type_{i}"] = t
+
         sql = (
             "SELECT * FROM memories "
-            "WHERE agent_id = :agent_id "
-            "ORDER BY created_at DESC "
+            "WHERE agent_id = :agent_id"
+            + type_filter +
+            " ORDER BY created_at DESC "
             "LIMIT :limit"
         )
-        result = await self._session.execute(
-            text(sql), {"agent_id": agent_id, "limit": limit}
-        )
+        result = await self._session.execute(text(sql), params)
         rows = result.fetchall()
 
         return [
@@ -247,6 +268,7 @@ class MemoryRetriever:
                 content=row.content,
                 importance=row.importance,
                 keywords=row.keywords,
+                memory_type=getattr(row, "memory_type", "episodic"),
                 created_at=row.created_at,
             )
             for row in rows
@@ -270,3 +292,138 @@ class MemoryRetriever:
         logger.info(f"MemoryRetriever.delete_by_agent: agent={agent_id}, "
                      f"deleted {count} records")
         return count
+
+
+# =============================================================================
+# MemoryConsolidator — Step 82: 情景记忆固化
+# =============================================================================
+
+CONSOLIDATION_PROMPT = """你是一个记忆反思系统。根据以下 Agent 在最近 {tick_count} 个 tick 中的关键经历，
+提取 2-5 条"教训"（lesson）。
+
+关键事件摘要：
+{event_summary}
+
+请反思：
+1. Agent 学到了什么？（最多 3 条教训）
+2. Agent 做对了什么？（最多 2 条成功经验）
+3. Agent 下次遇到类似情况应该怎么做？
+
+返回 JSON 数组格式（只返回 JSON，不要其他文字）：
+[
+  {{"content": "教训内容（20-100字）", "importance": 0.7-0.9, "type": "lesson"}},
+  ...
+]"""
+
+
+class MemoryConsolidator:
+    """记忆固化器——Episode 结束后 LLM 反思 → 提取教训 → 写入 lesson 记忆。
+
+    用法:
+        consolidator = MemoryConsolidator(model_client, db_session)
+        lessons = await consolidator.consolidate(agent_id, events, (0, 10))
+    """
+
+    def __init__(self, model_client, db_session):
+        self._model_client = model_client
+        self._retriever = MemoryRetriever(db_session)
+
+    async def consolidate(
+        self,
+        agent_id: str,
+        events: list,
+        tick_range: tuple[int, int],
+    ) -> list:
+        """LLM 反思关键经历 → 提取 2-5 条 lesson 记忆。
+
+        Args:
+            agent_id: Agent UUID
+            events: 本 episode 的 SimEvent 列表
+            tick_range: (start_tick, end_tick)
+
+        Returns:
+            新创建的 lesson MemoryResponse 列表
+        """
+        if not events or not self._model_client:
+            return []
+
+        # 1. 构建事件摘要
+        tick_count = tick_range[1] - tick_range[0] + 1
+        event_summary = self._build_event_summary(events, agent_id)
+
+        if len(event_summary) < 50:
+            logger.debug(f"MemoryConsolidator: not enough events for agent={agent_id[:8]}")
+            return []
+
+        # 2. LLM 反思
+        try:
+            prompt = CONSOLIDATION_PROMPT.format(
+                tick_count=tick_count,
+                event_summary=event_summary[:3000],
+            )
+            from autogen_core.models import UserMessage
+            import asyncio
+            import json as _json
+
+            result = await asyncio.wait_for(
+                self._model_client.create(
+                    messages=[UserMessage(content=prompt, source="consolidator")],
+                ),
+                timeout=15.0,
+            )
+            text = result.content if hasattr(result, "content") else str(result)
+
+            # 提取 JSON
+            lessons_data = _json.loads(text) if isinstance(text, str) else text
+            if isinstance(lessons_data, str):
+                # LLM 可能包在 markdown 代码块中
+                import re
+                match = re.search(r"\[.*\]", lessons_data, re.DOTALL)
+                if match:
+                    lessons_data = _json.loads(match.group(0))
+
+            if not isinstance(lessons_data, list):
+                return []
+
+        except Exception as e:
+            logger.warning(f"MemoryConsolidator LLM failed: {e}")
+            return []
+
+        # 3. 写入 lesson 记忆
+        new_memories = []
+        for item in lessons_data[:5]:
+            if not isinstance(item, dict):
+                continue
+            content = item.get("content", "")
+            if not content or len(content) < 10:
+                continue
+            importance = float(item.get("importance", 0.7))
+            importance = max(0.0, min(1.0, importance))
+
+            mem = await self._retriever.add_memory(
+                agent_id=agent_id,
+                content=content,
+                type_="lesson",
+                importance=importance,
+            )
+            new_memories.append(mem)
+
+        logger.info(
+            f"MemoryConsolidator: agent={agent_id[:8]} "
+            f"generated {len(new_memories)} lesson memories"
+        )
+        return new_memories
+
+    @staticmethod
+    def _build_event_summary(events: list, agent_id: str) -> str:
+        """从事件列表构建摘要文本。"""
+        lines = []
+        for e in events[-30:]:  # 最近 30 个事件
+            if hasattr(e, "source_agent_id") and e.source_agent_id == agent_id:
+                desc = getattr(e, "description", str(e))[:120]
+                lines.append(f"- [Tick {getattr(e, 'tick', '?')}] {desc}")
+            elif hasattr(e, "description"):
+                desc = e.description[:120]
+                if agent_id in desc:
+                    lines.append(f"- [Tick {getattr(e, 'tick', '?')}] (涉及自己) {desc}")
+        return "\n".join(lines[-20:])  # 最多 20 行

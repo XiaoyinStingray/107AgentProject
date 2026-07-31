@@ -91,3 +91,53 @@ export function useDeleteCheckpoint() {
     },
   });
 }
+
+/* ── State 4 Step 81: 场景启动（创建 WorldEngine + 获取 world_id）── */
+
+interface StartSceneResponse {
+  world_id: string;
+  scene_id: string;
+  status: string;
+}
+
+export function useStartScene() {
+  return useMutation({
+    mutationFn: ({
+      sceneId,
+      agentIds,
+    }: {
+      sceneId: string;
+      agentIds: string[];
+    }) =>
+      client.post<StartSceneResponse>(`/scenes/${sceneId}/start`, {
+        agent_ids: agentIds,
+      }),
+  });
+}
+
+/* ── State 4 Step 83: Agent 行为指纹 ── */
+
+interface AgentFingerprintResponse {
+  agent_id: string;
+  agent_name: string;
+  fingerprint: {
+    total_ticks: number;
+    tool_distribution: Record<string, number>;
+    emotion_trajectory: string[];
+    social_network: Record<string, number>;
+    decision_pattern: string;
+    consistency_score: number;
+  };
+}
+
+export function useAgentFingerprint(agentId: string | null) {
+  return useQuery({
+    queryKey: ["agent-fingerprint", agentId],
+    queryFn: () =>
+      client
+        .get<AgentFingerprintResponse>(`/bench/agents/${agentId}/fingerprint`)
+        .then((r) => r),
+    enabled: !!agentId,
+    staleTime: 60_000,
+  });
+}

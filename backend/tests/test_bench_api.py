@@ -3,7 +3,6 @@ Bench API 路由测试 — Step T3 / Layer 2。
 覆盖: POST runs / GET runs / GET runs/{id} / DELETE / report / test-api。
 """
 
-import json
 import tempfile
 
 import pytest
@@ -11,6 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 from api.bench import router as bench_router
 
@@ -32,6 +32,19 @@ def _sync_create_tables():
     engine = create_engine(_SYNC_DB_URL)
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
+    engine.dispose()
+
+
+def _set_run_status(run_id: str, status: str) -> None:
+    """通过独立同步会话模拟后台任务完成。"""
+    from models.bench_orm import BenchRun
+
+    engine = create_engine(_SYNC_DB_URL)
+    with Session(engine) as session:
+        run = session.get(BenchRun, run_id)
+        assert run is not None
+        run.status = status
+        session.commit()
     engine.dispose()
 
 
@@ -167,8 +180,8 @@ class TestGetBenchRun:
 
 class TestDeleteBenchRun:
 
-    def test_delete_existing(self, client, monkeypatch):
-        """删除评测记录。"""
+    def test_delete_completed_run(self, client, monkeypatch):
+        """已完成的评测记录可以删除。"""
         from fastapi import BackgroundTasks
         monkeypatch.setattr(BackgroundTasks, "add_task", lambda self, *a, **kw: None)
 
@@ -176,6 +189,7 @@ class TestDeleteBenchRun:
             "api_key": "sk", "base_url": "http://t", "model": "m",
         })
         run_id = create_resp.json()["id"]
+        _set_run_status(run_id, "done")
 
         resp = client.delete(f"/api/bench/runs/{run_id}")
         assert resp.status_code == 204
@@ -183,6 +197,28 @@ class TestDeleteBenchRun:
         # 确认已删除
         get_resp = client.get(f"/api/bench/runs/{run_id}")
         assert get_resp.status_code == 404
+
+    def test_delete_running_run_rejected(self, client, monkeypatch):
+        """运行中的评测不可删除，防止后台产生孤立结果。"""
+        from fastapi import BackgroundTasks
+
+        monkeypatch.setattr(
+            BackgroundTasks,
+            "add_task",
+            lambda self, *a, **kw: None,
+        )
+        create_resp = client.post("/api/bench/runs", json={
+            "api_key": "sk",
+            "base_url": "http://t",
+            "model": "m",
+        })
+        run_id = create_resp.json()["id"]
+
+        response = client.delete(f"/api/bench/runs/{run_id}")
+
+        assert response.status_code == 409
+        assert "运行中的评测不可删除" in response.json()["detail"]
+        assert client.get(f"/api/bench/runs/{run_id}").status_code == 200
 
     def test_delete_nonexistent(self, client):
         """删除不存在的记录返回 404。"""

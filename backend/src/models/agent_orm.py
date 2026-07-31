@@ -26,6 +26,8 @@ class AgentRow(Base):
     goals_json: Mapped[str] = mapped_column(String, default="[]")
     emotional_json: Mapped[str] = mapped_column(String, default="{}")
     energy: Mapped[float] = mapped_column(Float, default=100.0)
+    notes_json: Mapped[str] = mapped_column(String, default="[]")  # Step 78: 私有笔记 JSON
+    fingerprint_json: Mapped[str] = mapped_column(String, default="{}")  # Step 83: 行为指纹
     created_at: Mapped[str] = mapped_column(
         String, default=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -45,6 +47,8 @@ class AgentRow(Base):
             "goals": json.loads(self.goals_json),
             "emotional_state": json.loads(self.emotional_json),
             "energy": self.energy,
+            "notes_json": self.notes_json,
+            "fingerprint_json": self.fingerprint_json,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -60,6 +64,8 @@ class AgentRow(Base):
             goals_json=json.dumps(data.get("goals", []), ensure_ascii=False),
             emotional_json=json.dumps(data.get("emotional_state", {}), ensure_ascii=False),
             energy=data.get("energy", 100.0),
+            notes_json=data.get("notes_json", "[]"),
+            fingerprint_json=data.get("fingerprint_json", "{}"),
             created_at=data.get("created_at", datetime.now(timezone.utc).isoformat()),
             updated_at=data.get("updated_at", datetime.now(timezone.utc).isoformat()),
         )

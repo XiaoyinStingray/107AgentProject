@@ -85,6 +85,66 @@ export function useTeamPlan(teamId: string | null) {
     queryKey: [...teamKeys.detail(teamId ?? ""), "plan"],
     queryFn: () => client.get<TeamPlan>(`/teams/${teamId}/plan`),
     enabled: !!teamId,
-    refetchInterval: 5_000,  // 执行中每 5s 轮询
+    refetchInterval: 5_000,
+  });
+}
+
+// ── 68: Team 评分 ──
+
+export interface ScoreResult {
+  team_name: string;
+  scores: Record<string, { score: number; comment: string }>;
+  overall: number;
+  strengths: string[];
+  weaknesses: string[];
+  summary: string;
+}
+
+export function useScoreTeam() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ teamId, task }: { teamId: string; task: string }) =>
+      client.post<ScoreResult>(`/teams/${teamId}/score`, { task }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: teamKeys.all }),
+  });
+}
+
+// ── 68: Team 对抗 ──
+
+export interface VersusResult {
+  winner: "A" | "B" | "tie";
+  scores_a: Record<string, { score: number; comment: string }>;
+  scores_b: Record<string, { score: number; comment: string }>;
+  overall_a: number; overall_b: number;
+  strengths_a: string[]; strengths_b: string[];
+  weaknesses_a: string[]; weaknesses_b: string[];
+  summary_a: string; summary_b: string;
+  key_diffs: Array<{ dim: string; a: number; b: number; winner: string; gap: number }>;
+  team_a_name: string; team_b_name: string;
+  task: string;
+}
+
+export function useTeamVersus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (req: { team_a_id: string; team_b_id: string; task: string }) =>
+      client.post<VersusResult>("/teams/versus", req),
+  });
+}
+
+// ── 68: 学习曲线 ──
+
+export interface LearningCurve {
+  team_name: string;
+  points: Array<{ index: number; task: string; completion_pct: number; has_report: boolean }>;
+  trend: string; total_plans: number;
+  latest_task: string; latest_report: any;
+}
+
+export function useLearningCurve(teamId: string | null) {
+  return useQuery({
+    queryKey: [...teamKeys.detail(teamId ?? ""), "learning-curve"],
+    queryFn: () => client.get<LearningCurve>(`/teams/${teamId}/learning-curve`),
+    enabled: !!teamId,
   });
 }

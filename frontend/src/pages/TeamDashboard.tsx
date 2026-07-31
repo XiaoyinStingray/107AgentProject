@@ -11,6 +11,10 @@ import EmptyState from "../components/shared/EmptyState";
 import LiveChat from "./team/LiveChat";
 import HealthPanel from "./team/HealthPanel";
 import MarketPanel from "./team/MarketPanel";
+import DebatePanel from "./team/DebatePanel";
+import type { DebateState, RoleEvolution } from "./team/DebatePanel";
+import VersusPanel from "./team/VersusPanel";
+import LearningCurve from "./team/LearningCurve";
 
 /* ================================================================
    Step 51–53 — M9 Agent Team 仪表盘
@@ -27,6 +31,7 @@ export default function TeamDashboard() {
   const publishTeam = usePublishTeam();
   const [evaluation, setEvaluation] = useState<string | null>(null);
   const [showMarket, setShowMarket] = useState(false);
+  const [showVersus, setShowVersus] = useState(false);
   const [publishMsg, setPublishMsg] = useState<string | null>(null);
 
   // 看板状态
@@ -64,6 +69,23 @@ export default function TeamDashboard() {
     }
     return null;
   }, [events]);
+
+  // ── 67: 辩论 + 角色演化（从 plan_updated 直接读取，不用扫额外事件）──
+  const debate: DebateState | null = (livePlan as any)?.debate ?? null;
+  const agentRoles: Array<{ id: string; name: string; role: string }> =
+    (livePlan as any)?.agent_roles ?? [];
+
+  const [evolutions, setEvolutions] = useState<RoleEvolution[]>([]);
+  useEffect(() => {
+    const newEvos: RoleEvolution[] = (livePlan as any)?.evolutions ?? [];
+    if (newEvos.length > 0) {
+      setEvolutions((prev) => {
+        const seen = new Set(prev.map((p) => `${p.agent_id}|${p.step_title}`));
+        const fresh = newEvos.filter((e) => !seen.has(`${e.agent_id}|${e.step_title}`));
+        return [...prev, ...fresh];
+      });
+    }
+  }, [livePlan]);
 
   // 优先用 SSE 实时数据，fallback 到轮询
   const steps = livePlan?.steps ?? teamPlan?.steps ?? [];
@@ -276,7 +298,12 @@ export default function TeamDashboard() {
             )}
           </div>
 
-          {/* 内容区 —— 完成则全宽报告，否则左右分栏 */}
+          {/* 68: 已完成 Team 显示学习曲线 */}
+          {activeTeam.status === "finished" && (
+            <div className="mb-3"><LearningCurve teamId={activeTeamId} /></div>
+          )}
+
+          {/* 内容区 —— 报告全宽 / 执行中左右分栏 */}
           <div className="flex-1 min-h-0">
             {displayReport ? (
               <div className="space-y-3">
@@ -286,15 +313,12 @@ export default function TeamDashboard() {
                   <button
                     type="button"
                     onClick={() => {
-                      const text = `# ${displayReport.title}\n\n${displayReport.content}`;
+                      const text = `# ${displayReport.title}\n\n${displayReport.content ?? ""}`;
                       const blob = new Blob([text as string], { type: "text/markdown;charset=utf-8" });
                       const url = URL.createObjectURL(blob);
                       const a = document.createElement("a");
-                      a.href = url;
-                      a.download = "team-report.md";
-                      document.body.appendChild(a);
-                      a.click();
-                      document.body.removeChild(a);
+                      a.href = url; a.download = "team-report.md";
+                      document.body.appendChild(a); a.click(); document.body.removeChild(a);
                       window.setTimeout(() => URL.revokeObjectURL(url), 0);
                     }}
                     className="px-3 py-1 text-xs font-mono rounded border border-border text-text-secondary hover:border-accent-green hover:text-accent-green transition-colors"
@@ -306,10 +330,8 @@ export default function TeamDashboard() {
                     disabled={evaluateTeam.isPending}
                     onClick={async () => {
                       if (!activeTeamId) return;
-                      try {
-                        const result = await evaluateTeam.mutateAsync(activeTeamId);
-                        setEvaluation(result.evaluation);
-                      } catch { setEvaluation("评估失败，请重试"); }
+                      try { const r = await evaluateTeam.mutateAsync(activeTeamId); setEvaluation(r.evaluation); }
+                      catch { setEvaluation("评估失败，请重试"); }
                     }}
                     className="px-3 py-1 text-xs font-mono rounded border border-accent-orange/60 text-accent-orange hover:bg-accent-orange/10 transition-colors disabled:opacity-40"
                   >
@@ -340,20 +362,26 @@ export default function TeamDashboard() {
                   <div className="text-xs font-mono text-text-secondary mb-2">💬 实时对话</div>
                   <LiveChat events={events} connected={connected} isPaused={isPaused} />
                 </div>
-                {/* 右：任务进展 */}
-                <div className="lg:col-span-1 min-h-0 overflow-y-auto">
-                  <div className="text-xs font-mono text-text-secondary mb-2">📊 任务进展</div>
+                {/* 右：任务进展 + 辩论 */}
+                <div className="lg:col-span-1 min-h-0 overflow-y-auto space-y-3">
                   <HealthPanel
                     steps={steps}
                     progressPct={progressPct}
                     coordinatorMsg={coordinatorMsg}
-                    reportReady={!!report}
+                    reportReady={!!displayReport}
+                    agentNames={agentNames}
+                    agentRoles={agentRoles}
+                  />
+                  <DebatePanel
+                    debate={debate}
+                    evolutions={evolutions}
+                    steps={steps}
                     agentNames={agentNames}
                   />
                 </div>
               </div>
             )}
-          </div>
+        </div>
         </div>
       ) : (
         <>
@@ -364,15 +392,20 @@ export default function TeamDashboard() {
       <p className="text-sm text-text-secondary font-mono mb-6">
         把 Agent 组成团队，协作完成产品设计、市场调研、代码开发
       </p>
-      <button
-        type="button"
-        onClick={() => setShowMarket((v) => !v)}
-        className="mb-6 px-4 py-2 text-xs font-mono rounded-lg border border-border text-text-secondary hover:border-text-secondary/40"
-      >
-        {showMarket ? "← 返回列表" : "📦 Team 模板"}
-      </button>
 
       {showMarket && <div className="mb-6"><MarketPanel /></div>}
+      {showVersus && <div className="mb-6"><VersusPanel onClose={() => setShowVersus(false)} /></div>}
+
+      <div className="flex gap-2 mb-6">
+        <button onClick={() => { setShowMarket((v) => !v); setShowVersus(false); }}
+          className="px-3 py-1 text-xs font-mono rounded border border-border text-text-secondary hover:border-text-secondary/40">
+          {showMarket ? "← 返回列表" : "📦 Team 模板"}
+        </button>
+        <button onClick={() => { setShowVersus((v) => !v); setShowMarket(false); }}
+          className="px-3 py-1 text-xs font-mono rounded border border-border text-text-secondary hover:border-text-secondary/40">
+          {showVersus ? "← 返回列表" : "⚔️ Team 对抗"}
+        </button>
+      </div>
       {publishMsg && (
         <div className="mb-3 px-3 py-2 rounded border border-accent-green/40 bg-accent-green/5 text-xs font-mono text-accent-green">{publishMsg}</div>
       )}

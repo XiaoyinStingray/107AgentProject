@@ -215,6 +215,8 @@ const EVENT_VISUALS: Record<
   plan_updated: { label: "", border: "", text: "" },
   coordinator_nudge: { label: "", border: "", text: "" },
   report_ready: { label: "", border: "", text: "" },
+  debate_update: { label: "", border: "", text: "" },
+  role_evolved: { label: "", border: "", text: "" },
 };
 
 const INFRASTRUCTURE_EVENTS = new Set<SSEEventType>([
@@ -226,4 +228,6 @@ const INFRASTRUCTURE_EVENTS = new Set<SSEEventType>([
   "plan_updated",
   "coordinator_nudge",
   "report_ready",
+  "debate_update",
+  "role_evolved",
 ]);

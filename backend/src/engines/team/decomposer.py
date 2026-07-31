@@ -122,3 +122,82 @@ async def decompose_task(
 
     logger.info(f"Task decomposed: {len(validated)} steps for task {task[:30]!r}")
     return validated
+
+
+async def re_decompose(
+    remaining_steps: list[dict],
+    reason: str,
+    task: str = "",
+    model_client=None,
+) -> list[dict]:
+    """Step 80: 某步失败后 LLM 重新分解剩余工作。
+
+    保留已完成步骤的上下文，仅对剩余步骤重新规划。
+
+    Args:
+        remaining_steps: 尚未完成的步骤列表
+        reason: 重规划原因（如"原方案太耗时"）
+        task: 原始任务描述
+        model_client: LLM 客户端
+
+    Returns:
+        重新分解后的新步骤列表（不含已完成的步骤）
+    """
+    if not remaining_steps:
+        return []
+
+    if model_client is None:
+        # 无 LLM → 保留原步骤但降低粒度（拆分为更小步骤）
+        logger.info("re_decompose: no model_client, keeping original steps")
+        simplified = []
+        for s in remaining_steps:
+            simplified.append({**s, "status": "pending", "progress": 0.0})
+        return simplified
+
+    # LLM 重新分解
+    step_titles = [s.get("title", "") for s in remaining_steps]
+    prompt = (
+        f"原始任务：{task or '未指定'}\n"
+        f"重规划原因：{reason}\n"
+        f"剩余未完成的步骤：{', '.join(step_titles)}\n\n"
+        "请将这些剩余工作重新分解为更可行的子步骤（JSON 数组格式）：\n"
+        '[{"title": "步骤名", "description": "详细描述", "status": "pending", "progress": 0.0}]'
+    )
+
+    try:
+        import asyncio
+        import json as _json
+        from autogen_core.models import UserMessage
+
+        result = await asyncio.wait_for(
+            model_client.create(
+                messages=[UserMessage(content=prompt, source="re_decomposer")],
+            ),
+            timeout=15.0,
+        )
+        text = result.content if hasattr(result, "content") else str(result)
+        new_steps = _json.loads(text) if isinstance(text, str) else text
+
+        if isinstance(new_steps, list) and len(new_steps) > 0:
+            validated = []
+            for i, s in enumerate(new_steps):
+                if isinstance(s, dict) and s.get("title"):
+                    validated.append({
+                        "title": s.get("title", f"步骤{i+1}"),
+                        "description": s.get("description", ""),
+                        "assignee": s.get("assignee"),
+                        "status": "pending",
+                        "progress": 0.0,
+                        "depends_on": s.get("depends_on", []),
+                    })
+            if validated:
+                logger.info(
+                    f"re_decompose: {len(remaining_steps)}→{len(validated)} steps "
+                    f"(reason: {reason[:60]})"
+                )
+                return validated
+    except Exception as e:
+        logger.warning(f"re_decompose LLM failed: {e}")
+
+    # Fallback: 保留原步骤
+    return [{**s, "status": "pending", "progress": 0.0} for s in remaining_steps]

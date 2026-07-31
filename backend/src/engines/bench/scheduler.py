@@ -6,15 +6,14 @@ Step 58: 3 Agent × 3 场景 × 3 重复 = 27 条评测记录。
 import asyncio
 import json
 import uuid
-from datetime import datetime, timezone
 
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.bench_orm import BenchRun, BenchResult
-from models.world import Scenario, WorldResponse
-from models.agent import Persona, Background, Goal
+from models.world import Scenario
+from models.agent import Persona, Background
 from engines.bench.metrics import calculate_metrics, aggregate_scores
 
 
@@ -59,7 +58,23 @@ STD_SCENARIOS = [
 REPEAT_COUNT = 3
 
 
-async def run_bench_suite(run_id: str, db: AsyncSession, model_client_factory) -> dict:
+def _build_tick_context(scenario: Scenario, tick: int) -> str:
+    """构建单个评测 tick 注入 Agent 的场景上下文。"""
+    if scenario.name == "期末周":
+        environment = f"📊 资源状态: 图书馆剩余座位 {max(0, 80 - tick * 10)} 个\n"
+    else:
+        environment = "🌤️ 天气: 晴\n"
+    return (
+        f"⏰ 第 {tick} 个时间段\n"
+        f"📍 地点: {scenario.name}\n"
+        f"{environment}"
+    )
+
+
+async def run_bench_suite(
+    run_id: str, db: AsyncSession, model_client_factory,
+    custom_agents=None, custom_scenarios=None, repeats=None,
+) -> dict:
     """执行完整评测套件。
 
     model_client_factory: callable(api_key, base_url, model) → model_client
@@ -72,9 +87,28 @@ async def run_bench_suite(run_id: str, db: AsyncSession, model_client_factory) -
         raise ValueError(f"BenchRun {run_id} not found")
 
     all_scores = []
-    bench_run.total_tasks = len(STD_AGENTS) * len(STD_SCENARIOS) * REPEAT_COUNT
+    successful_tasks = 0
+    # 69: 自定义套件 or 标准
+    agents = custom_agents or STD_AGENTS
+    scenarios_raw = custom_scenarios or STD_SCENARIOS
+    rep_count = repeats if repeats is not None else REPEAT_COUNT
+
+    def _to_scenario(s):
+        if isinstance(s, Scenario): return s
+        return Scenario(name=s.get("name", ""), description=s.get("description", ""),
+                        time_span=s.get("time_span", "1-8"),
+                        initial_events=s.get("initial_events", []),
+                        environment_params=s.get("environment_params", {}))
+
+    scenarios_list = [_to_scenario(s) for s in scenarios_raw]
+    bench_run.total_tasks = len(agents) * len(scenarios_list) * rep_count
     bench_run.completed_tasks = 0
     await db.commit()
+
+    # 69: 取消检查
+    async def _check_cancel():
+        await db.refresh(bench_run)
+        return bench_run.status == "cancelled"
 
     try:
         model_client = model_client_factory(
@@ -94,36 +128,45 @@ async def run_bench_suite(run_id: str, db: AsyncSession, model_client_factory) -
         async with sem:
             result_id = str(uuid.uuid4())
             try:
-                scores = await _run_single_test(agent_tpl, scenario, rep, model_client, db)
-                return (result_id, scores, None)
+                scores, events = await _run_single_test(agent_tpl, scenario, rep, model_client, db)
+                return (result_id, scores, None, events)
             except Exception as e:
-                return (result_id, {}, str(e)[:500])
+                return (result_id, calculate_metrics([], {}), str(e)[:500], [])
 
     # 构建任务列表 + 元数据
     task_specs = [
-        (a, s, r) for a in STD_AGENTS for s in STD_SCENARIOS for r in range(REPEAT_COUNT)
+        (a, s, r) for a in agents for s in scenarios_list for r in range(rep_count)
     ]
 
     async def _run_with_meta(agent_tpl, scenario, rep):
-        result_id, scores, error = await _run_one(agent_tpl, scenario, rep)
-        return (agent_tpl, scenario, rep, result_id, scores, error)
+        result_id, scores, error, events = await _run_one(agent_tpl, scenario, rep)
+        return (agent_tpl, scenario, rep, result_id, scores, error, events)
 
     pending = [_run_with_meta(a, s, r) for a, s, r in task_specs]
 
     for coro in asyncio.as_completed(pending):
-        agent_tpl, scenario, rep, result_id, scores, error = await coro
+        agent_tpl, scenario, rep, result_id, scores, error, events_raw = await coro
         br = BenchResult(
             id=result_id, run_id=run_id,
-            agent_template=agent_tpl["name"], scenario=scenario.name, repeat_index=rep,
+            agent_template=agent_tpl.get("name", agent_tpl.get("id", "?")),
+            scenario=scenario.name if hasattr(scenario, "name") else scenario.get("name", "?"),
+            repeat_index=rep,
             scores_json=json.dumps(scores, ensure_ascii=False),
+            events_json=json.dumps(events_raw, ensure_ascii=False),
             status="done" if not error else "failed",
             error=error,
         )
+        # 失败任务的零分也进入聚合，避免只统计成功样本导致结果虚高。
+        all_scores.append(scores)
         if not error:
-            all_scores.append(scores)
+            successful_tasks += 1
         db.add(br)
         bench_run.completed_tasks += 1
-        await db.commit()  # 每完成一个立即提交——前端实时轮询
+        await db.commit()
+        # 69: 取消检查
+        if await _check_cancel():
+            logger.info(f"Bench run {run_id} cancelled at {bench_run.completed_tasks}/{bench_run.total_tasks}")
+            break
 
     # 聚合 + 报告
     agg = aggregate_scores(all_scores)
@@ -136,7 +179,7 @@ async def run_bench_suite(run_id: str, db: AsyncSession, model_client_factory) -
     except Exception as e:
         bench_run.report = f"报告生成失败: {e}"
 
-    bench_run.status = "done"
+    bench_run.status = "done" if successful_tasks > 0 else "failed"
     bench_run.llm_api_key = ""  # 安全：跑完即清除 API Key
     await db.commit()
     logger.info(f"Bench run {run_id}: completed {bench_run.completed_tasks}/{bench_run.total_tasks}")
@@ -144,9 +187,9 @@ async def run_bench_suite(run_id: str, db: AsyncSession, model_client_factory) -
 
 
 async def _run_single_test(agent_tpl: dict, scenario, rep: int,
-                           model_client, db: AsyncSession) -> dict:
-    """运行一条评测：创建 Agent → 创建 World → run 8 ticks → 计算指标。"""
-    from engines.agent_factory.factory import AgentFactory, LifeAgent
+                           model_client, _db: AsyncSession):
+    """运行一条评测：创建 Agent → 注入场景 → run 8 ticks → 计算指标。"""
+    from engines.agent_factory.factory import AgentFactory
 
     # 用模板创建 Agent
     persona = Persona(
@@ -160,23 +203,12 @@ async def _run_single_test(agent_tpl: dict, scenario, rep: int,
         persona=persona, background=background, goals=[],
     )
 
-    # 创建 World
-    world_id = str(uuid.uuid4())
-    world = WorldResponse(
-        id=world_id, name=f"Bench: {agent_tpl['name']} × {scenario.name}",
-        world_type="solo", scenario=scenario, agent_ids=[agent.id],
-        current_tick=0, status="idle",
-        created_at=datetime.now(timezone.utc).isoformat(),
-    )
-
-    import sys
-    print(f"[BENCH] START {agent_tpl['name']} x {scenario.name} #{rep}", flush=True)
+    logger.info(f"Bench task started: {agent_tpl['name']} × {scenario.name} #{rep}")
     events: list[dict] = []
+    tick_errors: list[str] = []
+    successful_ticks = 0
     for tick in range(8):
-        context = (
-            f"⏰ 第 {tick} 个时间段\n📍 地点: {scenario.name}\n"
-            + (f"🌤️ 天气: 晴\n" if scenario.name != "期末周" else "📊 资源状态: 图书馆剩余座位 {max(0, 80 - tick * 10)} 个\n")
-        )
+        context = _build_tick_context(scenario, tick)
         agent.inject_context(context)
         start = __import__("time").time()
         try:
@@ -189,16 +221,19 @@ async def _run_single_test(agent_tpl: dict, scenario, rep: int,
                 ),
                 timeout=30.0,
             )
+            successful_ticks += 1
             # 从 AutoGen Response 提取所有消息（兼容 v0.4/v0.7）
             for msg in getattr(result, "inner_messages", []) or []:
                 content = str(getattr(msg, "content", ""))
                 if content:
-                    events.append({"type": "thought_stream", "content": content, "tick": tick})
+                    tag = "agent_action" if any(kw in content for kw in ["调用","执行","Action","Tool","function","complete_step","submit"]) else "thought_stream"
+                    events.append({"type": tag, "content": content, "tick": tick})
             # v0.7: messages 属性
             for msg in getattr(result, "messages", []) or []:
                 content = str(getattr(msg, "content", ""))
                 if content:
-                    events.append({"type": "agent_message", "content": content, "tick": tick})
+                    tag = "agent_action" if any(kw in content for kw in ["调用","执行","Action","Tool","function","complete_step","submit"]) else "agent_message"
+                    events.append({"type": tag, "content": content, "tick": tick})
             # 兜底: chat_message
             chat = getattr(result, "chat_message", None)
             if chat and getattr(chat, "content", ""):
@@ -206,17 +241,32 @@ async def _run_single_test(agent_tpl: dict, scenario, rep: int,
             # 兜底: result 本身就有 content
             content = getattr(result, "content", None)
             if content and isinstance(content, str):
-                events.append({"type": "agent_message", "content": content, "tick": tick})
+                tag = "agent_action" if any(kw in content for kw in ["调用","执行","Action","Tool","function","complete_step","submit"]) else "agent_message"
+                events.append({"type": tag, "content": content, "tick": tick})
         except asyncio.TimeoutError:
-            events.append({"type": "error", "content": "timeout", "tick": tick})
+            tick_errors.append(f"tick {tick}: timeout")
         except Exception as exc:
-            events.append({"type": "error", "content": str(exc)[:100], "tick": tick})
+            tick_errors.append(f"tick {tick}: {str(exc)[:100]}")
         elapsed = __import__("time").time() - start
         if tick == 0:
             logger.info(f"  tick {tick}: {len(events)} events in {elapsed:.1f}s")
 
-    scores = calculate_metrics(events, {"mbti": agent_tpl["mbti"], "big_five": agent_tpl["big_five"]})
-    # 强制输出——后台任务日志可能被缓冲
-    import sys
-    print(f"[BENCH] {agent_tpl['name']} x {scenario.name} #{rep}: {len(events)} events, scores={scores}", flush=True)
-    return scores
+    if successful_ticks == 0:
+        detail = tick_errors[-1] if tick_errors else "no valid response"
+        raise RuntimeError(f"all 8 ticks failed ({detail})")
+    if tick_errors:
+        logger.warning(
+            f"Bench task partially failed: {agent_tpl['name']} × "
+            f"{scenario.name} #{rep}, {len(tick_errors)}/8 ticks"
+        )
+
+    scores = calculate_metrics(
+        events,
+        {"mbti": agent_tpl["mbti"], "big_five": agent_tpl["big_five"]},
+    )
+    logger.info(
+        f"Bench task finished: {agent_tpl['name']} × {scenario.name} #{rep}, "
+        f"{successful_ticks}/8 ticks, {len(events)} events, scores={scores}"
+    )
+    logger.info(f"  events collected: {len(events)} total (thoughts={sum(1 for e in events if e.get('type')=='thought_stream')}, msgs={sum(1 for e in events if e.get('type')=='agent_message')})")
+    return scores, events

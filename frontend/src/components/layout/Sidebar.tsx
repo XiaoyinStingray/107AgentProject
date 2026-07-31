@@ -14,6 +14,7 @@ import {
   PanelLeftClose,
   PanelLeft,
   LayoutDashboard,
+  Terminal,
 } from "lucide-react";
 import Badge from "../shared/Badge";
 import { MENU_SECTIONS } from "../../data/menuData";
@@ -34,6 +35,7 @@ const SECTION_ICONS: Record<string, React.ReactNode> = {
   "M9 Agent Team": <Users size={16} />,
   "M10 LLM Bench": <BarChart3 size={16} />,
   "M11 游戏化场景": <LayoutDashboard size={16} />,
+  "M12 Worker": <Terminal size={16} />,
 };
 
 export default function Sidebar() {
@@ -135,7 +137,17 @@ export default function Sidebar() {
                   {section.items.map((item) => (
                     <button
                       key={item.id}
-                      onClick={() => navigate(`${section.route}#item-${item.id}`)}
+                      onClick={() => {
+                        const it = item as any;
+                        if (it.redirect) {
+                          navigate(it.redirect);
+                        } else if (it.anchor) {
+                          navigate(`${section.route}#${it.anchor}`, { replace: true });
+                        } else {
+                          // 无锚点单页面：强制跳转
+                          window.location.href = section.route;
+                        }
+                      }}
                       className="
                         w-full flex items-center gap-2 pl-10 pr-3 py-1.5 text-sm
                         text-text-secondary hover:text-text-primary hover:bg-bg-card/30

@@ -7,7 +7,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
-from sqlalchemy import select, delete
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import get_db
@@ -85,15 +85,16 @@ async def download_team(item_id: str, db: AsyncSession = Depends(get_db)):
     if not item:
         raise HTTPException(status_code=404, detail="市场条目不存在")
 
-    item.downloads += 1
-    await db.commit()
-
-    # 返回原始 Team 配置（agent_ids + roles）
+    # 只有实际能返回模板配置时才计为一次成功下载。
     team_result = await db.execute(select(TeamRow).where(TeamRow.id == item.team_id))
     team = team_result.scalar_one_or_none()
     if not team:
         raise HTTPException(status_code=404, detail="原始 Team 已被删除")
 
+    item.downloads += 1
+    await db.commit()
+
+    # 返回原始 Team 配置（agent_ids + roles）
     return {
         "name": team.name,
         "description": team.description,
@@ -118,3 +119,15 @@ async def rate_item(item_id: str, body: dict, db: AsyncSession = Depends(get_db)
     item.rating_count += 1
     await db.commit()
     return {"rating": item.rating, "rating_count": item.rating_count}
+
+
+@router.delete("/{item_id}")
+async def delete_market_item(item_id: str, db: AsyncSession = Depends(get_db)):
+    """删除模板（67: 补充缺失的删除端点）"""
+    result = await db.execute(select(MarketItem).where(MarketItem.id == item_id))
+    item = result.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="市场条目不存在")
+    await db.delete(item)
+    await db.commit()
+    return {"ok": True}

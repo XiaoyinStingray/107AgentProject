@@ -128,13 +128,6 @@ describe("Step 45 Archive — Tab 栏与切换", () => {
     expect(screen.getByText("实验模板")).toBeInTheDocument();
     expect(screen.getByText("成就系统")).toBeInTheDocument();
     expect(screen.getByText("研究报告导出")).toBeInTheDocument();
-    // 3 个 P3 disabled Tab
-    const marketBtn = screen.getByText("Agent 市场").closest("button")!;
-    const dashBtn = screen.getByText("社区数据大屏").closest("button")!;
-    const apiBtn = screen.getByText("API 开放").closest("button")!;
-    expect(marketBtn).toBeDisabled();
-    expect(dashBtn).toBeDisabled();
-    expect(apiBtn).toBeDisabled();
   });
 
   it("defaults to highlights tab", () => {
@@ -162,13 +155,6 @@ describe("Step 45 Archive — Tab 栏与切换", () => {
     expect(screen.getByText("选择 Agent")).toBeInTheDocument();
   });
 
-  it("P3 tabs cannot be clicked", () => {
-    renderArchive();
-    const marketBtn = screen.getByText("Agent 市场").closest("button")!;
-    expect(marketBtn).toBeDisabled();
-    // 仍在 highlights tab
-    expect(screen.getByText("新生报到")).toBeInTheDocument();
-  });
 });
 
 describe("Step 45 Archive — 精彩回放面板", () => {
@@ -344,8 +330,8 @@ describe("Step 45 Archive — 工具函数", () => {
     vi.unstubAllGlobals();
   });
 
-  it("ARCHIVE_TABS has 7 items with 4 available", () => {
-    expect(ARCHIVE_TABS.length).toBe(7);
+  it("ARCHIVE_TABS has 4 available items", () => {
+    expect(ARCHIVE_TABS.length).toBe(4);
     expect(ARCHIVE_TABS.filter((t) => t.available).length).toBe(4);
   });
 

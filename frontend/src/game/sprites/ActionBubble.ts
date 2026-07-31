@@ -96,4 +96,22 @@ export class ActionBubble extends Phaser.GameObjects.Container {
     this.setAlpha(0);
     this.destroy();
   }
+
+  /** 66-A: 更新气泡文字（分页时用），重建背景尺寸 */
+  setText(message: string): void {
+    this.text.setText(message);
+
+    const padX = 14;
+    const padY = 10;
+    const w = this.text.width + padX * 2;
+    const h = this.text.height + padY * 2;
+
+    this.bg.clear();
+    this.bg.fillStyle(0xfafaf5, 0.92);
+    this.bg.fillRoundedRect(-w / 2, -h / 2, w, h, 10);
+    this.bg.lineStyle(2, 0xccccbb, 0.6);
+    this.bg.strokeRoundedRect(-w / 2, -h / 2, w, h, 10);
+    this.bg.fillStyle(0xfafaf5, 0.92);
+    this.bg.fillTriangle(-6, h / 2, 6, h / 2, 0, h / 2 + 8);
+  }
 }

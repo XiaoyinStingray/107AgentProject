@@ -264,3 +264,106 @@ async def test_to_response_contains_all_fields(factory):
     assert len(resp.goals) == 1
     assert resp.created_at  # 时间戳已初始化
     assert resp.updated_at
+
+
+# =============================================================================
+# State 4 Phase A2: inject_context continuous mode 测试
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_inject_context_continuous_appends_not_overwrites(factory):
+    """mode='continuous' 追加 UserMessage，不覆盖 system prompt。"""
+    agent = await factory.create_from_description("测试角色")
+
+    # 记录初始 system message
+    original_sys = agent._get_autogen_system_messages()[0].content
+    original_msg_count = len(agent._get_autogen_model_messages())
+
+    agent.inject_context("⏰ Tick 1\n📍 图书馆", mode="continuous")
+    agent.inject_context("⏰ Tick 2\n📍 宿舍", mode="continuous")
+
+    # system prompt 应保持不变
+    current_sys = agent._get_autogen_system_messages()[0].content
+    assert current_sys == original_sys
+
+    # 消息数应该增加了 2
+    new_msg_count = len(agent._get_autogen_model_messages())
+    assert new_msg_count >= original_msg_count + 2
+
+
+@pytest.mark.asyncio
+async def test_inject_context_continuous_does_not_clear_history(factory):
+    """mode='continuous' 不清空消息历史。"""
+    agent = await factory.create_from_description("测试角色")
+
+    # 先加一些标记消息
+    agent._add_autogen_model_message(
+        type("FakeMsg", (), {"content": "历史消息1", "source": "test"})()
+    )
+    before = len(agent._get_autogen_model_messages())
+
+    agent.inject_context("⏰ Tick 1\n📍 图书馆", mode="continuous")
+    after = len(agent._get_autogen_model_messages())
+    assert after > before  # 消息追加而非替换
+
+
+@pytest.mark.asyncio
+async def test_inject_context_continuous_includes_notes(factory):
+    """mode='continuous' 上下文包含 Agent 的私有笔记。"""
+    agent = await factory.create_from_description("测试角色")
+    agent._notes = [{"tick": 1, "content": "重要观察：小红很可疑"}]
+
+    agent.inject_context("⏰ Tick 2\n📍 图书馆", mode="continuous")
+
+    # 最后一条消息应包含笔记内容
+    msgs = agent._get_autogen_model_messages()
+    last_msg = msgs[-1]
+    content = getattr(last_msg, "content", str(last_msg))
+    assert "重要观察" in content
+
+
+@pytest.mark.asyncio
+async def test_inject_context_replace_preserves_old_behavior(factory):
+    """mode='replace'（默认）保持原有覆盖行为。"""
+    agent = await factory.create_from_description("测试角色")
+    original_sys = agent._get_autogen_system_messages()[0].content
+
+    agent.inject_context("⏰ Tick 5\n📍 大学宿舍\n🌤️ 阴天")
+
+    # system prompt 应该被更新（包含世界状态）
+    new_sys = agent._get_autogen_system_messages()[0].content
+    assert "当前处境" in new_sys
+    assert "大学宿舍" in new_sys
+    assert new_sys != original_sys
+
+
+@pytest.mark.asyncio
+async def test_context_compression_triggers_at_threshold(factory):
+    """消息数超过 COMPRESS_THRESHOLD 时触发压缩。"""
+    agent = await factory.create_from_description("测试角色")
+    agent._COMPRESS_THRESHOLD = 5  # 降低阈值方便测试
+
+    # 注入 10 条上下文化消息（超过阈值 2x）
+    for i in range(10):
+        agent._add_autogen_model_message(
+            type("FakeMsg", (), {"content": f"消息{i}", "source": f"agent_{i}"})()
+        )
+        agent._context_count += 1
+
+    pre_count = agent._context_count
+    agent._compress_history()
+    post_count = agent._context_count
+
+    # 压缩后消息数应减少
+    assert post_count < pre_count
+
+
+@pytest.mark.asyncio
+async def test_inject_context_notes_field_in_to_response(factory):
+    """to_response 包含 notes 字段。"""
+    agent = await factory.create_from_description("测试角色")
+    agent._notes = [{"tick": 1, "content": "测试笔记"}]
+
+    resp = agent.to_response()
+    assert resp.notes == [{"tick": 1, "content": "测试笔记"}]

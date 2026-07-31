@@ -115,6 +115,57 @@ class TestSSEFormatting:
 
 
 # =============================================================================
+# SSE 连接隔离
+# =============================================================================
+
+
+class TestSSEConnectionIsolation:
+    @pytest.mark.asyncio
+    async def test_superseding_one_world_does_not_stop_another_world(self):
+        """同 World 新连接只淘汰旧连接，不影响其他 World。"""
+        from api.sse import (
+            _active_connection_ids,
+            _world_event_generator,
+        )
+
+        def paused_engine():
+            return SimpleNamespace(
+                agents={},
+                current_tick=0,
+                world=SimpleNamespace(status="paused"),
+            )
+
+        _active_connection_ids.clear()
+        _active_connection_ids.update({
+            "world-a": "new-a",
+            "world-b": "conn-b",
+        })
+        old_a = _world_event_generator("world-a", paused_engine(), "old-a")
+        active_b = _world_event_generator("world-b", paused_engine(), "conn-b")
+
+        connected_a = json.loads(
+            (await anext(old_a)).removeprefix("data: ").strip()
+        )
+        connected_b = json.loads(
+            (await anext(active_b)).removeprefix("data: ").strip()
+        )
+
+        assert connected_a["world_id"] == "world-a"
+        assert connected_b["world_id"] == "world-b"
+        with pytest.raises(StopAsyncIteration):
+            await anext(old_a)
+
+        paused_b = json.loads(
+            (await anext(active_b)).removeprefix("data: ").strip()
+        )
+        assert paused_b["type"] == "paused"
+        assert paused_b["world_id"] == "world-b"
+
+        await active_b.aclose()
+        _active_connection_ids.clear()
+
+
+# =============================================================================
 # SSE 端点
 # =============================================================================
 

@@ -322,3 +322,88 @@ def test_background_fields_in_identity_section():
     assert "安徽" in identity_section
     assert "中科大" in identity_section
     assert "高考全县第一" in identity_section
+
+
+# =============================================================================
+# State 4 Phase A1: build_core_system_message / build_context_message 拆分测试
+# =============================================================================
+
+
+def test_build_core_system_message_no_world_context():
+    """build_core_system_message 不含世界状态和记忆。"""
+    from engines.persona.prompt_templates import build_core_system_message
+
+    msg = build_core_system_message(
+        make_full_persona(),
+        make_full_background(),
+        make_goals(),
+    )
+    assert "当前处境" not in msg
+    assert "近期记忆" not in msg
+    assert "小明" in msg  # 人格仍在
+    assert "行为模式" in msg  # 决策风格仍在
+
+
+def test_build_core_system_message_has_persona_only():
+    """build_core_system_message 包含人格 + 价值观 + 决策风格 + 目标。"""
+    from engines.persona.prompt_templates import build_core_system_message
+
+    msg = build_core_system_message(
+        make_full_persona(),
+        make_full_background(),
+        make_goals(),
+    )
+    assert "你是谁" in msg
+    assert "核心价值观" in msg
+    assert "行为模式" in msg
+    assert "当前目标" in msg
+
+
+def test_build_context_message_has_world_state():
+    """build_context_message 包含世界状态和记忆，不含人格。"""
+    from engines.persona.prompt_templates import build_context_message
+
+    memories = [
+        MemoryResponse(
+            id="m1", agent_id="a1", type="episodic",
+            content="在图书馆遇到了新朋友", importance=0.9,
+            keywords="社交", memory_type="episodic",
+            created_at="2026-07-17",
+        ),
+    ]
+    msg = build_context_message("⏰ 第 5 个时间段\n📍 大学宿舍", memories)
+    assert "当前处境" in msg
+    assert "大学宿舍" in msg
+    assert "近期记忆" in msg
+    assert "图书馆" in msg
+    assert "你是谁" not in msg  # 不含人格
+
+
+def test_build_context_message_with_notes():
+    """build_context_message 包含笔记段。"""
+    from engines.persona.prompt_templates import build_context_message
+
+    notes = [
+        {"tick": 1, "content": "小红今天没来"},
+        {"tick": 2, "content": "保持观察"},
+    ]
+    msg = build_context_message("⏰ 第 3 个时间段\n📍 图书馆", notes=notes)
+    assert "你的笔记" in msg
+    assert "小红今天没来" in msg
+    assert "保持观察" in msg
+
+
+def test_build_system_message_backward_compatible():
+    """build_system_message 向后兼容——输出与改造前一致。"""
+    from engines.persona.prompt_templates import build_system_message
+
+    msg = build_system_message(
+        make_full_persona(),
+        make_full_background(),
+        make_goals(),
+        world_context="⏰ 第 3 个时间段\n📍 图书馆",
+    )
+    # 同时包含人格 + 世界状态
+    assert "你是谁" in msg
+    assert "当前处境" in msg
+    assert "图书馆" in msg

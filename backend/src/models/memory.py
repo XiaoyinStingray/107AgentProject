@@ -33,6 +33,7 @@ class MemoryResponse(Timestamped):
     content: str
     importance: float
     keywords: str = Field(default="")
+    memory_type: str = Field(default="episodic")  # Step 82: episodic|semantic|lesson|reflection|skill
 
 
 # =============================================================================
@@ -55,6 +56,7 @@ class Memory(Base):
     content: Mapped[str] = mapped_column(String)
     importance: Mapped[float] = mapped_column(default=0.5)
     keywords: Mapped[str] = mapped_column(String, default="")
+    memory_type: Mapped[str] = mapped_column(String, default="episodic")  # Step 82: episodic|semantic|lesson|reflection|skill
     created_at: Mapped[str] = mapped_column(
         String, default=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -68,5 +70,6 @@ class Memory(Base):
             content=self.content,
             importance=self.importance,
             keywords=self.keywords,
+            memory_type=self.memory_type,
             created_at=self.created_at,
         )

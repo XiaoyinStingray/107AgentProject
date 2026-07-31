@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
 import EmptyState from "../components/shared/EmptyState";
@@ -30,7 +30,15 @@ import { client } from "../api/client";
    ================================================================ */
 
 export default function Archive() {
+  const location = useLocation();
   const [activeTab, setActiveTab] = useState<ArchiveTab>("highlights");
+
+  // 72: hash → tab
+  useEffect(() => {
+    const h = location.hash?.replace("#", "");
+    const MAP: Record<string, ArchiveTab> = { templates: "templates", achievements: "achievements", export: "export" };
+    if (MAP[h]) setActiveTab(MAP[h]);
+  }, [location.hash]);
 
   return (
     <div className="h-full overflow-y-auto p-6 animate-fade-in">
@@ -74,15 +82,6 @@ export default function Archive() {
       {activeTab === "templates" && <TemplatesPanel />}
       {activeTab === "achievements" && <AchievementsPanel />}
       {activeTab === "export" && <ExportPanel />}
-      {activeTab === "market" && (
-        <EmptyState title="📦 Agent 市场" description="分享/下载社区创建的 Agent" tier="P3" />
-      )}
-      {activeTab === "dashboard" && (
-        <EmptyState title="📊 社区数据大屏" description="全局统计数据与趋势分析" tier="P3" />
-      )}
-      {activeTab === "api" && (
-        <EmptyState title="🔌 API 开放" description="通过 API 控制 Agent 与模拟" tier="P3" />
-      )}
     </div>
   );
 }

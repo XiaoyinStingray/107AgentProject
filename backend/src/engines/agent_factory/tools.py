@@ -1,20 +1,27 @@
 """
 Tool 注册体系 — Agent 可执行的"行动"函数，注册为 AutoGen Tool。
 
-所有 Tool 目前是 stub——返回占位字符串。实际效果由 World Engine（Step 09）拦截
-tool call 后应用（发送消息、更新关系、生成事件等）。
+State 4 改造：
+  - 保留模块级 stub tools → Arena/Bench 继续使用（向后兼容）
+  - 新增 make_agent_tools(engine, agent_id) → 闭包 tools，捕获 WorldEngine 引用
+  - 新增 make_team_tools(engine, agent_id) → Team 模式闭包 tools
+  - WorldEngine.__init__ 中调用 make_agent_tools 为每个 agent 注入真实 tools
 
 用法:
     from engines.agent_factory.tools import DEFAULT_AGENT_TOOLS
+    agent = LifeAgent(..., tools=DEFAULT_AGENT_TOOLS)  # Arena/Bench 用
 
-    agent = LifeAgent(..., tools=DEFAULT_AGENT_TOOLS)
+    from engines.agent_factory.tools import make_agent_tools
+    tools = make_agent_tools(engine, agent_id)  # WorldEngine 用
 """
+
+import uuid
 
 from loguru import logger
 
 
 # =============================================================================
-# 通用 Tool（所有 Agent 默认可用）
+# 模块级 Stub Tools — Arena / Bench 使用（向后兼容）
 # =============================================================================
 
 
@@ -64,19 +71,6 @@ async def observe(target: str) -> str:
 async def submit_deliverable(step_title: str, deliverable: str) -> str:
     """【团队任务】提交当前阶段的交付物。
 
-    这不是"汇报进度"，而是提交实质性产出。deliverable 必须是可直接使用的结构化内容。
-
-    调研类输出示例：
-    | 选题名称 | 技术栈 | 难度 | 创新点 | 可行性 |
-    |---------|--------|------|--------|--------|
-    | 智能课表 | React+Node | 中 | AI推荐 | 高 |
-
-    设计类输出示例：
-    ## 方案：校园社交App
-    **核心功能**：课表共享、二手交易、组队学习
-    **技术选型**：Flutter + Go + PostgreSQL
-    **风险点**：用户冷启动、实时消息成本
-
     Args:
         step_title: 步骤标题（必须与你分配到的任务标题一致）
         deliverable: 交付物——结构化内容，将直接汇入最终报告。留空表示不需要帮助
@@ -85,24 +79,8 @@ async def submit_deliverable(step_title: str, deliverable: str) -> str:
     return f"✅ 交付物已提交：{step_title}。内容已汇入报告。"
 
 
-async def complete_step(step_title: str, result: str) -> str:
-    """【已弃用】请使用 submit_deliverable 代替。"""
-    return await submit_deliverable(step_title, result)
-
-
-# =============================================================================
-# Tool 集合
-# =============================================================================
-
-# 所有 Agent 默认可用的 tool 集合
-DEFAULT_AGENT_TOOLS: list = [send_message, think_aloud, set_goal, observe]
-
 async def finish_task(summary: str = "") -> str:
     """【团队任务】所有阶段完成后，调用此工具结束任务并生成最终报告。
-
-    仅在以下情况下调用：
-    - 你已完成所有分配给你的任务（submit_deliverable 已提交）
-    - 你认为团队的所有阶段目标都已达成
 
     Args:
         summary: 任务完成的总体总结（可选）
@@ -111,21 +89,268 @@ async def finish_task(summary: str = "") -> str:
     return "任务已标记完成。系统将生成最终报告。"
 
 
-# Team 任务专用 tools——不需要 observe/set_goal
+async def complete_step(step_title: str, result: str) -> str:
+    """【已弃用】请使用 submit_deliverable 代替。"""
+    return await submit_deliverable(step_title, result)
+
+
+# =============================================================================
+# 模块级 Tool 集合 — Arena / Bench 使用
+# =============================================================================
+
+DEFAULT_AGENT_TOOLS: list = [send_message, think_aloud, set_goal, observe]
+
 TEAM_AGENT_TOOLS: list = [send_message, think_aloud, submit_deliverable, finish_task]
 
-# 保留旧名兼容
-complete_step = submit_deliverable
-
-# 场景特定 tool 集合——不同 Scenario 注册不同 tools
-# （预留，后续 Step 按场景扩展）
 STUDY_SCENE_TOOLS: list = [
-    send_message,
-    think_aloud,
-    set_goal,
-    observe,
-    # study, skip_class, join_club, cheat 等场景相关 tool — 后续 Step 补充
+    send_message, think_aloud, set_goal, observe,
 ]
 
-# 空工具集——测试用
 EMPTY_TOOLS: list = []
+
+
+# =============================================================================
+# State 4: 闭包 Tool 工厂 — WorldEngine 使用（产生真实副作用）
+# =============================================================================
+
+
+def make_agent_tools(engine, agent_id: str) -> list:
+    """为指定 Agent 创建闭包 tool 集合——捕获 WorldEngine 引用。
+
+    每个 tool 通过闭包访问 WorldEngine 实例，产生真实的副作用：
+    - send_message → engine._pending_messages
+    - set_goal → agent.goals
+    - observe → 读取目标 agent 公开状态
+    - think_aloud → engine._thought_log
+    - write_note → agent._notes
+    - read_notes → 从 agent._notes 读取
+
+    Args:
+        engine: WorldEngine 实例（提供 _find_agent_by_name 等方法）
+        agent_id: 当前 Agent 的 UUID
+
+    Returns:
+        闭包 tool 函数列表
+    """
+    agent = engine.agents.get(agent_id)
+
+    def _engine_alive() -> bool:
+        """检查 engine 是否已被销毁。"""
+        return getattr(engine, "world", None) is not None
+
+    # ── send_message ──
+    async def _send_message(target_name: str, content: str, tone: str = "neutral") -> str:
+        if not _engine_alive():
+            return "⚠️ 世界已结束。"
+        if not target_name or not isinstance(target_name, str):
+            return "❌ 请提供有效的目标名字。"
+        if not content or not isinstance(content, str):
+            return "❌ 消息内容不能为空。"
+        target = engine._find_agent_by_name(target_name)
+        if target is None:
+            return f"❌ 找不到名为 {target_name} 的人。请检查名字是否正确。"
+        pending = getattr(engine, "_pending_messages", None)
+        if pending is not None:
+            pending.append({
+                "from": agent_id,
+                "to": target.id,
+                "from_name": agent.persona.name if agent else agent_id,
+                "to_name": target_name,
+                "content": content,
+                "tone": tone,
+                "tick": engine.current_tick,
+            })
+        return f"✅ 消息已发送给 {target_name}。对方将在本回合内看到。"
+
+    # ── think_aloud ──
+    async def _think_aloud(thought: str) -> str:
+        if not _engine_alive():
+            return "⚠️ 世界已结束。"
+        if not thought or not isinstance(thought, str):
+            return "🤔 （空想）"
+        thought_log = getattr(engine, "_thought_log", None)
+        if thought_log is not None:
+            thought_log.setdefault(agent_id, []).append({
+                "tick": engine.current_tick,
+                "thought": thought,
+            })
+        return f"🤔 思考已记录。"
+
+    # ── set_goal ──
+    async def _set_goal(description: str, priority: int = 1) -> str:
+        if not _engine_alive():
+            return "⚠️ 世界已结束。"
+        if agent is None:
+            return "❌ Agent 未找到。"
+        if not description or not isinstance(description, str):
+            return "❌ 请提供有效的目标描述。"
+        # 去重：检查是否已有同名目标
+        for g in agent.goals:
+            if g.description == description:
+                g.status = "active"
+                g.progress = 0.0
+                logger.debug(f"[tool] set_goal: agent={agent_id[:8]} re-set goal='{description}'")
+                return f"✅ 目标已更新（优先级 {priority}）：{description}"
+        from models.agent import Goal
+        new_goal = Goal(
+            id=str(uuid.uuid4()),
+            description=description,
+            priority=priority,
+            status="active",
+        )
+        agent.goals.append(new_goal)
+        engine._goal_check_pending = True
+        return f"✅ 新目标已设定（优先级 {priority}）：{description}"
+
+    # ── observe ──
+    async def _observe(target: str) -> str:
+        target_agent = engine._find_agent_by_name(target)
+        if target_agent:
+            state_lines = [
+                f"📍 位置: {getattr(target_agent, 'position', '未知')}",
+                f"😊 情绪: {target_agent.emotional_state.label}",
+                f"⚡ 能量: {target_agent.energy:.0f}",
+            ]
+            state = "\n".join(state_lines)
+            return f"🔍 {target} 的当前状态：\n{state}"
+        return f"🔍 你观察了周围，{target} 一切如常。"
+
+    # ── write_note (Step 78) ──
+    async def _write_note(content: str) -> str:
+        if not _engine_alive():
+            return "⚠️ 世界已结束。"
+        if agent is None:
+            return "❌ 无法记录笔记。"
+        if not content or not isinstance(content, str):
+            return "❌ 笔记内容不能为空。"
+        agent._notes.append({"tick": engine.current_tick, "content": content})
+        if len(agent._notes) > 100:
+            agent._notes = agent._notes[-100:]
+        return f"📝 笔记已记录（共 {len(agent._notes)} 条）"
+
+    # ── move_to (Step 81) ──
+    async def _move_to(tile_x: int, tile_y: int) -> str:
+        """移动到场景中的指定坐标。仅在场景模式（M11）下可用。"""
+        bridge = getattr(engine, "scene_bridge", None)
+        if bridge is None:
+            return "⚠️ 移动功能仅在场景模式下可用。"
+        ok = bridge.move_agent(agent_id, tile_x, tile_y)
+        if ok:
+            return f"🚶 已移动到 ({tile_x}, {tile_y})。"
+        return "❌ 移动失败。"
+
+    # ── interact_with (Step 81) ──
+    async def _interact_with(target_name: str, action: str = "talk") -> str:
+        """与场景中的物品或人互动。仅在场景模式下可用。"""
+        bridge = getattr(engine, "scene_bridge", None)
+        if bridge is None:
+            return "⚠️ 互动功能仅在场景模式下可用。"
+        target = engine._find_agent_by_name(target_name)
+        if target:
+            return f"🔧 你与 {target_name} 互动（{action}）。"
+        return f"🔧 你尝试与 {target_name} {action}，但没找到。"
+
+    # ── read_notes (Step 78) ──
+    async def _read_notes(limit: int = 5) -> str:
+        if agent is None:
+            return "📝 无法读取笔记。"
+        recent = agent._notes[-limit:]
+        if not recent:
+            return "📝 暂无笔记。"
+        lines = [f"- [Tick {n['tick']}] {n['content']}" for n in reversed(recent)]
+        return "📝 你的最近笔记：\n" + "\n".join(lines)
+
+    # ── web_search (Step 83) ──
+    async def _web_search(query: str) -> str:
+        """搜索互联网获取真实世界信息。"""
+        from llm.search import web_search, format_search_results
+        results = await web_search(query, max_results=3)
+        return format_search_results(results)
+
+    return [_send_message, _think_aloud, _set_goal, _observe,
+            _write_note, _read_notes, _move_to, _interact_with, _web_search]
+
+
+def make_team_tools(engine, agent_id: str) -> list:
+    """为 Team 模式 Agent 创建闭包 tool 集合——捕获 WorldEngine + PlanManager 引用。
+
+    Team 专用 tools:
+    - send_message, think_aloud（同上）
+    - submit_deliverable → 写入 PlanManager 结果
+    - finish_task → 标记任务完成
+
+    Args:
+        engine: WorldEngine 实例（需有 team_plan 属性）
+        agent_id: 当前 Agent 的 UUID
+    """
+    agent = engine.agents.get(agent_id)
+    plan = getattr(engine, "team_plan", None)
+
+    # ── send_message (复用) ──
+    async def _send_message(target_name: str, content: str, tone: str = "neutral") -> str:
+        target = engine._find_agent_by_name(target_name)
+        if target is None:
+            return f"❌ 找不到名为 {target_name} 的人。"
+        pending = getattr(engine, "_pending_messages", None)
+        if pending is not None:
+            pending.append({
+                "from": agent_id, "to": target.id,
+                "from_name": agent.persona.name if agent else agent_id,
+                "to_name": target_name,
+                "content": content, "tone": tone,
+                "tick": engine.current_tick,
+            })
+        return f"✅ 消息已发送给 {target_name}。"
+
+    # ── think_aloud ──
+    async def _think_aloud(thought: str) -> str:
+        thought_log = getattr(engine, "_thought_log", None)
+        if thought_log is not None:
+            thought_log.setdefault(agent_id, []).append({
+                "tick": engine.current_tick, "thought": thought,
+            })
+        return f"🤔 思考已记录。"
+
+    # ── submit_deliverable ──
+    async def _submit_deliverable(step_title: str, deliverable: str) -> str:
+        if plan is None:
+            return "❌ 当前没有活跃的计划。"
+        # 调用 PlanManager._complete() — 它处理 _results 写入 + _activate_next
+        for step in plan.steps:
+            if step.get("title") == step_title and step.get("status") == "active":
+                plan._complete(step_title, deliverable)
+                logger.info(f"[team-tool] submit_deliverable: {step_title} done by {agent_id[:8]}")
+                # 发射 plan_updated 事件
+                if plan._on_event:
+                    plan._on_event("plan_updated", plan.to_dict())
+                return f"✅ 交付物已提交：{step_title}。内容已汇入报告。"
+        return f"❌ 找不到活跃步骤：{step_title}。请检查步骤标题是否正确。"
+
+    # ── finish_task ──
+    async def _finish_task(summary: str = "") -> str:
+        if plan is not None:
+            # 只标记当前活跃步骤完成——不跳过未开始步骤
+            # 与 PlanManager.check_progress 中的 finish_task 处理保持一致
+            step = plan.current_step()
+            if step and step.get("status") == "active":
+                plan._complete(step.get("title", ""), summary or "（Agent 主动标记完成）")
+                if plan._on_event:
+                    plan._on_event("plan_updated", plan.to_dict())
+        logger.info(f"[team-tool] finish_task: {summary[:80] if summary else '无摘要'}")
+        return "🏁 任务已标记完成。系统将生成最终报告。"
+
+    # ── revise_plan (Step 80) ──
+    async def _revise_plan(step_title: str, new_title: str, reason: str) -> str:
+        """【团队任务】修订计划——当原步骤不可行时修改。
+        step_title: 需要修改的步骤标题
+        new_title: 新步骤标题
+        reason: 修订原因（如"原方案需要登录10个App太耗时"）
+        """
+        if plan is None:
+            return "❌ 当前没有活跃的计划。"
+        result = plan.revise_plan(step_title, new_title, reason)
+        if result is None:
+            return f"❌ 找不到步骤：{step_title}。可用步骤：{', '.join(s.get('title','') for s in plan.steps)}"
+        return f"✅ 计划已修订：{step_title} → {new_title}（原因：{reason[:80]}）"
+
+    return [_send_message, _think_aloud, _submit_deliverable, _finish_task, _revise_plan]

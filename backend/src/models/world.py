@@ -21,7 +21,7 @@ class Scenario(BaseModel):
 class WorldCreate(BaseModel):
     """创建 World 的请求体"""
     name: str = Field(..., min_length=1)
-    world_type: str = Field(default="group", description="solo | group")
+    world_type: str = Field(default="group", description="solo | group | team")
     scenario: Scenario = Field(default_factory=Scenario)
     agent_ids: list[str] = Field(default_factory=list)
 
@@ -31,7 +31,7 @@ class WorldResponse(Timestamped):
     id: str  # 显式声明，解决 Pyright 继承解析问题
     created_at: str  # 显式声明，解决 Pyright 继承解析问题
     name: str
-    world_type: str = Field(default="group", description="solo | group")
+    world_type: str = Field(default="group", description="solo | group | team")
     scenario: Scenario
     agent_ids: list[str]
     current_tick: int = Field(default=0)

@@ -1,7 +1,6 @@
 import { Outlet, useLocation } from "react-router-dom";
 import { findItemById, MENU_SECTIONS } from "../../data/menuData";
 import Badge from "../shared/Badge";
-import EmptyState from "../shared/EmptyState";
 
 /** 根据菜单 hash 决定显示模块页面或统一占位反馈。 */
 export default function FeatureRouteBoundary() {
@@ -19,18 +18,6 @@ export default function FeatureRouteBoundary() {
 
   if (!selectedItem || !belongsToCurrentRoute) {
     return <Outlet />;
-  }
-
-  if (selectedItem.priority === "P3") {
-    return (
-      <div className="h-full flex items-center justify-center p-6 animate-fade-in motion-reduce:animate-none">
-        <EmptyState
-          title={`${selectedItem.emoji} ${selectedItem.label}`}
-          description="该功能已保留菜单入口，将在后续版本继续开发。"
-          tier="P3"
-        />
-      </div>
-    );
   }
 
   return (

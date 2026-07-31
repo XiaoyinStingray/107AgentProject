@@ -12,7 +12,7 @@ export default function LiveChat({ events, connected, isPaused }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    try { bottomRef.current?.scrollIntoView?.({ behavior: "smooth" }); } catch {}
   }, [events.length]);
 
   const chatEvents = events.filter(

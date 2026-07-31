@@ -359,9 +359,35 @@
 
 ---
 
-## BUG-024：M11 侧边栏子项跳转不生效
+## BUG-025：多人剧场加载 Team 的 World，world_type 隔离缺失
 
-- **状态**：📝 已知，暂不修复
+- **状态**：✅ 已修复 (2026-07-29)
+- **优先级**：P1（模块隔离失效——Team 的 World 出现在 GroupSandbox 中）
+- **发现日期**：2026-07-29
+- **环境**：GroupSandbox（多人剧场）M3 + TeamDashboard M9
+- **复现步骤**：
+  1. 在 M9 Agent Team 中创建一个 Team 并执行任务
+  2. 切换到 M3 群体沙盒
+  3. 查看「已有实验」列表
+- **实际结果**：Team 创建的 World 出现在群体沙盒的 World 列表中（因为 Team 使用 `world_type="group"`）
+- **根因**：
+  1. `backend/src/engines/team/engine.py:249` — Team 创建 World 时使用 `world_type="group"`，而非独立的 `"team"`
+  2. `frontend/src/pages/GroupSandbox.tsx:50` — `worlds` 过滤条件为 `w.world_type !== "solo"`，导致 Team World 漏入群体沙盒
+  3. `backend/src/models/world.py:24,34` — `world_type` 字段文档仅标注 `solo | group`，缺少 `team`
+- **修复内容**：
+  1. `world.py` — `world_type` 字段文档更新为 `solo | group | team`
+  2. `team/engine.py` — 创建 World 时 `world_type="team"`
+  3. `world_orm.py` — 默认值注释更新
+  4. `GroupSandbox.tsx` — 过滤条件改为 `w.world_type === "group"`（显式匹配，不留缺口）
+  5. `SoloTheater.tsx` — 确认已过滤 `world_type !== "group"`，Team World 不会漏入
+- **关联位置**：
+  - `backend/src/engines/team/engine.py` — line 249（world_type 赋值）
+  - `frontend/src/pages/GroupSandbox.tsx` — line 50（worlds 过滤）
+  - `backend/src/models/world.py` — line 24, 34（类型文档）
+  - `backend/src/models/world_orm.py` — line 25（DB 列默认值）
+- **影响范围**：
+  - Team Dashboard 创建 World 后不影响 Team 本身的功能
+  - 仅影响多人剧场（M3）的 World 列表展示——用户看到不该出现的 Team World
 - **优先级**：P3
 - **发现日期**：2026-07-28
 - **环境**：M11 侧边栏 → 子项（时间轴与快照/导演模式/叙事导出）
@@ -371,3 +397,181 @@
 - **实际结果**：跳转到 `/scene#item-57` 等 hash 路由，但 `/scene` 页面不处理 hash，停留在场景选择页无变化
 - **根因**：menuData 子项的导航逻辑为 `navigate('/scene#item-{id}')`，hash 片段不被 React Router 或 M11 页面消费
 - **计划修复时机**：对应功能（Step 65 时间轴、Step 66 导演、Step 71 叙事导出）实现后改为跳转具体子页面/锚点
+
+---
+
+## 2026-07-29：State 3 T4 — Phase 15 Bug 修补
+
+### BUG-025：Bench 全 tick 失败仍被记为成功
+
+- **状态**：✅ 已修复并定向验证（2026-07-29，State 3 T4）
+- **优先级**：P1
+- **根因**：单 tick 异常被转换为普通 `error` 事件，调度器随后仍计算非零指标并把 BenchResult 标为 `done`。
+- **修复**：8 个 tick 全部失败时抛出任务失败，保存六维全零、错误摘要和 `failed` 状态；零分纳入聚合。27 条全部失败时 BenchRun 同样标为 `failed`。
+- **回归测试**：`test_all_tick_failures_are_persisted_as_zero_score_failures`。
+
+### BUG-026：Bench 鲁棒性聚合几乎恒为 100
+
+- **状态**：✅ 已修复并定向验证（2026-07-29，State 3 T4）
+- **优先级**：P1
+- **根因**：每条任务的鲁棒性固定为 80，聚合时只计算这组固定值的变异系数，方差恒为零。
+- **修复**：改为比较每条任务其余五维综合分的跨任务变异系数；全零任务返回 0，单样本保留 85。
+- **回归测试**：覆盖稳定样本、高波动样本、占位值隔离和全零边界。
+
+### BUG-027：运行中 Bench 可删除但后台任务不会取消
+
+- **状态**：✅ 已修复并定向验证（2026-07-29，State 3 T4）
+- **优先级**：P1
+- **根因**：删除端点未检查运行状态，数据库记录删除后后台任务仍会调用 LLM 并写入子结果。
+- **修复**：运行中删除返回 HTTP 409；前端删除按钮在运行态禁用。已完成或失败的评测仍可删除。
+- **回归测试**：Bench API `14 passed`；BenchLab 运行态按钮测试通过。
+
+### BUG-028：失效 Team 模板下载失败仍增加计数
+
+- **状态**：✅ 已修复并定向验证（2026-07-29，State 3 T4）
+- **优先级**：P2
+- **根因**：下载次数在确认原始 Team 存在之前提交。
+- **修复**：先验证 MarketItem 和 Team，再增加并提交下载次数；404 失败下载保持原计数。
+- **回归测试**：Market API `14 passed`，包含删除原 Team 后下载的回归场景。
+
+### BUG-029：Bench 页面空闲时永久轮询
+
+- **状态**：✅ 已修复并定向验证（2026-07-29，State 3 T4）
+- **优先级**：P2
+- **根因**：`useBenchRuns()` 无条件设置 3 秒轮询。
+- **修复**：仅当列表中至少一个 Run 为 `running` 时轮询；空列表或全部结束后停止。
+- **回归测试**：fake timer 覆盖空闲不轮询与运行中按 3 秒轮询。
+
+### BUG-030：期末周 Bench 上下文未插值剩余座位
+
+- **状态**：✅ 已修复并定向验证（2026-07-29，State 3 T4）
+- **优先级**：P2
+- **根因**：资源状态字符串缺少 f-string，LLM 收到的是字面量 `{max(0, 80 - tick * 10)}`。
+- **修复**：提取 `_build_tick_context()`，按 tick 计算实际剩余座位；其他场景保持天气上下文。
+- **回归测试**：期末周插值与普通场景上下文 `2 passed`。
+
+### BUG-031：后端重启后 Bench 任务永久停留在运行中
+
+- **状态**：✅ 已修复并验收（2026-07-29，State 3 T4）
+- **优先级**：P1（任务无法继续或删除，且数据库残留运行时 API Key）
+- **根因**：Bench 使用进程内 `BackgroundTasks` 执行，进程退出后协程丢失；数据库只保存了进度和 `running` 状态，没有启动恢复策略。
+- **修复**：应用启动并完成数据库初始化后，将遗留的 `running` 评测标为 `failed`，清空 API Key，并在报告中说明中断原因和已保留进度；已有子结果不删除，失败记录可正常删除。
+- **回归测试**：覆盖 `running → failed`、Key 清除、`6/27` 进度和子结果保留、非运行记录不变，以及应用生命周期调用恢复函数。
+- **当前限制**：T4 不实现暂停、继续或断点续跑；完整的持久化任务控制延期至 Step 69。
+
+---
+
+## 2026-07-31：State 3 T5 — Phase 16 性能与 E2E
+
+### BUG-032：静音模式的拟声 Promise 提前完成
+
+- **状态**：🚧 待 T6 修复
+- **优先级**：P1
+- **现象**：关闭声音时，`AgentVoiceEngine.speak()` 在静音播放计时结束前就完成，调用方会误以为当前消息已经播放完毕。
+- **根因**：静音分支调用 `playSilent(...)` 时缺少 `await`。
+- **影响**：破坏对话气泡与拟声的严格串行语义，可能提前消费下一条消息。
+- **回归测试**：`frontend/src/game/audio/AgentVoiceEngine.test.ts`。
+
+### BUG-033：暂停后恢复可能并行播放两条对话
+
+- **状态**：🚧 待 T6 修复
+- **优先级**：P1
+- **现象**：队列在当前消息暂停期间积累新消息时，恢复会同时恢复当前音频并启动下一条队列消息。
+- **根因**：`DialoguePlaybackQueue.resume()` 恢复活动引擎后，只要待处理队列非空就再次调用 `processNext()`，没有检查当前消息是否仍在播放。
+- **影响**：违反 Step 66-A 的全场严格串行要求，可能产生气泡和声音重叠。
+- **回归测试**：`frontend/src/game/audio/DialoguePlaybackQueue.test.ts`。
+
+### BUG-034：音频控制组件卸载后残留 visibilitychange 监听器
+
+- **状态**：🚧 待 T6 修复
+- **优先级**：P2
+- **现象**：反复进入和离开 M11 后，页面可见性变化会触发已经卸载组件注册的回调。
+- **根因**：`AudioControls` 使用匿名函数注册 `visibilitychange`，且没有在 effect cleanup 中移除。
+- **影响**：产生监听器泄漏，并可能重复暂停或恢复音频。
+- **回归测试**：`frontend/src/components/scene/scene-components.test.tsx`。
+
+### BUG-035：Checkpoint 可通过错误场景路径删除
+
+- **状态**：🚧 待 T6 修复
+- **优先级**：P2
+- **现象**：在 `library` 创建的 Checkpoint，可以通过 `/api/scenes/dorm/checkpoints/{id}` 删除。
+- **根因**：删除查询只按 Checkpoint ID 匹配，没有同时校验 `scene_id`。
+- **影响**：场景资源边界失效，错误请求可能删除其他场景的存档。
+- **回归测试**：`backend/tests/test_scenes_api.py`。
+
+### BUG-036：切换场景后自动对话扫描停止
+
+- **状态**：🚧 待 T6 修复
+- **优先级**：P1
+- **现象**：切换场景后 Agent 仍会移动和显示情绪，但不再自动产生新对话。
+- **根因**：`MapScene.loadMap()` 调用 `destroyScene()` 清理定时器，地图重建后没有重新启动对话扫描器。
+- **影响**：M11 的核心自主互动在首次切换场景后失效。
+- **验证方式**：浏览器依次切换六个场景后观察对话日志与气泡。
+
+### BUG-037：耳语内容没有进入 Agent 行为链路
+
+- **状态**：🚧 待 T6 修复
+- **优先级**：P1
+- **现象**：向 Agent 发送“去和某人说话”等耳语后，只有角色闪烁，Agent 不会执行指令，也没有接收或失败反馈。
+- **根因**：前端事件虽然携带耳语文本，但 `MapScene` 监听器只读取 Agent ID 并播放闪烁 tween；文本未保存、未调用后端，也未注入对话或决策上下文。
+- **影响**：Step 64b 的耳语入口为视觉占位，不具备计划中的干预语义。
+- **人工复现**：详情面板选择 Agent，发送明确行动指令，观察角色仅闪烁。
+
+### BUG-038：Checkpoint 加载不恢复已有 Agent 的坐标
+
+- **状态**：🚧 待 T6 修复
+- **优先级**：P1
+- **现象**：删除 Agent 后加载存档可以恢复人物，但移动已有 Agent 后加载存档不会恢复原坐标。
+- **根因**：加载操作只更新 React `agents`；`MapScene.syncAgentsInPlace()` 为避免普通状态同步干扰实时移动，明确不使用 React 坐标覆盖已有 sprite，导致存档恢复也走了同一条非覆盖路径。
+- **影响**：无法从相同场面起点比较不同干预结果，Checkpoint 只实现了部分恢复。
+- **人工复现**：暂停并保存 Checkpoint，移动角色，再加载该 Checkpoint。
+
+---
+
+## 2026-07-31: State 4 回归修复 + Worker 补丁
+
+### BUG-039：场景启动 Crash — WorldRow 传入不存在的 scenario_id 参数
+
+- **状态**：✅ 已修复 (2026-07-31)
+- **优先级**：P0（场景启动 500 错误，M11 完全不可用）
+- **根因**：scenes.py 构造 WorldRow 时传入不存在的 scenario_id 列
+- **修复**：scenario_id=... → scenario_json=json.dumps({...})
+- **关联位置**：`backend/src/api/scenes.py` — lines 302, 315
+
+### BUG-040：AI 驱动场景对话过长
+
+- **状态**：✅ 已修复 (2026-07-31)
+- **优先级**：P1（State 4 回归——system prompt 无对话长度约束）
+- **现象**：AI 驱动模式下 Agent 对话超长，偶发 TimeoutError
+- **根因**：两条路径均缺长度约束——
+  Path A（interact 端点）：generate_dialogue_llm 无 SystemMessage
+  Path B（WorldEngine+SceneBridge）：build_core_system_message 鼓励"有血有肉的人"但无长度限制；GroupChat task 也无
+- **修复（3 处）**：
+  1. `scene/engine.py`：新增 system_prompt 硬约束（≤30字、禁止前缀/旁白/元叙述），[SystemMessage, UserMessage] 结构
+  2. `persona/prompt_templates.py`：`_build_identity_section` 新增"对话风格规范"（10-30字、拆分长想法、禁止元叙述）——对所有 LifeAgent 生效
+  3. `world/messages.py`：`_build_group_task` 新增长度约束（10-30字、拆分长对话）——对每 tick GroupChat 生效
+- **关联位置**：`engines/scene/engine.py`, `engines/persona/prompt_templates.py`, `engines/world/messages.py`
+
+### BUG-041：M5 侧边栏点击后主面板风格不更新
+
+- **状态**：✅ 已修复 (2026-07-31)
+- **优先级**：P1（侧边栏导航完全无效）
+- **根因**：NarrativeFactory hash→style useEffect 依赖[]（仅 mount），同路由内 hash 变化不 remount
+- **修复**：改用 useLocation().hash 作为依赖
+- **关联位置**：`frontend/src/pages/NarrativeFactory.tsx` — lines 66-78
+
+## 2026-07-31: State 5 — Worker + scenes bug 修复
+
+### BUG-039：场景启动 Crash — WorldRow 传入不存在的 scenario_id 参数
+
+- **状态**：✅ 已修复 (2026-07-31)
+- **优先级**：P0（场景启动 500 错误，M11 完全不可用）
+- **发现日期**：2026-07-31
+- **环境**：`POST /api/scenes/library/start`
+- **复现步骤**：
+  1. 启动后端
+  2. 调用 `POST /api/scenes/library/start` 任意场景
+- **实际结果**：返回 500 Internal Server Error，Traceback：`TypeError: 'scenario_id' is an invalid keyword argument for WorldRow`
+- **根因**：`scenes.py` 第 302 行和 315 行在构造 `WorldRow(...)` 时传入了 `scenario_id="builtin_study"` 和 `scenario_id=scenario_row.id`。`WorldRow` ORM 模型没有 `scenario_id` 列——场景数据应存入 `scenario_json` 列（JSON 字符串）。
+- **修复**：两处 `scenario_id=...` 改为 `scenario_json=_json.dumps({"id": ..., "name": ...})`，与 `worlds.py` 中 `_sync_world_to_db` 的序列化格式一致。
+- **关联位置**：`backend/src/api/scenes.py` — lines 302, 315

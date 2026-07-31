@@ -4,7 +4,7 @@ export interface BenchRunSummary {
   id: string;
   name: string;
   llm_model: string;
-  status: "running" | "done" | "failed";
+  status: "running" | "done" | "failed" | "cancelled";
   total_tasks: number;
   completed_tasks: number;
   scores: Record<string, number> | null;

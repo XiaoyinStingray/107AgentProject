@@ -55,32 +55,27 @@ _STRESS_RESPONSE_LABEL: dict[str, str] = {
 # =============================================================================
 
 
-def build_system_message(
+def build_core_system_message(
     persona: Persona,
     background: Background,
     goals: list[Goal],
-    recent_memories: list[MemoryResponse] | None = None,
-    world_context: str = "",
 ) -> str:
-    """将人格对象组装为 AutoGen Agent 的 system_message 字符串。
+    """构建仅含人格的 system message——不含记忆和世界状态。
 
-    输出结构（6 段式）：
+    用于 LifeAgent 初始化时设置一次，之后不再重建。
+    输出结构（4 段式）：
       1. 你是谁 — persona.narrative
       2. 你的核心价值观 — persona.values
       3. 你的决策风格 — persona.decision_style 展开
-      4. 你的记忆 — recent_memories top-5（按 importance 降序）
-      5. 你的目标 — goals 按 priority 升序
-      6. 当前处境 — world_context
+      4. 你的目标 — goals 按 priority 升序
 
     Args:
         persona: Agent 人格定义（必需）
         background: 背景故事（必需）
         goals: 层级化目标列表（可为空列表）
-        recent_memories: 近期记忆（可选，None 视为空列表）
-        world_context: 当前世界状态文本（可选，每 tick 刷新）
 
     Returns:
-        str: 可直接传给 AutoGen AssistantAgent 的 system_message
+        str: 可直接传给 AutoGen AssistantAgent 的 core system_message
     """
     parts: list[str] = []
 
@@ -94,20 +89,83 @@ def build_system_message(
     # ---- 3. 你的决策风格 ----
     parts.append(_build_decision_section(persona))
 
-    # ---- 4. 你的记忆 ----
-    memories = recent_memories or []
-    if memories:
-        parts.append(_build_memory_section(memories))
-
-    # ---- 5. 你的目标 ----
+    # ---- 4. 你的目标 ----
     if goals:
         parts.append(_build_goals_section(goals))
 
-    # ---- 6. 当前处境 ----
-    if world_context:
-        parts.append(_build_world_section(world_context))
+    return "\n\n".join(parts)
+
+
+def build_context_message(
+    world_state: str,
+    memories: list[MemoryResponse] | None = None,
+    notes: list[dict] | None = None,
+) -> str:
+    """构建每 tick 追加到消息历史的 UserMessage 文本。
+
+    不含人格部分——人格已在 system prompt 中保持不变。
+    输出结构（3 段式）：
+      1. 当前处境 — world_state
+      2. 近期记忆 — memories top-5（按 importance 降序）
+      3. 你的笔记 — notes 最近 5 条
+
+    Args:
+        world_state: 当前世界上下文文本（每 tick 刷新）
+        memories: 近期记忆列表（可选）
+        notes: 私有笔记列表，每条为 {"tick": int, "content": str}（可选）
+
+    Returns:
+        str: 适合作为 UserMessage 注入的上下文文本
+    """
+    parts: list[str] = []
+
+    # ---- 1. 当前处境 ----
+    if world_state:
+        parts.append(_build_world_section(world_state))
+
+    # ---- 2. 你的记忆 ----
+    mems = memories or []
+    if mems:
+        parts.append(_build_memory_section(mems))
+
+    # ---- 3. 你的笔记 ----
+    nts = notes or []
+    if nts:
+        parts.append(_build_notes_section(nts))
 
     return "\n\n".join(parts)
+
+
+def build_system_message(
+    persona: Persona,
+    background: Background,
+    goals: list[Goal],
+    recent_memories: list[MemoryResponse] | None = None,
+    world_context: str = "",
+) -> str:
+    """将人格对象组装为 AutoGen Agent 的 system_message 字符串。
+
+    向后兼容——Arena/Bench 继续使用此函数。
+    内部委托给 build_core_system_message + build_context_message。
+
+    Args:
+        persona: Agent 人格定义（必需）
+        background: 背景故事（必需）
+        goals: 层级化目标列表（可为空列表）
+        recent_memories: 近期记忆（可选，None 视为空列表）
+        world_context: 当前世界状态文本（可选，每 tick 刷新）
+
+    Returns:
+        str: 可直接传给 AutoGen AssistantAgent 的完整 system_message
+    """
+    core = build_core_system_message(persona, background, goals)
+
+    memories = recent_memories or []
+    if not world_context and not memories:
+        return core
+
+    context = build_context_message(world_context, memories)
+    return f"{core}\n\n{context}"
 
 
 # =============================================================================
@@ -153,6 +211,11 @@ def _build_identity_section(persona: Persona, background: Background) -> str:
     lines.append("")
     lines.append("请你在所有互动中严格遵循以上人格设定。你的言行、决策、情感反应都应该与这个角色一致。")
     lines.append("你不是一个中立的 AI 助手——你是一个有血有肉、有过去有未来、会哭会笑的真实的人。")
+    lines.append("")
+    lines.append("## 对话风格规范")
+    lines.append("- 你的每次发言必须简短自然，控制在10-30个汉字，像真人发消息一样。")
+    lines.append("- 不要长篇大论，不要一次说多个话题。如果一个想法很长，拆分成多次简短对话。")
+    lines.append("- 不要使用\"我觉得\"、\"我认为\"等元叙述前缀——直接表达你的想法。")
 
     return "\n".join(lines)
 
@@ -225,6 +288,17 @@ def _build_goals_section(goals: list[Goal]) -> str:
 def _build_world_section(world_context: str) -> str:
     """构建当前处境段落。"""
     return f"# 当前处境\n\n{world_context}"
+
+
+def _build_notes_section(notes: list[dict]) -> str:
+    """构建笔记段落——取最近 5 条。"""
+    recent = notes[-5:]
+    lines = ["# 你的笔记"]
+    for note in reversed(recent):
+        tick = note.get("tick", "?")
+        content = note.get("content", "")
+        lines.append(f"- [Tick {tick}] {content}")
+    return "\n".join(lines)
 
 
 # =============================================================================
