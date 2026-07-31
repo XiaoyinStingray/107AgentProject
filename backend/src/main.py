@@ -24,6 +24,8 @@ from api.teams import router as teams_router
 from api.market import router as market_router
 from api.bench import router as bench_router
 from api.scenes import router as scenes_router
+from api.workers import router as workers_router
+from api.pipelines import router as pipelines_router
 from engines.bench.recovery import recover_interrupted_bench_runs
 from llm.errors import register_llm_error_middleware
 
@@ -36,9 +38,17 @@ async def lifespan(app: FastAPI):
     await init_db()
     async with async_session() as db:
         await recover_interrupted_bench_runs(db)
-    logger.info("Life Lab ready")
+
+    # Phase 26: 启动自主调度器
+    from engines.worker.scheduler import get_scheduler
+    scheduler = get_scheduler()
+    await scheduler.start()
+    logger.info("Life Lab ready (scheduler active)")
+
     yield
+
     logger.info("Shutting down Life Lab")
+    await scheduler.stop()
 
 
 app = FastAPI(
@@ -72,6 +82,8 @@ app.include_router(teams_router)
 app.include_router(market_router)
 app.include_router(bench_router)
 app.include_router(scenes_router)
+app.include_router(workers_router)
+app.include_router(pipelines_router)
 
 
 @app.get("/health")

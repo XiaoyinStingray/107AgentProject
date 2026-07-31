@@ -1,0 +1,26 @@
+# Life Lab — Docker Compose 编排
+# docker compose up → 完整产品可访问 http://localhost:8000
+
+version: "3.8"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - workspaces:/data/workspaces
+      - ./backend/src:/app/backend/src:ro  # 开发时可挂载源码热重载
+    environment:
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://api.openai.com/v1}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      - WORKSPACE_ROOT=/data/workspaces
+      - PYTHONPATH=/app/backend/src
+    restart: unless-stopped
+
+volumes:
+  workspaces:
+    driver: local

@@ -14,6 +14,7 @@ import {
   PanelLeftClose,
   PanelLeft,
   LayoutDashboard,
+  Terminal,
 } from "lucide-react";
 import Badge from "../shared/Badge";
 import { MENU_SECTIONS } from "../../data/menuData";
@@ -34,6 +35,7 @@ const SECTION_ICONS: Record<string, React.ReactNode> = {
   "M9 Agent Team": <Users size={16} />,
   "M10 LLM Bench": <BarChart3 size={16} />,
   "M11 游戏化场景": <LayoutDashboard size={16} />,
+  "M12 Worker": <Terminal size={16} />,
 };
 
 export default function Sidebar() {
