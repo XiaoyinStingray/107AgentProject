@@ -69,7 +69,18 @@ export default function PipelinePage() {
       const method = draft.id ? "PUT" : "POST";
       const url = draft.id ? `/api/pipelines/${draft.id}` : "/api/pipelines/";
       const r = await fetch(url, {method, headers:{"Content-Type":"application/json"}, body:JSON.stringify(draft)});
-      if (r.ok) { setEditing(false); load(); setMsg("保存成功"); setTimeout(()=>setMsg(null),2000); }
+      if (r.ok) {
+        const saved = await r.json();
+        // 更新本地列表（不重新加载全部，避免 selectedPipe 闪变）
+        if (draft.id) {
+          setTemplates(prev => prev.map(t => t.id===draft.id ? {...t, ...draft} : t));
+        } else {
+          setTemplates(prev => [...prev, {...draft, id: saved.id}]);
+          setSelected(saved.id);
+        }
+        setEditing(false);
+        setMsg("保存成功"); setTimeout(()=>setMsg(null),2000);
+      }
     } catch {}
   };
 
