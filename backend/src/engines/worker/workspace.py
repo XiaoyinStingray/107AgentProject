@@ -295,15 +295,214 @@ class LocalWorkspace(WorkspaceProvider):
 # =============================================================================
 # CloudWorkspace — SSH 远程工作区（Phase 24 实现）
 # =============================================================================
-#
-# class CloudWorkspace(WorkspaceProvider):
-#     """SSH 远程文件系统实现。通过 asyncssh SFTP 操作文件。
-#
-#     Args:
-#         host: SSH 主机地址
-#         port: SSH 端口
-#         user: SSH 用户名
-#         key: SSH 私钥内容（仅存内存，不序列化）
-#         path: 云端工作区路径
-#     """
-#     def __init__(self, host: str, port: int, user: str, key: str, path: str): ...
+
+
+class CloudWorkspace(WorkspaceProvider):
+    """SSH 远程文件系统实现。通过 asyncssh SFTP 操作文件。
+
+    安全约束:
+        - SSH 密钥仅存内存中，不序列化到数据库或日志。
+        - 连接断开 → 自动重连 1 次 → 仍失败 → Worker 进入 ERROR。
+        - 文件操作通过 SFTP，命令执行通过 SSH exec。
+
+    Args:
+        host: SSH 主机地址
+        port: SSH 端口（默认 22）
+        user: SSH 用户名
+        key: SSH 私钥内容（PEM 格式字符串，仅存内存）
+        path: 云端工作区根路径，如 "/data/workspaces/abc123"
+    """
+
+    def __init__(self, host: str, port: int, user: str, key: str, path: str):
+        self._host = host
+        self._port = port or 22
+        self._user = user
+        self._key = key
+        self._root = path.rstrip("/")
+
+        # 连接状态
+        self._conn = None
+        self._sftp = None
+        self._reconnect_attempts = 0
+        self._MAX_RECONNECT = 1
+
+        logger.info(f"CloudWorkspace created: {user}@{host}:{port}{path}")
+
+    async def _ensure_connected(self):
+        """确保 SSH 连接活跃。如果断开则自动重连。"""
+        if self._conn is not None and not self._conn.is_closed():
+            return
+
+        import asyncssh
+
+        self._reconnect_attempts += 1
+        if self._reconnect_attempts > self._MAX_RECONNECT + 1:  # +1 for initial connect
+            raise ConnectionError(
+                f"SSH 连接失败，已重试 {self._MAX_RECONNECT} 次: "
+                f"{self._user}@{self._host}:{self._port}"
+            )
+
+        try:
+            # 解析私钥
+            if self._key.startswith("-----BEGIN"):
+                # PEM 格式
+                private_key = asyncssh.import_private_key(self._key)
+            else:
+                # 文件路径
+                private_key = asyncssh.read_private_key(self._key)
+
+            self._conn = await asyncssh.connect(
+                host=self._host,
+                port=self._port,
+                username=self._user,
+                client_keys=[private_key],
+                known_hosts=None,  # 跳过 known_hosts 检查（用户已在 UI 确认连接）
+            )
+            self._sftp = await self._conn.start_sftp_client()
+            self._reconnect_attempts = 0  # 重置计数
+            logger.info(f"CloudWorkspace connected: {self._user}@{self._host}:{self._port}")
+
+        except Exception as e:
+            logger.error(f"CloudWorkspace connect failed: {e}")
+            raise ConnectionError(f"SSH 连接失败: {e}")
+
+    async def _disconnect(self):
+        """关闭 SSH 连接。Worker 结束时调用。"""
+        if self._sftp:
+            try:
+                self._sftp.exit()
+            except Exception:
+                pass
+            self._sftp = None
+        if self._conn:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            self._conn = None
+
+    def _remote_path(self, relative_path: str) -> str:
+        """将相对路径转为云端绝对路径。"""
+        clean = relative_path.replace("\\", "/").lstrip("/")
+        return f"{self._root}/{clean}"
+
+    # ── WorkspaceProvider 实现 ──
+
+    async def write_file(self, path: str, content: str) -> str:
+        await self._ensure_connected()
+        remote = self._remote_path(path)
+        # 确保父目录存在
+        parent = os.path.dirname(remote) if "/" in remote else self._root
+        try:
+            await self._sftp.makedirs(parent, exist_ok=True)
+        except Exception:
+            pass
+        await self._sftp.write_text(remote, content, encoding='utf-8')
+        logger.info(f"[CloudWorkspace] write: {path} ({len(content)} chars)")
+        return remote
+
+    async def read_file(self, path: str) -> str:
+        await self._ensure_connected()
+        remote = self._remote_path(path)
+        try:
+            return await self._sftp.read_text(remote, encoding='utf-8')
+        except Exception as e:
+            raise FileNotFoundError(f"云端文件不存在: {path}") from e
+
+    async def list_files(self, directory: str = "") -> list[FileInfo]:
+        await self._ensure_connected()
+        dir_path = self._remote_path(directory) if directory else self._root
+        files = []
+        try:
+            async for entry in self._sftp.scandir(dir_path):
+                if entry.type == "file" or entry.attrs.isreg:
+                    relative = entry.filename if not directory else f"{directory}/{entry.filename}"
+                    files.append(FileInfo(
+                        path=relative,
+                        size=entry.attrs.size or 0,
+                        modified_at=str(entry.attrs.mtime or 0),
+                    ))
+        except Exception as e:
+            logger.warning(f"[CloudWorkspace] list_files failed: {e}")
+        files.sort(key=lambda f: f.modified_at, reverse=True)
+        return files
+
+    async def delete_file(self, path: str) -> bool:
+        await self._ensure_connected()
+        remote = self._remote_path(path)
+        try:
+            await self._sftp.remove(remote)
+            return True
+        except Exception:
+            return False
+
+    async def run_python(self, code: str, timeout: int = 30) -> SandboxResult:
+        await self._ensure_connected()
+        from engines.worker.sandbox import check_code_safety
+
+        # 静态检查
+        is_safe, reason = check_code_safety(code)
+        if not is_safe:
+            return SandboxResult(stdout="", stderr=f"代码安全检查未通过: {reason}", exit_code=-1)
+
+        # 写入临时文件 → 执行 → 读取结果
+        import uuid
+        tmp_name = f"_tmp_{uuid.uuid4().hex[:8]}.py"
+        tmp_path = f"{self._root}/{tmp_name}"
+
+        try:
+            await self._sftp.write_text(tmp_path, code, encoding='utf-8')
+            result = await self._conn.run(
+                f"cd {self._root} && python {tmp_name}",
+                timeout=timeout,
+            )
+            return SandboxResult(
+                stdout=result.stdout[:10000] if result.stdout else "",
+                stderr=result.stderr[:5000] if result.stderr else "",
+                exit_code=result.exit_status or 0,
+            )
+        except TimeoutError:
+            return SandboxResult(stdout="", stderr=f"云端执行超时（{timeout}秒）", exit_code=-1)
+        except Exception as e:
+            return SandboxResult(stdout="", stderr=f"云端执行失败: {e}", exit_code=-1)
+        finally:
+            try:
+                await self._sftp.remove(tmp_path)
+            except Exception:
+                pass
+
+    async def exists(self, path: str) -> bool:
+        await self._ensure_connected()
+        remote = self._remote_path(path)
+        try:
+            await self._sftp.stat(remote)
+            return True
+        except Exception:
+            return False
+
+    @property
+    def location_description(self) -> str:
+        return f"云端: {self._user}@{self._host}:{self._root}"
+
+    # ── 连接管理 ──
+
+    async def test_connection(self) -> tuple[bool, str, float]:
+        """测试 SSH 连接——返回 (成功, 消息, 延迟ms)。
+
+        供 POST /api/workers/test-connection 端点使用。
+        """
+        import time
+        start = time.monotonic()
+        try:
+            await self._ensure_connected()
+            latency = int((time.monotonic() - start) * 1000)
+            # 同时检查工作区目录是否存在
+            await self._sftp.stat(self._root)
+            return True, f"连接成功", latency
+        except Exception as e:
+            latency = int((time.monotonic() - start) * 1000)
+            return False, f"连接失败: {e}", latency
+
+    async def close(self):
+        """关闭连接——Worker 结束后调用。"""
+        await self._disconnect()

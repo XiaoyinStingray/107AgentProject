@@ -21,6 +21,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from engines.worker.engine import AgentWorker
+from engines.worker.workspace import CloudWorkspace
 
 router = APIRouter(prefix="/api/workers", tags=["workers"])
 
@@ -133,8 +134,24 @@ async def execute_worker_task(req: WorkerExecuteRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"无法创建 Agent: {e}")
 
+    # 创建 Workspace（根据类型）
+    workspace = None
+    if req.workspace_type == "cloud":
+        config = req.workspace_config or {}
+        try:
+            workspace = CloudWorkspace(
+                host=config.get("host", ""),
+                port=config.get("port", 22),
+                user=config.get("user", ""),
+                key=config.get("key", ""),
+                path=config.get("path", ""),
+            )
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"云端工作区配置错误: {e}")
+    # local → workspace=None, AgentWorker 自动创建 LocalWorkspace
+
     # 创建 Worker
-    worker = AgentWorker(agent=agent)
+    worker = AgentWorker(agent=agent, workspace=workspace, base_dir=req.workspace_config.get("path"))
 
     # 注册到内存表
     _active_workers[worker.run_id] = {
@@ -202,3 +219,51 @@ async def cancel_worker(run_id: str):
     worker = entry["worker"]
     worker.cancel()
     return {"status": "cancelling", "run_id": run_id}
+
+
+# =============================================================================
+# Phase 24: 工作区连接测试
+# =============================================================================
+
+
+class TestConnectionRequest(BaseModel):
+    """SSH 连接测试请求。"""
+    host: str = Field(..., description="SSH 主机地址")
+    port: int = Field(default=22, description="SSH 端口")
+    user: str = Field(..., description="SSH 用户名")
+    key: str = Field(..., description="SSH 私钥内容（PEM 格式或文件路径），仅存内存")
+    path: str = Field(default="/data/workspaces", description="云端工作区路径")
+
+
+class TestConnectionResponse(BaseModel):
+    """连接测试结果。"""
+    success: bool
+    message: str
+    latency_ms: int
+    location: str
+
+
+@router.post("/test-connection")
+async def test_ssh_connection(req: TestConnectionRequest):
+    """测试 SSH 连接。
+
+    创建一个临时 CloudWorkspace → 测试连接 → 返回结果。
+    SSH 密钥仅存内存中，不会序列化到数据库或日志。
+    """
+    logger.info(f"POST /api/workers/test-connection: {req.user}@{req.host}:{req.port}")
+    workspace = CloudWorkspace(
+        host=req.host,
+        port=req.port,
+        user=req.user,
+        key=req.key,
+        path=req.path,
+    )
+    success, message, latency = await workspace.test_connection()
+    await workspace.close()
+
+    return TestConnectionResponse(
+        success=success,
+        message=message,
+        latency_ms=latency,
+        location=f"云端: {req.user}@{req.host}:{req.path}",
+    )

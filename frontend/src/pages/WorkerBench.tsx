@@ -9,6 +9,9 @@ import React, { useState, useCallback } from "react";
 import { useWorkerExecute } from "../api/workers";
 import WorkerTerminal from "../components/worker/WorkerTerminal";
 import WorkspacePanel from "../components/worker/WorkspacePanel";
+import WorkspaceSelector, {
+  type WorkspaceConfig,
+} from "../components/worker/WorkspaceSelector";
 
 // =============================================================================
 // 常量
@@ -28,6 +31,11 @@ export default function WorkerBench() {
   const [task, setTask] = useState("");
   const [agentId, setAgentId] = useState("");
   const [showPanel, setShowPanel] = useState(true);
+  const [showWorkspaceConfig, setShowWorkspaceConfig] = useState(false);
+  const [workspaceConfig, setWorkspaceConfig] = useState<WorkspaceConfig>({
+    type: "local",
+    path: "",
+  });
 
   const { events, connected, done, error, execute, cancel, reset } =
     useWorkerExecute();
@@ -38,7 +46,16 @@ export default function WorkerBench() {
     execute({
       agent_id: agentId || "worker-default",
       task: task.trim(),
-      workspace_type: "local",
+      workspace_type: workspaceConfig.type,
+      workspace_config: workspaceConfig.type === "cloud"
+        ? {
+            host: workspaceConfig.host,
+            port: workspaceConfig.port,
+            user: workspaceConfig.user,
+            key: workspaceConfig.key,
+            path: workspaceConfig.path,
+          }
+        : { path: workspaceConfig.path },
     });
   }, [task, agentId, execute]);
 
@@ -160,19 +177,42 @@ export default function WorkerBench() {
 
         {/* Agent ID 输入（可选） */}
         {!connected && (
-          <div className="mt-2 flex items-center gap-2">
-            <span className="text-xs font-mono text-text-muted">Agent:</span>
-            <input
-              type="text"
-              value={agentId}
-              onChange={(e) => setAgentId(e.target.value)}
-              placeholder="(默认 Worker)"
-              disabled={connected}
-              className="bg-transparent border-b border-border text-xs font-mono
-                         text-text-secondary placeholder-text-muted px-1
-                         focus:outline-none focus:border-cyan-700/50 w-48"
-            />
-          </div>
+          <>
+            <div className="mt-2 flex items-center gap-2">
+              <span className="text-xs font-mono text-text-muted">Agent:</span>
+              <input
+                type="text"
+                value={agentId}
+                onChange={(e) => setAgentId(e.target.value)}
+                placeholder="(默认 Worker)"
+                disabled={connected}
+                className="bg-transparent border-b border-border text-xs font-mono
+                           text-text-secondary placeholder-text-muted px-1
+                           focus:outline-none focus:border-cyan-700/50 w-48"
+              />
+              <button
+                onClick={() => setShowWorkspaceConfig(!showWorkspaceConfig)}
+                className={`text-xs font-mono px-2 py-0.5 rounded border transition-colors ${
+                  showWorkspaceConfig
+                    ? "border-cyan-700/30 text-cyan-400"
+                    : "border-border text-text-muted"
+                }`}
+              >
+                {workspaceConfig.type === "local" ? "💻" : "☁️"} 工作区配置
+              </button>
+            </div>
+
+            {/* 工作区配置面板 */}
+            {showWorkspaceConfig && (
+              <div className="mt-2 p-3 border border-border rounded bg-surface">
+                <WorkspaceSelector
+                  value={workspaceConfig}
+                  onChange={setWorkspaceConfig}
+                  disabled={false}
+                />
+              </div>
+            )}
+          </>
         )}
 
         {/* 错误提示 */}

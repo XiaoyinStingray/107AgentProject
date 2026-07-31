@@ -233,7 +233,8 @@ class AgentWorker:
             # ── 主循环（状态机驱动）──
             while True:
                 if self._cancel_requested:
-                    yield from self._handle_cancel()
+                    for ev in self._handle_cancel():
+                        yield ev
                     return
 
                 match self._state:
@@ -246,7 +247,8 @@ class AgentWorker:
                             yield event
                         # deciding 可能直接转换到 DONE
                         if self._state == WorkerState.DONE:
-                            yield from self._handle_done()
+                            for ev in self._handle_done():
+                                yield ev
                             return
 
                     case WorkerState.EXECUTING:
@@ -258,11 +260,13 @@ class AgentWorker:
                             yield event
 
                     case WorkerState.DONE:
-                        yield from self._handle_done()
+                        for ev in self._handle_done():
+                            yield ev
                         return
 
                     case WorkerState.ERROR:
-                        yield from self._handle_error()
+                        for ev in self._handle_error():
+                            yield ev
                         return
 
                     case _:
