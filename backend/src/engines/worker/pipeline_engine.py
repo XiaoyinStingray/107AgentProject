@@ -180,9 +180,7 @@ class PipelineEngine:
                         run.node_workers[node.id] = worker
 
                         # 执行任务
-                        events = []
                         async for sse_event in worker.execute(node.task):
-                            events.append(sse_event)
                             # 转发节点事件（加上 node_id 前缀）
                             yield _pipeline_event("pipeline.node_event", {
                                 "node_id": node.id,

@@ -73,55 +73,76 @@ def _sse_event(event_type: str, data: dict) -> str:
 
     Args:
         event_type: WorkerEventType 字面量
-        data: 事件 data 字典（必须是可 JSON 序列化的）
+        data: 事件 data 字典（可以是 dict 或 dataclass 实例）
 
     Returns:
         "data: {json}\n\n" 格式的 SSE 字符串
     """
+    # 将 dataclass 实例转为 dict（否则 json.dumps 无法序列化）
+    from dataclasses import asdict, is_dataclass
+    serializable_data = {}
+    for key, value in (data.items() if isinstance(data, dict) else data.__dict__.items()):
+        if is_dataclass(value):
+            serializable_data[key] = asdict(value)
+        elif isinstance(value, list):
+            serializable_data[key] = [
+                asdict(v) if is_dataclass(v) else v for v in value
+            ]
+        else:
+            serializable_data[key] = value
+
     payload = json.dumps({
         "type": event_type,
-        "data": data,
+        "data": serializable_data,
         "timestamp": _now_iso(),
     }, ensure_ascii=False)
     return f"data: {payload}\n\n"
 
 
 def _safe_json_parse(text: str) -> dict | None:
-    """安全解析 JSON——容忍 Markdown 代码块包裹。
+    """安全解析 JSON——容忍 Markdown 代码块包裹。返回 dict 或 None。
 
     尝试多种策略:
-      1. 直接解析
+      1. 直接解析（必须是 JSON 对象）
       2. 提取 ```json ... ``` 代码块
       3. 查找第一个 { 到最后一个 } 之间的内容
+    所有策略都确保返回 dict（拒绝数组/字符串/数字等非对象 JSON）。
     """
     text = text.strip()
     if not text:
         return None
 
+    def _parse(s: str) -> dict | None:
+        """解析 JSON 字符串，仅当结果是 dict 时返回。"""
+        try:
+            result = json.loads(s)
+            if isinstance(result, dict):
+                return result
+            return None
+        except json.JSONDecodeError:
+            return None
+
     # 策略 1: 直接解析
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
+    result = _parse(text)
+    if result is not None:
+        return result
 
     # 策略 2: 提取代码块
     if "```json" in text:
         start = text.find("```json") + 7
         end = text.find("```", start)
         if end > start:
-            try:
-                return json.loads(text[start:end].strip())
-            except json.JSONDecodeError:
-                pass
+            result = _parse(text[start:end].strip())
+            if result is not None:
+                return result
 
     # 策略 3: 从第一个 { 到最后一个 }
     brace_start = text.find("{")
     brace_end = text.rfind("}")
     if brace_start >= 0 and brace_end > brace_start:
-        try:
-            return json.loads(text[brace_start:brace_end + 1])
-        except json.JSONDecodeError:
-            pass
+        result = _parse(text[brace_start:brace_end + 1])
+        if result is not None:
+            return result
 
     return None
 
@@ -511,9 +532,10 @@ class AgentWorker:
         try:
             if tool_spec and tool_spec.handler:
                 result_str = str(await tool_spec.handler(**tool_args))
+                success = True
             else:
-                result_str = f"工具 '{tool_name}' 未实现"
-            success = True
+                result_str = f"工具 '{tool_name}' 未实现（handler 未注册）"
+                success = False
         except Exception as e:
             result_str = f"工具执行失败: {e}"
             success = False

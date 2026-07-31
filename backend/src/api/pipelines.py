@@ -170,19 +170,16 @@ async def execute_pipeline(pipeline_id: str, req: PipelineExecuteRequest = None)
         raise HTTPException(status_code=400, detail=f"管道无效: {msg}")
 
     # 创建工作区
-    from pathlib import Path
-    from engines.worker.workspace import LocalWorkspace, CloudWorkspace
+    from api.workers import _create_workspace
 
-    if req.workspace_type == "cloud":
-        config = req.workspace_config or {}
-        workspace = CloudWorkspace(
-            host=config.get("host", ""),
-            port=config.get("port", 22),
-            user=config.get("user", ""),
-            key=config.get("key", ""),
-            path=config.get("path", ""),
-        )
-    else:
+    workspace = _create_workspace(
+        req.workspace_type,
+        req.workspace_config or {},
+        f"pipeline-{pipeline_id}",
+    )
+    if workspace is None:
+        from pathlib import Path
+        from engines.worker.workspace import LocalWorkspace
         workspace = LocalWorkspace(
             str(Path.home() / "workspaces"),
             f"pipeline-{pipeline_id}",

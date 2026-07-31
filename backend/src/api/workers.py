@@ -21,7 +21,39 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from engines.worker.engine import AgentWorker
-from engines.worker.workspace import CloudWorkspace
+from engines.worker.workspace import CloudWorkspace, LocalWorkspace, WorkspaceProvider
+
+
+def _create_workspace(workspace_type: str, config: dict, run_id: str = "") -> WorkspaceProvider | None:
+    """共享 workspace 工厂——workers 和 pipelines 端点共用。
+
+    Args:
+        workspace_type: "local" | "cloud"
+        config: 工作区配置字典 (local: {path}, cloud: {host, port, user, key, path})
+        run_id: 运行 ID（local 模式用作子目录名）
+
+    Returns:
+        WorkspaceProvider 实例，local 模式返回 None（由 AgentWorker 自动创建 LocalWorkspace）
+
+    Raises:
+        HTTPException: 云端配置无效时
+    """
+    from pathlib import Path
+    from fastapi import HTTPException
+
+    if workspace_type == "cloud":
+        try:
+            return CloudWorkspace(
+                host=config.get("host", ""),
+                port=config.get("port", 22),
+                user=config.get("user", ""),
+                key=config.get("key", ""),
+                path=config.get("path", ""),
+            )
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"云端工作区配置错误: {e}")
+    # local → None, AgentWorker 自动创建 LocalWorkspace
+    return None
 
 router = APIRouter(prefix="/api/workers", tags=["workers"])
 
@@ -134,21 +166,12 @@ async def execute_worker_task(req: WorkerExecuteRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"无法创建 Agent: {e}")
 
-    # 创建 Workspace（根据类型）
-    workspace = None
-    if req.workspace_type == "cloud":
-        config = req.workspace_config or {}
-        try:
-            workspace = CloudWorkspace(
-                host=config.get("host", ""),
-                port=config.get("port", 22),
-                user=config.get("user", ""),
-                key=config.get("key", ""),
-                path=config.get("path", ""),
-            )
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"云端工作区配置错误: {e}")
-    # local → workspace=None, AgentWorker 自动创建 LocalWorkspace
+    # 创建 Workspace
+    workspace = _create_workspace(
+        req.workspace_type,
+        req.workspace_config or {},
+        req.agent_id,
+    )
 
     # 创建 Worker
     worker = AgentWorker(agent=agent, workspace=workspace, base_dir=req.workspace_config.get("path"))

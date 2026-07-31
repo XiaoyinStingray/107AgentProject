@@ -37,7 +37,7 @@ class ScheduledTask:
     agent_id: str
     task: str
     trigger_type: str  # "cron" | "file_watch" | "once"
-    cron_expr: str = ""  # "daily 08:00" / "hourly" / "*/30 * * * *"
+    cron_expr: str = ""  # "daily 08:00" / "hourly" / "every 30 minutes"
     watch_dir: str = ""  # 文件监视目录（trigger_type=file_watch 时）
     file_pattern: str = "*"  # 文件匹配模式
     enabled: bool = True
@@ -99,9 +99,17 @@ class WorkerScheduler:
         while self._running:
             try:
                 await self._check_all_tasks()
+            except asyncio.CancelledError:
+                break
             except Exception as e:
                 logger.error(f"[Scheduler] loop error: {e}")
-            await asyncio.sleep(self._check_interval)
+            try:
+                await asyncio.sleep(self._check_interval)
+            except asyncio.CancelledError:
+                break
+            except RuntimeError:
+                # Event loop closed during shutdown
+                break
 
     async def _check_all_tasks(self):
         """检查所有任务是否需要触发。"""
