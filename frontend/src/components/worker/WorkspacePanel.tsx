@@ -1,11 +1,12 @@
 /**
- * WorkspacePanel — 工作区文件面板。
+ * WorkspacePanel — 工作区文件面板 + 文件查看器。
  *
  * 左侧面板：显示工作区文件树，实时更新。
+ * 点击文件 → 右侧滑出面板查看内容。
  * 通过 worker.file_updated 事件触发刷新。
  */
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import type { WorkerEvent } from "../../api/workers";
 
 // =============================================================================
@@ -67,10 +68,12 @@ function TreeNode({
   node,
   depth,
   newFiles,
+  onFileClick,
 }: {
   node: FileTreeNode;
   depth: number;
   newFiles: Set<string>;
+  onFileClick?: (path: string) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const isNew = newFiles.has(node.path);
@@ -96,6 +99,7 @@ function TreeNode({
               node={child}
               depth={depth + 1}
               newFiles={newFiles}
+              onFileClick={onFileClick}
             />
           ))}
       </div>
@@ -103,9 +107,10 @@ function TreeNode({
   }
 
   return (
-    <div
-      className={`flex items-center justify-between py-0.5 hover:bg-bg-primary/50
-                 transition-colors ${isNew ? "animate-pulse" : ""}`}
+    <button
+      onClick={() => onFileClick?.(node.path)}
+      className={`w-full flex items-center justify-between py-0.5 hover:bg-bg-primary/50
+                 transition-colors cursor-pointer ${isNew ? "animate-pulse" : ""}`}
       style={{ paddingLeft: `${depth * 12 + 4}px`, paddingRight: "4px" }}
     >
       <div className="flex items-center gap-1 min-w-0">
@@ -136,7 +141,7 @@ function TreeNode({
             : `${node.size}B`}
         </span>
       )}
-    </div>
+    </button>
   );
 }
 
@@ -146,9 +151,43 @@ function TreeNode({
 
 interface WorkspacePanelProps {
   events: WorkerEvent[];
+  runId?: string;
+  connected?: boolean;
 }
 
-export default function WorkspacePanel({ events }: WorkspacePanelProps) {
+export default function WorkspacePanel({ events, runId, connected }: WorkspacePanelProps) {
+  // 文件查看器状态
+  const [viewingFile, setViewingFile] = useState<string | null>(null);
+  const [fileContent, setFileContent] = useState<string | null>(null);
+  const [fileLoading, setFileLoading] = useState(false);
+
+  // 点击文件 → 获取内容
+  const openFile = useCallback(async (path: string) => {
+    if (!runId) return;
+    setViewingFile(path);
+    setFileLoading(true);
+    setFileContent(null);
+    try {
+      const resp = await fetch(`/api/workers/${runId}/files/${encodeURIComponent(path)}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        setFileContent(data.content);
+      } else {
+        setFileContent("(无法读取文件)");
+      }
+    } catch {
+      setFileContent("(网络错误)");
+    } finally {
+      setFileLoading(false);
+    }
+  }, [runId]);
+
+  // 关闭文件查看器
+  const closeFile = useCallback(() => {
+    setViewingFile(null);
+    setFileContent(null);
+  }, []);
+
   // 从事件中提取文件信息
   const files = useMemo(() => {
     const seen = new Map<string, number>();
@@ -186,7 +225,7 @@ export default function WorkspacePanel({ events }: WorkspacePanelProps) {
   const tree = useMemo(() => buildFileTree(files), [files]);
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="relative flex flex-col h-full">
       {/* 标题 */}
       <div className="px-3 py-2 border-b border-border">
         <div className="flex items-center justify-between">
@@ -218,10 +257,46 @@ export default function WorkspacePanel({ events }: WorkspacePanelProps) {
               node={node}
               depth={0}
               newFiles={newFiles}
+              onFileClick={openFile}
             />
           ))
         )}
       </div>
+
+      {/* 文件查看器滑出面板 */}
+      {viewingFile && (
+        <div className="absolute right-0 top-0 bottom-0 w-[400px] bg-bg-card border-l-2 border-border
+                        shadow-2xl z-30 flex flex-col"
+             style={{boxShadow: "-4px 0 20px rgba(0,0,0,0.5)"}}>
+          {/* 查看器标题栏 */}
+          <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-bg-secondary">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-xs">
+                {viewingFile.endsWith(".md") ? "📝" :
+                 viewingFile.endsWith(".py") ? "🐍" :
+                 viewingFile.endsWith(".json") ? "📋" : "📄"}
+              </span>
+              <span className="text-xs font-mono text-text-primary truncate" title={viewingFile}>
+                {viewingFile}
+              </span>
+            </div>
+            <button onClick={closeFile}
+                    className="text-text-muted hover:text-text-primary text-lg leading-none px-1">
+              ✕
+            </button>
+          </div>
+          {/* 文件内容 */}
+          <div className="flex-1 overflow-y-auto p-3">
+            {fileLoading ? (
+              <p className="text-xs text-text-muted font-mono">加载中…</p>
+            ) : fileContent !== null ? (
+              <pre className="text-xs font-mono text-text-secondary whitespace-pre-wrap break-all">
+                {fileContent}
+              </pre>
+            ) : null}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

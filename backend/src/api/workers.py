@@ -181,20 +181,30 @@ async def execute_worker_task(req: WorkerExecuteRequest):
         "worker": worker,
         "agent_name": worker._agent_name,
         "task": req.task,
+        "running": True,
+        "events": [],
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
     # 返回 SSE 流
     async def event_generator():
+        entry = _active_workers.get(worker.run_id)
         try:
             async for event in worker.execute(req.task):
                 yield event
+                # 保存事件供重连回放
+                if entry and entry.get("events") is not None:
+                    entry["events"].append(event)
         except Exception as e:
             logger.exception(f"Worker SSE error: {e}")
-            yield f"data: {json.dumps({'type': 'worker.error', 'data': {'message': str(e)}, 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
+            err = f"data: {json.dumps({'type': 'worker.error', 'data': {'message': str(e)}, 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
+            if entry and entry.get("events") is not None:
+                entry["events"].append(err)
+            yield err
         finally:
+            if entry:
+                entry["running"] = False
             # 保留 worker 在内存中（用户可查询状态、下载产物）
-            pass
 
     return StreamingResponse(
         event_generator(),
@@ -221,6 +231,54 @@ async def get_worker_status(run_id: str):
         task=entry["task"],
         created_at=entry["created_at"],
     )
+
+
+# =============================================================================
+# 文件读取 + 事件回放 + 活跃列表
+# =============================================================================
+
+
+@router.get("/{run_id}/files/{path:path}")
+async def read_worker_file(run_id: str, path: str):
+    """读取 Worker 工作区中的文件内容。"""
+    entry = _active_workers.get(run_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Worker {run_id!r} 未找到")
+    try:
+        content = await entry["worker"]._workspace.read_file(path)
+        return {"path": path, "content": content, "size": len(content)}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"文件不存在: {path}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{run_id}/events")
+async def get_worker_events(run_id: str):
+    """获取 Worker 事件列表——页面切换后恢复终端用。"""
+    entry = _active_workers.get(run_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Worker {run_id!r} 未找到")
+    return {
+        "run_id": run_id,
+        "events": entry.get("events", [])[-500:],
+        "running": entry.get("running", False),
+    }
+
+
+@router.get("/running/list")
+async def list_running_workers():
+    """列出所有活跃 Worker——供全局状态栏显示。"""
+    return [
+        {
+            "run_id": rid,
+            "agent_name": e["agent_name"],
+            "task": e["task"][:80],
+            "running": e.get("running", False),
+            "created_at": e["created_at"],
+        }
+        for rid, e in _active_workers.items()
+    ]
 
 
 @router.delete("/{run_id}")
