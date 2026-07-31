@@ -61,7 +61,18 @@ export function useWorkerExecute() {
     const controller = new AbortController();
     abortRef.current = controller;
 
-    setState({ connected: true, events: [], done: false, error: null });
+    setState((prev) => ({
+      connected: true,
+      events: req.reuse_run_id
+        ? [...prev.events, {
+            type: "worker.started" as WorkerEventType,
+            data: { run_id: req.reuse_run_id, agent_name: "", task: `--- 追加: ${req.task.slice(0, 60)} ---`, workspace: "" },
+            timestamp: new Date().toISOString(),
+          }]
+        : [],
+      done: false,
+      error: null,
+    }));
 
     try {
       const response = await fetch("/api/workers/execute", {
