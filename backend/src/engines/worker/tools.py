@@ -18,6 +18,8 @@ Phase 23: 实现 5 个 handler 函数并填入 WORKER_TOOLS。
 from dataclasses import dataclass
 from typing import Callable, Any
 
+from loguru import logger
+
 
 # =============================================================================
 # 数据类
@@ -147,3 +149,130 @@ WORKER_TOOLS: list[ToolSpec] = [
 
 # 工具名 → ToolSpec 快速查找表
 TOOL_REGISTRY: dict[str, ToolSpec] = {t.name: t for t in WORKER_TOOLS}
+
+
+# =============================================================================
+# Tool Handler 实现（Phase 23）
+# =============================================================================
+
+
+def make_worker_tools(workspace) -> list[ToolSpec]:
+    """为 Worker 创建闭包工具集——捕获 WorkspaceProvider 引用。
+
+    每个 tool handler 通过闭包访问 workspace（LocalWorkspace 或 CloudWorkspace），
+    产生真实的文件系统副作用。引擎不需要知道 workspace 的具体类型。
+
+    Args:
+        workspace: WorkspaceProvider 实例
+
+    Returns:
+        ToolSpec 列表，其中每个 tool 的 handler 已填入捕获了 workspace 的闭包
+    """
+    from engines.worker.sandbox import check_code_safety
+
+    # ── web_search ──
+    async def web_search_handler(query: str) -> str:
+        """搜索互联网。"""
+        from llm.search import web_search, format_search_results
+        results = await web_search(query, max_results=5)
+        return format_search_results(results)
+
+    # ── run_python ──
+    async def run_python_handler(code: str) -> str:
+        """在沙盒中执行 Python 代码。"""
+        if not code or not isinstance(code, str) or len(code.strip()) == 0:
+            return "错误：代码不能为空。"
+        result = await workspace.run_python(code)
+        output_parts = []
+        if result.stdout:
+            output_parts.append(f"--- stdout ---\n{result.stdout}")
+        if result.stderr:
+            output_parts.append(f"--- stderr ---\n{result.stderr}")
+        if not result.stdout and not result.stderr:
+            output_parts.append("(无输出)")
+        output_parts.append(f"退出码: {result.exit_code}")
+        return "\n\n".join(output_parts)
+
+    # ── write_file ──
+    async def write_file_handler(path: str, content: str) -> str:
+        """创建或覆盖写入文件。"""
+        if not path or not isinstance(path, str):
+            return "错误：请提供有效的文件路径。"
+        if content is None or not isinstance(content, str):
+            return "错误：请提供有效的文件内容。"
+        if any(c in path for c in ('\\', '..')):
+            return f"错误：路径包含非法字符: {path}"
+        try:
+            full_path = await workspace.write_file(path, content)
+            logger.info(f"[worker-tool] write_file: {path} → {full_path} ({len(content)} chars)")
+            return f"文件已写入: {path} ({len(content)} 字符)"
+        except PermissionError as e:
+            return f"权限错误: {e}"
+        except Exception as e:
+            logger.error(f"[worker-tool] write_file failed: {e}")
+            return f"写入失败: {e}"
+
+    # ── read_file ──
+    async def read_file_handler(path: str) -> str:
+        """读取文件内容。"""
+        if not path or not isinstance(path, str):
+            return "错误：请提供有效的文件路径。"
+        try:
+            content = await workspace.read_file(path)
+            return f"--- {path} ---\n{content}"
+        except FileNotFoundError:
+            return f"文件不存在: {path}。请确认文件名是否正确。工作区中的文件列表可用 list_files 查看。"
+        except PermissionError as e:
+            return f"权限错误: {e}"
+        except Exception as e:
+            return f"读取失败: {e}"
+
+    # ── list_files ──
+    async def list_files_handler(directory: str = "") -> str:
+        """列出工作区文件。"""
+        try:
+            files = await workspace.list_files(directory)
+            if not files:
+                return "工作区为空。"
+            lines = [f"工作区文件（{len(files)} 个）:"]
+            for f_info in files:
+                size_kb = f_info.size / 1024
+                size_str = f"{size_kb:.1f}KB" if size_kb >= 0.1 else f"{f_info.size}B"
+                lines.append(f"  - {f_info.path} ({size_str})")
+            return "\n".join(lines)
+        except Exception as e:
+            return f"列出文件失败: {e}"
+
+    # 构造闭包 ToolSpec 列表（复制原 ToolSpec 并填入 handler）
+    return [
+        ToolSpec(
+            name="web_search",
+            description=TOOL_REGISTRY["web_search"].description,
+            parameters=TOOL_REGISTRY["web_search"].parameters,
+            handler=web_search_handler,
+        ),
+        ToolSpec(
+            name="run_python",
+            description=TOOL_REGISTRY["run_python"].description,
+            parameters=TOOL_REGISTRY["run_python"].parameters,
+            handler=run_python_handler,
+        ),
+        ToolSpec(
+            name="write_file",
+            description=TOOL_REGISTRY["write_file"].description,
+            parameters=TOOL_REGISTRY["write_file"].parameters,
+            handler=write_file_handler,
+        ),
+        ToolSpec(
+            name="read_file",
+            description=TOOL_REGISTRY["read_file"].description,
+            parameters=TOOL_REGISTRY["read_file"].parameters,
+            handler=read_file_handler,
+        ),
+        ToolSpec(
+            name="list_files",
+            description=TOOL_REGISTRY["list_files"].description,
+            parameters=TOOL_REGISTRY["list_files"].parameters,
+            handler=list_files_handler,
+        ),
+    ]
