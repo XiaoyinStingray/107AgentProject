@@ -11,6 +11,7 @@ interface Props {
   count: number;
   max: number;
   paused: boolean;
+  busy?: boolean;
   onSave: (name: string) => void;
   onLoad: (id: string) => void;
   onDelete: (id: string) => void;
@@ -18,7 +19,7 @@ interface Props {
 }
 
 export default function CheckpointPanel({
-  checkpoints, count, max, paused,
+  checkpoints, count, max, paused, busy = false,
   onSave, onLoad, onDelete, onTogglePause,
 }: Props) {
   const [saveName, setSaveName] = useState("");
@@ -36,13 +37,14 @@ export default function CheckpointPanel({
         <button
           type="button"
           onClick={onTogglePause}
+          disabled={busy}
           className={`px-3 py-1 rounded border transition-colors ${
             paused
               ? "border-accent-green/60 bg-accent-green/10 text-accent-green"
               : "border-accent-orange/60 bg-accent-orange/10 text-accent-orange"
-          }`}
+          } disabled:opacity-40 disabled:cursor-not-allowed`}
         >
-          {paused ? "▶ 继续" : "⏸ 暂停"}
+          {busy ? "同步中…" : paused ? "▶ 继续" : "⏸ 暂停"}
         </button>
         <span className="text-text-secondary">
           {paused ? "已暂停" : "运行中"}

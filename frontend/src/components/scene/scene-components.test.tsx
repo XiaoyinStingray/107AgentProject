@@ -130,7 +130,7 @@ describe("AudioControls", () => {
   });
 
   it("removes its visibility listener when unmounted", () => {
-    const context = { state: "running" };
+    const context = { state: "running", close: vi.fn() };
     vi.stubGlobal("AudioContext", vi.fn(() => context));
     const addSpy = vi.spyOn(document, "addEventListener");
     const removeSpy = vi.spyOn(document, "removeEventListener");
@@ -148,5 +148,7 @@ describe("AudioControls", () => {
       "visibilitychange",
       visibilityRegistration?.[1],
     );
+    expect(queueMocks.setEnabled).toHaveBeenLastCalledWith(false, null);
+    expect(context.close).toHaveBeenCalledOnce();
   });
 });

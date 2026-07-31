@@ -125,6 +125,9 @@ export class AutonomousMover {
   start(): void {
     if (this.active) return;
     this.active = true;
+    if (this.commandQueue.length > 0 && this.sprite.action !== "walk") {
+      this.executeNextCommand();
+    }
     this.scheduleNext();
   }
 
@@ -167,7 +170,7 @@ export class AutonomousMover {
       this.commandQueue = this.commandQueue.slice(-3);
     }
     // 立即尝试执行（如果当前不在移动中）
-    if (this.sprite.action !== "walk") {
+    if (this.active && this.sprite.action !== "walk") {
       this.executeNextCommand();
     }
   }

@@ -7,6 +7,14 @@ import { emotionEngine, RANDOM_EVENTS } from "../emotion/EmotionEngine";
 import type { EmotionChange, SceneEvent } from "../emotion/EmotionEngine";
 import { playbackQueue } from "../audio/DialoguePlaybackQueue";
 import type { Emotion } from "../sprites/AgentSprite";
+import {
+  buildWhisperContext,
+  chooseWhisperApproachTile,
+  normalizeWhisper,
+  resolveWhisperTarget,
+  type PendingWhisper,
+  type WhisperAgent,
+} from "../whisper";
 
 /* ── 多轮对话会话 66-S ── */
 interface ConversationSession {
@@ -18,6 +26,17 @@ interface ConversationSession {
   currentRound: number;    // 0-based
   context: string[];       // 之前轮次的消息（LLM 上下文）
   timer: Phaser.Time.TimerEvent | null;
+  whisper?: {
+    speakerId: string;
+    targetName: string;
+  };
+}
+
+interface SseDialogueEvent {
+  fromId: string;
+  fromName: string;
+  message: string;
+  targetIds: string[];
 }
 
 /**
@@ -83,6 +102,7 @@ export class MapScene extends Phaser.Scene {
   // 66-S: 多轮对话会话
   private activeSessions: Map<string, ConversationSession> = new Map();
   private busyAgents: Set<string> = new Set();
+  private pendingWhispers: Map<string, PendingWhisper> = new Map();
 
   constructor() {
     super({ key: "MapScene" });
@@ -92,17 +112,46 @@ export class MapScene extends Phaser.Scene {
    * 生命周期
    * ================================================================ */
 
+  private onAgentWhisper(agentId: string, message: string): void {
+    this.receiveWhisper(agentId, message);
+  }
+
+  private onAgentWhisperFeedback(agentId: string, message: string): void {
+    this.showAgentBubble(agentId, message);
+  }
+
+  private onSseMoveTo(agentId: string, tileX: number, tileY: number): void {
+    if (this.paused) return;
+    const mover = this.movers.get(agentId);
+    if (!mover) return;
+    mover.setSseDriven(true);
+    mover.pushCommand(tileX, tileY);
+  }
+
+  private onSseDialogue(data: SseDialogueEvent): void {
+    this.receiveSseDialogue(data);
+  }
+
+  private onSseEmotion(agentId: string, emotion: string): void {
+    const sprite = this.agentSprites.get(agentId);
+    if (sprite) {
+      sprite.setEmotion(emotion as Emotion);
+    }
+  }
+
+  private onBrainToggle(enabled: boolean): void {
+    (this as any)._brainEnabled = enabled;
+  }
+
   create(): void {
     this.input.dragDistanceThreshold = 8;
     this.ready = true;
-    this.game.events.on("agent-whisper", (agentId: string) => {
-      const sprite = this.agentSprites.get(agentId);
-      if (!sprite) return;
-      this.tweens.add({
-        targets: sprite, alpha: 0.5, duration: 120, yoyo: true, repeat: 2,
-      });
-    });
-    this.startDialogueScanner();
+    this.game.events.on("agent-whisper", this.onAgentWhisper, this);
+    this.game.events.on(
+      "agent-whisper-feedback",
+      this.onAgentWhisperFeedback,
+      this,
+    );
 
     // ── EmotionEngine 66-S ──
     emotionEngine.onEmotionChange((changes: EmotionChange[]) => {
@@ -140,35 +189,13 @@ export class MapScene extends Phaser.Scene {
 
     // ── State 4 Step 81: SSE Brain 联动 ──
     // SSE move_to → 驱动精灵移动
-    this.game.events.on("sse-move-to", (agentId: string, tileX: number, tileY: number) => {
-      const mover = this.movers.get(agentId);
-      if (mover) {
-        mover.setSseDriven(true);
-        mover.pushCommand(tileX, tileY);
-      }
-    });
+    this.game.events.on("sse-move-to", this.onSseMoveTo, this);
     // SSE dialogue → 显示对话气泡
-    this.game.events.on("sse-dialogue", (data: {
-      fromId: string; fromName: string; message: string; targetIds: string[];
-    }) => {
-      // 发言者气泡
-      this.showAgentBubble(data.fromId, data.message, "talk");
-      // 目标气泡（如果有）
-      data.targetIds?.forEach((tid) => {
-        this.showAgentBubble(tid, "", "listen");
-      });
-    });
+    this.game.events.on("sse-dialogue", this.onSseDialogue, this);
     // SSE emotion → 更新精灵情绪
-    this.game.events.on("sse-emotion", (agentId: string, emotion: string) => {
-      const sprite = this.agentSprites.get(agentId);
-      if (sprite) {
-        sprite.setEmotion(emotion as Emotion);
-      }
-    });
+    this.game.events.on("sse-emotion", this.onSseEmotion, this);
     // Brain 开关 → 切换对话数据源
-    this.game.events.on("brain-toggle", (enabled: boolean) => {
-      (this as any)._brainEnabled = enabled;
-    });
+    this.game.events.on("brain-toggle", this.onBrainToggle, this);
 
     // 从 GameCanvas registry 读取初始数据（绕过 getScene 时序问题）
     const agents = this.game.registry.get("pendingAgents") as AgentSpriteData[] | undefined;
@@ -183,19 +210,17 @@ export class MapScene extends Phaser.Scene {
   }
 
   shutdown(): void {
-    this.game.events.off("agent-whisper");
-    this.dialogueTimer?.destroy();
-    this.dialogueCooldowns.clear();
-    // 清理活跃会话
-    for (const [key, s] of this.activeSessions) {
-      s.timer?.destroy();
-      this.busyAgents.delete(s.a.agentId);
-      this.busyAgents.delete(s.b.agentId);
-    }
-    this.activeSessions.clear();
+    this.game.events.off("agent-whisper", this.onAgentWhisper, this);
+    this.game.events.off(
+      "agent-whisper-feedback",
+      this.onAgentWhisperFeedback,
+      this,
+    );
+    this.game.events.off("sse-move-to", this.onSseMoveTo, this);
+    this.game.events.off("sse-dialogue", this.onSseDialogue, this);
+    this.game.events.off("sse-emotion", this.onSseEmotion, this);
+    this.game.events.off("brain-toggle", this.onBrainToggle, this);
     emotionEngine.stop();
-    // 66-A: 清空音频队列（场景切换/卸载不残留声音）
-    playbackQueue.clear();
     this.destroyScene();
   }
 
@@ -286,6 +311,9 @@ export class MapScene extends Phaser.Scene {
         this.fgImages.push(img);
       });
     }
+
+    // destroyScene() 会移除全部 Phaser timer；每次地图重建后必须重启扫描器。
+    this.startDialogueScanner();
   }
 
   /* ================================================================
@@ -516,7 +544,10 @@ export class MapScene extends Phaser.Scene {
     this.movers.forEach((m) => m.stop());
     if (this.dialogueTimer) this.dialogueTimer.paused = true;
     // 取消所有进行中的 tween（停止移动动画）
-    this.tweens.killTweensOf(this.agentSprites);
+    this.agentSprites.forEach((sprite) => {
+      this.tweens.killTweensOf(sprite);
+      if (sprite.action === "walk") sprite.setAction("idle");
+    });
     // 66-A: 暂停音频播放
     playbackQueue.pause();
   }
@@ -547,9 +578,92 @@ export class MapScene extends Phaser.Scene {
     }
   }
 
+  /** 从 Checkpoint 强制恢复全部 Agent 状态；普通同步仍保留实时坐标。 */
+  restoreAgents(data: AgentSpriteData[]): void {
+    const wasPaused = this.paused;
+    this.movers.forEach((mover) => mover.stop());
+    this.agentSprites.forEach((sprite) => {
+      this.tweens.killTweensOf(sprite);
+    });
+    this.clearConversationState();
+    this.setAgents(data);
+
+    for (const snapshot of data) {
+      const sprite = this.agentSprites.get(snapshot.agentId);
+      if (!sprite) continue;
+      sprite.setTile(snapshot.tileX, snapshot.tileY);
+      sprite.setData("startTileX", snapshot.tileX);
+      sprite.setData("startTileY", snapshot.tileY);
+      sprite.setAction(snapshot.action);
+    }
+
+    if (!wasPaused) {
+      this.movers.forEach((mover) => mover.start());
+    }
+  }
+
   /** 获取指定 Agent 的精灵（供外部调用 showBubble 等） */
   getAgentSprite(agentId: string): AgentSprite | undefined {
     return this.agentSprites.get(agentId);
+  }
+
+  /** Store a one-shot local instruction for the Agent's next conversation. */
+  receiveWhisper(agentId: string, message: string): boolean {
+    const sprite = this.agentSprites.get(agentId);
+    const normalized = normalizeWhisper(message);
+    if (!sprite || !normalized) return false;
+    const agents: WhisperAgent[] = [...this.agentSprites.values()].map((agent) => ({
+      agentId: agent.agentId,
+      name: agent.getData("name") ?? "",
+      tileX: agent.tileX,
+      tileY: agent.tileY,
+    }));
+    const target = resolveWhisperTarget(normalized, agentId, agents);
+    if (!target) {
+      this.showAgentBubble(agentId, "没有找到可互动的目标");
+      return false;
+    }
+
+    this.pendingWhispers.set(agentId, {
+      message: normalized,
+      targetAgentId: target.agentId,
+      targetName: target.name,
+    });
+
+    const distance =
+      Math.abs(sprite.tileX - target.tileX) +
+      Math.abs(sprite.tileY - target.tileY);
+    if (distance <= MapScene.PROXIMITY) {
+      this.showAgentBubble(agentId, `已收到，准备与 ${target.name} 对话`);
+      return true;
+    }
+
+    const approach = chooseWhisperApproachTile(
+      agents.find((agent) => agent.agentId === agentId)!,
+      target,
+      (tileX, tileY) =>
+        this.isWalkable(tileX, tileY) &&
+        !this.isOccupiedByOther(agentId, tileX, tileY),
+    );
+    if (approach) {
+      this.movers.get(agentId)?.pushCommand(approach.tileX, approach.tileY);
+      this.showAgentBubble(agentId, `已收到，正前往 ${target.name}`);
+    } else {
+      this.showAgentBubble(agentId, `已收到，等待接近 ${target.name}`);
+    }
+    return true;
+  }
+
+  /** Route Brain SSE dialogue through the same serialized playback queue. */
+  receiveSseDialogue(data: SseDialogueEvent): boolean {
+    const speaker = this.agentSprites.get(data.fromId);
+    if (!speaker || !data.message.trim()) return false;
+    this.queueDialogue(
+      data.fromId,
+      data.message,
+      speaker.emotion ?? "neutral",
+    );
+    return true;
   }
 
   /** 显示 Agent 头顶气泡（直接模式，用于非对话通知） */
@@ -751,7 +865,18 @@ export class MapScene extends Phaser.Scene {
     }
 
     // 收集可对话的 pair（按距离排序，最近的优先）
-    const eligible: Array<{ a: AgentSprite; b: AgentSprite; dist: number; pairKey: string }> = [];
+    const eligible: Array<{
+      a: AgentSprite;
+      b: AgentSprite;
+      dist: number;
+      pairKey: string;
+      whisper: {
+        speaker: AgentSprite;
+        listener: AgentSprite;
+        message: string;
+        targetName: string;
+      } | null;
+    }> = [];
 
     for (let i = 0; i < agents.length; i++) {
       for (let j = i + 1; j < agents.length; j++) {
@@ -767,23 +892,79 @@ export class MapScene extends Phaser.Scene {
         const last = this.dialogueCooldowns.get(pairKey) ?? 0;
         if (now - last < MapScene.COOLDOWN) continue;
 
-        eligible.push({ a, b, dist, pairKey });
+        eligible.push({
+          a,
+          b,
+          dist,
+          pairKey,
+          whisper: this.findWhisperForPair(a, b),
+        });
       }
     }
 
-    eligible.sort((x, y) => x.dist - y.dist);
+    eligible.sort((x, y) => {
+      const whisperPriority = Number(Boolean(y.whisper)) - Number(Boolean(x.whisper));
+      return whisperPriority || x.dist - y.dist;
+    });
 
     // 每次扫描最多启动 1 个新会话（已有多轮在进行中）
-    for (const { a, b, dist, pairKey } of eligible) {
+    for (const { a, b, dist, pairKey, whisper } of eligible) {
       if (this.activeSessions.size >= 1) break; // 同时最多 1 组对话
       this.dialogueCooldowns.set(pairKey, now);
-      this.startConversationSession(a, b, dist);
+      if (whisper) {
+        this.pendingWhispers.delete(whisper.speaker.agentId);
+        this.showAgentBubble(
+          whisper.speaker.agentId,
+          `正在执行耳语：与 ${whisper.targetName} 对话`,
+        );
+        this.startConversationSession(
+          whisper.speaker,
+          whisper.listener,
+          dist,
+          [buildWhisperContext(whisper.message)],
+          {
+            speakerId: whisper.speaker.agentId,
+            targetName: whisper.targetName,
+          },
+        );
+      } else {
+        this.startConversationSession(a, b, dist);
+      }
       break;
     }
   }
 
+  private findWhisperForPair(
+    a: AgentSprite,
+    b: AgentSprite,
+  ): {
+    speaker: AgentSprite;
+    listener: AgentSprite;
+    message: string;
+    targetName: string;
+  } | null {
+    for (const [speaker, listener] of [[a, b], [b, a]] as const) {
+      const whisper = this.pendingWhispers.get(speaker.agentId);
+      if (whisper?.targetAgentId === listener.agentId) {
+        return {
+          speaker,
+          listener,
+          message: whisper.message,
+          targetName: whisper.targetName,
+        };
+      }
+    }
+    return null;
+  }
+
   /** 启动多轮对话会话 */
-  private startConversationSession(a: AgentSprite, b: AgentSprite, dist: number): void {
+  private startConversationSession(
+    a: AgentSprite,
+    b: AgentSprite,
+    dist: number,
+    initialContext: string[] = [],
+    whisper?: ConversationSession["whisper"],
+  ): void {
     const nameA: string = a.getData("name") ?? "?";
     const nameB: string = b.getData("name") ?? "?";
     const rounds = 2 + Math.floor(Math.random() * 3); // 2-4 轮
@@ -807,8 +988,9 @@ export class MapScene extends Phaser.Scene {
       a, b, nameA, nameB,
       totalRounds: rounds,
       currentRound: 0,
-      context: [],
+      context: [...initialContext],
       timer: null,
+      whisper,
     };
 
     this.activeSessions.set(pairKey, session);
@@ -838,11 +1020,12 @@ export class MapScene extends Phaser.Scene {
       const msg = result.message;
       context.push(msg);
 
-      speaker.setAction("talk");
-      listener.setAction("talk");
-
-      // 情绪触发
-      emotionEngine.onDialogue(speaker.agentId, msg);
+      if (!this.paused) {
+        speaker.setAction("talk");
+        listener.setAction("talk");
+        // 情绪触发
+        emotionEngine.onDialogue(speaker.agentId, msg);
+      }
 
       session.currentRound++;
 
@@ -890,6 +1073,12 @@ export class MapScene extends Phaser.Scene {
     this.busyAgents.delete(b.agentId);
     session.timer?.destroy();
     this.activeSessions.delete(sessionKey);
+    if (session.whisper) {
+      this.showAgentBubble(
+        session.whisper.speakerId,
+        `耳语执行完成：已与 ${session.whisper.targetName} 对话`,
+      );
+    }
   }
 
   /** 对话结束后让双方各退一步（tween 动画，不瞬移） */
@@ -1034,7 +1223,25 @@ export class MapScene extends Phaser.Scene {
    * 清理
    * ================================================================ */
 
+  private clearConversationState(): void {
+    this.dialogueCooldowns.clear();
+    for (const session of this.activeSessions.values()) {
+      session.timer?.destroy();
+    }
+    this.activeSessions.clear();
+    this.busyAgents.clear();
+    this.pendingWhispers.clear();
+    playbackQueue.clear();
+  }
+
+  private resetDialogueRuntime(): void {
+    this.dialogueTimer?.destroy();
+    this.dialogueTimer = null;
+    this.clearConversationState();
+  }
+
   private destroyScene(): void {
+    this.resetDialogueRuntime();
     // 杀光所有 tween + timer（防止回调在 scene 销毁后触发）
     this.tweens.killAll();
     this.time.removeAllEvents();

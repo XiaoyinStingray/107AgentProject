@@ -8,6 +8,7 @@ from engines.scene.engine import (
     AgentSpriteData,
     RandomEventEngine,
     SceneEngine,
+    _extract_whisper_instruction,
     _mock_dialogue,
     detect_emotion,
 )
@@ -91,6 +92,22 @@ def test_mock_dialogue_has_a_safe_fallback_for_unknown_agents():
 
     assert result["message"]
     assert result["emotion"] is None
+
+
+def test_whisper_instruction_has_an_observable_mock_fallback():
+    context = "【用户只对你说的耳语指令】请去和陈墨聊聊"
+
+    assert _extract_whisper_instruction(context) == "请去和陈墨聊聊"
+    result = _mock_dialogue(
+        "苏敏",
+        "陈墨",
+        "library",
+        "neutral",
+        _extract_whisper_instruction(context),
+    )
+
+    assert "陈墨" in result["message"]
+    assert "提醒" in result["message"]
 
 
 @pytest.mark.anyio

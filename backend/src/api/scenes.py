@@ -245,7 +245,11 @@ async def create_checkpoint(scene_id: str, body: CheckpointCreate, db: AsyncSess
 @router.delete("/{scene_id}/checkpoints/{checkpoint_id}")
 async def delete_checkpoint(scene_id: str, checkpoint_id: str, db: AsyncSession = Depends(get_db)):
     """删除存档"""
-    ok = await CheckpointRow.delete_by_id(db, checkpoint_id)
+    ok = await CheckpointRow.delete_by_scene_and_id(
+        db,
+        scene_id,
+        checkpoint_id,
+    )
     if not ok:
         raise HTTPException(404, "存档不存在")
     return {"ok": True}
@@ -276,7 +280,7 @@ async def start_scene(scene_id: str, body: StartSceneRequest):
 
     from api.worlds import _rebuild_agents_from_db, _build_world_engine
     from api.sse import register_world
-    from models.world import WorldResponse
+    from models.world import Scenario, WorldResponse
     from models.world_orm import WorldRow
     from models.scenario_orm import ScenarioRow
     from db import async_session
@@ -293,32 +297,29 @@ async def start_scene(scene_id: str, body: StartSceneRequest):
         )
         scenario_row = result.scalar_one_or_none()
 
-        if scenario_row is None:
-            # 创建临时场景 World
-            world_row = WorldRow(
-                id=str(uuid.uuid4()),
-                name=f"Scene: {scene_id}",
-                agent_ids_json=_json.dumps(body.agent_ids),
-                scenario_id="builtin_study",
-                world_type="scene",
-                status="running",
+        scenario = (
+            Scenario(**scenario_row.to_scenario())
+            if scenario_row is not None
+            else Scenario(
+                name=f"scene_{scene_id}",
+                description=f"M11 游戏化场景：{scene_id}",
+                environment_params={"scene_id": scene_id},
             )
-            session.add(world_row)
-            await session.commit()
-            world_data = WorldResponse(**world_row.to_dict())
-        else:
-            # 复用已有场景 scenario
-            world_row = WorldRow(
-                id=str(uuid.uuid4()),
-                name=f"Scene: {scene_id}",
-                agent_ids_json=_json.dumps(body.agent_ids),
-                scenario_id=scenario_row.id,
-                world_type="scene",
-                status="running",
-            )
-            session.add(world_row)
-            await session.commit()
-            world_data = WorldResponse(**world_row.to_dict())
+        )
+        world_row = WorldRow(
+            id=str(uuid.uuid4()),
+            name=f"Scene: {scene_id}",
+            scenario_json=_json.dumps(
+                scenario.model_dump(),
+                ensure_ascii=False,
+            ),
+            agent_ids_json=_json.dumps(body.agent_ids),
+            world_type="scene",
+            status="running",
+        )
+        session.add(world_row)
+        await session.commit()
+        world_data = WorldResponse(**world_row.to_dict())
 
     # 3. 构建 WorldEngine + 注入 SceneBridge
     engine = await _build_world_engine(world_data)

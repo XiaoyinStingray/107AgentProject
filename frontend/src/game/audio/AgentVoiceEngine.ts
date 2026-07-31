@@ -106,7 +106,7 @@ export class AgentVoiceEngine {
   ): Promise<void> {
     if (!this.audioCtx || volume <= 0) {
       // 无声模式：仅分页回调
-      this.playSilent(text, callbacks);
+      await this.playSilent(text, callbacks);
       return;
     }
 

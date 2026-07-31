@@ -10,6 +10,7 @@ from engines.world.relationships import (
     apply_relationship_changes,
     extract_relationship_changes,
 )
+from engines.world.instructions import resolve_agent_instruction
 from engines.world.resources import build_resource_context
 from models.event import Event, SimEvent
 
@@ -338,6 +339,25 @@ class WorldStateMixin:
         if not hasattr(self, "_pending_injects"):
             self._pending_injects: list[SimEvent] = []
         self._pending_injects.append(event)
+        if event_type == "agent_action" and targets:
+            for target_id in targets:
+                instruction = resolve_agent_instruction(
+                    description,
+                    target_id,
+                    self.agents,
+                )
+                self._pending_agent_instructions.setdefault(
+                    target_id,
+                    [],
+                ).append(instruction)
+                if len(self.agents) > 1:
+                    # Delay scheduling until the next context-injection boundary.
+                    # This prevents an in-progress tick from consuming the route
+                    # before the instructed Agent receives its private prompt.
+                    route = [target_id]
+                    if instruction.social_target_id is not None:
+                        route.append(instruction.social_target_id)
+                    self._pending_instruction_routes.append(route)
         logger.info(
             "WorldEngine.inject_event: type={}, targets={}, description={}",
             event_type,

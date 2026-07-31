@@ -87,6 +87,11 @@ class WorldMessageMixin:
 
     def _select_addressed_speaker(self, messages) -> str | None:
         """Route an explicit single-name address without another LLM call."""
+        while self._pending_speaker_ids:
+            agent_id = self._pending_speaker_ids.pop(0)
+            agent = self.agents.get(agent_id)
+            if agent is not None:
+                return agent.autogen_agent.name
         if not messages:
             return next(iter(self.agents.values())).autogen_agent.name
         latest = messages[-1]
