@@ -16,9 +16,10 @@ export default function PipelinePage() {
   const [draft, setDraft] = useState<Pipeline>({name:"",description:"",nodes:[]});
   const [suggestGoal, setSuggestGoal] = useState("");
   const [suggesting, setSuggesting] = useState(false);
-  const [run, setRun] = useState<{running:boolean;events:any[];nodes:Record<string,string>}>({running:false,events:[],nodes:{}});
+  const [run, setRun] = useState<{running:boolean;events:any[];nodes:Record<string,string>;finished:boolean}>({running:false,events:[],nodes:{},finished:false});
   const abortRef = useRef<AbortController|null>(null);
   const [msg, setMsg] = useState<string|null>(null);
+  const [completedRuns, setCompletedRuns] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     try { const r=await fetch("/api/pipelines/"); if(r.ok) setTemplates(await r.json()); } catch {}
@@ -88,7 +89,7 @@ export default function PipelinePage() {
   const exec = async () => {
     if (!selected) return;
     const ctrl = new AbortController(); abortRef.current = ctrl;
-    setRun({running:true,events:[],nodes:{}});
+    setRun({running:true,events:[],nodes:{},finished:false});
     try {
       const r = await fetch(`/api/pipelines/${selected}/execute`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({workspace_type:"local"}),signal:ctrl.signal});
       if (!r.ok) { setMsg(`执行失败 (${r.status})`); setRun(p=>({...p,running:false})); return; }
@@ -100,7 +101,9 @@ export default function PipelinePage() {
         for (const line of buf.split("\n")) {
           if (line.startsWith("data: ")) try {
             const ev = JSON.parse(line.slice(6));
-            setRun(prev => ({...prev, events:[...prev.events,ev], nodes:ev.type==="pipeline.node_status"?{...prev.nodes,[ev.data.node_id]:ev.data.status}:prev.nodes, running:ev.type!=="pipeline.done"}));
+            const isDone = ev.type==="pipeline.done";
+            setRun(prev => ({...prev, events:[...prev.events,ev], nodes:ev.type==="pipeline.node_status"?{...prev.nodes,[ev.data.node_id]:ev.data.status}:prev.nodes, running:!isDone, finished:isDone}));
+            if (isDone && selected) setCompletedRuns(prev => new Set(prev).add(selected));
           } catch {}
         }
         buf = buf.includes("\n") ? buf.slice(buf.lastIndexOf("\n")+1) : buf;
@@ -121,8 +124,10 @@ export default function PipelinePage() {
         </div>
         <div className="flex items-center gap-2">
           <button onClick={newBlank} className="px-3 py-1 text-xs font-mono rounded border border-border text-text-secondary hover:text-cyan-400">+ 新建</button>
-          {selected && !run.running && <button onClick={exec} className="px-3 py-1 bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-mono rounded">▶ 运行</button>}
-          {run.running && <button onClick={()=>abortRef.current?.abort()} className="px-3 py-1 bg-rose-800 hover:bg-rose-700 text-white text-xs font-mono rounded">⏹ 停止</button>}
+          {selected && !run.running && !completedRuns.has(selected) && <button onClick={exec} className="px-3 py-1 bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-mono rounded">▶ 运行</button>}
+          {run.running ? (
+        <button onClick={()=>abortRef.current?.abort()} className="px-3 py-1 bg-rose-800 hover:bg-rose-700 text-white text-xs font-mono rounded">⏹ 停止</button>
+      ) : null}
         </div>
       </div>
 
@@ -147,7 +152,7 @@ export default function PipelinePage() {
               </div>
             ) : templates.map(t=>(
               <div key={t.id}
-                   onClick={()=>{setSelected(t.id!);setEditing(false);}}
+                   onClick={()=>{setSelected(t.id!);setEditing(false);setRun({running:false,events:[],nodes:{},finished:false});}}
                    className={`px-3 py-2 border-b border-border/50 cursor-pointer transition-colors hover:bg-bg-primary/50 ${selected===t.id?"bg-cyan-900/10 border-l-2 border-l-cyan-500":""}`}>
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-mono text-text-primary font-semibold truncate">{t.name}</span>
@@ -214,11 +219,20 @@ export default function PipelinePage() {
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-sm font-mono text-text-primary font-semibold">{selectedPipe.name}</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-mono text-text-primary font-semibold">{selectedPipe.name}</h3>
+                    {completedRuns.has(selected!) && (
+                      <span className="text-xs font-mono text-emerald-500 border border-emerald-700/30 rounded px-1.5 py-0.5 bg-emerald-900/10">
+                        🏁 已完成
+                      </span>
+                    )}
+                  </div>
                   {selectedPipe.description && <p className="text-xs text-text-muted mt-1">{selectedPipe.description}</p>}
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={editSelected} className="px-3 py-1 text-xs font-mono rounded border border-border text-text-secondary hover:text-cyan-400">✏️ 编辑</button>
+                  {!completedRuns.has(selected!) && (
+                    <button onClick={editSelected} className="px-3 py-1 text-xs font-mono rounded border border-border text-text-secondary hover:text-cyan-400">✏️ 编辑</button>
+                  )}
                   <button onClick={()=>del(selectedPipe.id!)} className="px-3 py-1 text-xs font-mono rounded border border-border text-text-secondary hover:text-rose-400">🗑 删除</button>
                 </div>
               </div>
