@@ -267,3 +267,67 @@ async def test_ssh_connection(req: TestConnectionRequest):
         latency_ms=latency,
         location=f"云端: {req.user}@{req.host}:{req.path}",
     )
+
+
+# =============================================================================
+# Phase 26: 调度器管理
+# =============================================================================
+
+
+class SchedulerTaskRequest(BaseModel):
+    """调度任务创建请求。"""
+    name: str = Field(..., description="任务名称")
+    agent_id: str = Field(..., description="执行 Agent ID")
+    task: str = Field(..., description="任务描述")
+    trigger_type: str = Field(default="cron", description="触发类型: cron | file_watch | once")
+    cron_expr: str = Field(default="", description="Cron 表达式，如 'daily 08:00'")
+    watch_dir: str = Field(default="", description="监视目录路径")
+    file_pattern: str = Field(default="*", description="文件匹配模式")
+
+
+@router.post("/scheduler/tasks")
+async def create_scheduled_task(req: SchedulerTaskRequest):
+    """创建自主调度任务。"""
+    import uuid
+    from engines.worker.scheduler import get_scheduler, ScheduledTask
+
+    task = ScheduledTask(
+        id=str(uuid.uuid4())[:8],
+        name=req.name,
+        agent_id=req.agent_id,
+        task=req.task,
+        trigger_type=req.trigger_type,
+        cron_expr=req.cron_expr,
+        watch_dir=req.watch_dir,
+        file_pattern=req.file_pattern,
+        enabled=True,
+    )
+    get_scheduler().add_task(task)
+    return {"id": task.id, "name": task.name, "trigger_type": task.trigger_type}
+
+
+@router.get("/scheduler/tasks")
+async def list_scheduled_tasks():
+    """列出所有调度任务。"""
+    from engines.worker.scheduler import get_scheduler
+    tasks = get_scheduler().list_tasks()
+    return [
+        {
+            "id": t.id,
+            "name": t.name,
+            "trigger_type": t.trigger_type,
+            "cron_expr": t.cron_expr,
+            "enabled": t.enabled,
+            "last_run": t.last_run,
+            "run_count": t.run_count,
+        }
+        for t in tasks
+    ]
+
+
+@router.delete("/scheduler/tasks/{task_id}")
+async def delete_scheduled_task(task_id: str):
+    """删除调度任务。"""
+    from engines.worker.scheduler import get_scheduler
+    get_scheduler().remove_task(task_id)
+    return {"status": "deleted", "task_id": task_id}
