@@ -168,6 +168,11 @@ async def _world_event_generator(
                     "tick": engine.current_tick,
                 })
                 break
+            if engine.world.status == "paused":
+                # 暂停：不发送事件（前端已知 paused），静默等待恢复
+                await asyncio.sleep(0.5)
+                continue
+
             if engine.world.status == "running":
                 tick_events = []  # 收集本 tick 的事件用于 PlanManager
                 async for event in engine.tick_stream():
