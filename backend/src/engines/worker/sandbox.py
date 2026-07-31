@@ -70,20 +70,37 @@ DEFAULT_TIMEOUT = 30            # 秒
 # =============================================================================
 
 
+# run_python 的正确用法提示
+_PYTHON_HINT = (
+    "run_python 应仅用于数据分析、计算、图表生成。"
+    "如果需要写文本文件（.md/.txt/.json 等），请直接使用 write_file 工具。"
+)
+
+
 def check_code_safety(code: str) -> tuple[bool, str]:
-    """静态检查 Python 代码是否安全。
+    """静态检查 Python 代码是否安全+合理使用。
 
     Args:
         code: Python 源码字符串
 
     Returns:
-        (is_safe, reason) — is_safe=True 表示通过检查
+        (is_safe, reason)
     """
     for pattern in DANGER_PATTERNS:
         match = pattern.search(code)
         if match:
             matched_text = match.group(0)[:60]
             return False, f"禁止使用: {matched_text}..."
+
+    # 检查是否在错误地用 Python 写文本文件
+    write_patterns = [
+        r'open\([^)]*\.(?:md|txt|json|csv|html|xml)[^)]*,\s*[\'"]w[\'"]',
+        r'\.write\(.*(?:报告|report|article|文档|小说|story|blog|笔记)',
+    ]
+    for pat in write_patterns:
+        if re.search(pat, code, re.IGNORECASE):
+            return False, f"不要用 Python 写文本文件。{_PYTHON_HINT}"
+
     return True, "ok"
 
 
