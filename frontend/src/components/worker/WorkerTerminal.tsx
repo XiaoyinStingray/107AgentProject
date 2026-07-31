@@ -272,6 +272,8 @@ interface WorkerTerminalProps {
   events: WorkerEvent[];
   connected: boolean;
   done: boolean;
+  /** 是否已认可 */
+  accepted?: boolean;
   /** 用户点击认可后的回调 */
   onAccept?: () => void;
   /** 继续修改的回调 */
@@ -284,6 +286,7 @@ export default function WorkerTerminal({
   events,
   connected,
   done,
+  accepted,
   onAccept,
   onRevise,
   onNewTask,
@@ -353,7 +356,7 @@ export default function WorkerTerminal({
       </div>
 
       {/* 完成卡片 */}
-      {done && <CompletionCard events={events} onAccept={onAccept} onRevise={onRevise} onNewTask={onNewTask} />}
+      {done && <CompletionCard events={events} accepted={accepted} onAccept={onAccept} onRevise={onRevise} onNewTask={onNewTask} />}
     </div>
   );
 }
@@ -361,9 +364,10 @@ export default function WorkerTerminal({
 
 /** 完成卡片——用户验收入口 */
 function CompletionCard({
-  events, onAccept, onRevise, onNewTask
+  events, accepted, onAccept, onRevise, onNewTask
 }: {
   events: WorkerEvent[];
+  accepted?: boolean;
   onAccept?: () => void;
   onRevise?: (instruction: string) => void;
   onNewTask?: () => void;
@@ -391,9 +395,13 @@ function CompletionCard({
         )}
         <div className="flex items-center gap-2 ml-7">
           <button onClick={onAccept}
-                  className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white
-                             text-xs font-mono rounded transition-colors">
-            ✓ 认可交付
+                  disabled={accepted}
+                  className={`px-4 py-1.5 text-white text-xs font-mono rounded transition-colors ${
+                    accepted
+                      ? "bg-emerald-800 cursor-default"
+                      : "bg-emerald-700 hover:bg-emerald-600"
+                  }`}>
+            {accepted ? "✓ 已认可" : "✓ 认可交付"}
           </button>
           <button onClick={onNewTask}
                   className="px-4 py-1.5 bg-bg-secondary hover:bg-bg-primary text-text-secondary

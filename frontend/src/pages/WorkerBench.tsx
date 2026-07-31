@@ -485,6 +485,7 @@ export default function WorkerBench() {
             events={events}
             connected={connected}
             done={effectiveDone}
+            accepted={accepted}
             onAccept={handleAccept}
             onRevise={(instruction: string) => {
               // 直接使用 currentRunId，不通过闭包
