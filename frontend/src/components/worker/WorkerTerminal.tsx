@@ -291,7 +291,7 @@ export default function WorkerTerminal({
   return (
     <div className="flex flex-col h-full">
       {/* 状态栏 */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-surface-dark">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-bg-secondary">
         <div className="flex items-center gap-2">
           <span
             className={`w-2 h-2 rounded-full ${
@@ -341,7 +341,7 @@ export default function WorkerTerminal({
 
       {/* 底部状态栏 */}
       {done && (
-        <div className="px-3 py-2 border-t border-border bg-surface-dark">
+        <div className="px-3 py-2 border-t border-border bg-bg-secondary">
           <div className="text-xs font-mono text-text-muted">
             {events.filter((e) => e.type === "worker.tool_start").length} 次工具调用
             {" · "}
