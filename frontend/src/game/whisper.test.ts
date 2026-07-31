@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   buildWhisperContext,
   chooseWhisperApproachTile,
+  isWhisperMoveNearIntent,
   normalizeWhisper,
+  resolveMentionedWhisperTarget,
+  resolveWhisperMoveTarget,
   resolveWhisperTarget,
   type WhisperAgent,
 } from "./whisper";
@@ -22,6 +25,28 @@ describe("whisper helpers", () => {
 
   it("falls back to the nearest other Agent", () => {
     expect(resolveWhisperTarget("找个人聊聊", "a", agents)?.agentId).toBe("c");
+  });
+
+  it("distinguishes an explicitly named Brain target from a local fallback", () => {
+    expect(
+      resolveMentionedWhisperTarget("请去和陈墨聊一聊", "a", agents)?.agentId,
+    ).toBe("b");
+    expect(
+      resolveMentionedWhisperTarget("找个人聊聊", "a", agents),
+    ).toBeNull();
+  });
+
+  it("recognizes an explicit move-near instruction without treating talk as movement", () => {
+    expect(isWhisperMoveNearIntent("移动到陈墨旁边")).toBe(true);
+    expect(isWhisperMoveNearIntent("去靠近陈墨")).toBe(true);
+    expect(isWhisperMoveNearIntent("去和陈墨说话")).toBe(false);
+    expect(isWhisperMoveNearIntent("不要移动到陈墨旁边")).toBe(false);
+    expect(
+      resolveWhisperMoveTarget("移位到陈墨身边", "a", agents)?.agentId,
+    ).toBe("b");
+    expect(
+      resolveWhisperMoveTarget("移动到陌生人旁边", "a", agents),
+    ).toBeNull();
   });
 
   it("does not invent a social target for an environment action", () => {

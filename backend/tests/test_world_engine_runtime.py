@@ -74,17 +74,30 @@ class TestGroupIdentityProtocol:
         su = make_agent("a2", "苏瑶")
         song = make_agent("a3", "宋明远")
         world_engine = WorldEngine(make_world(), [chen, su, song], db_session)
+
+        class ActiveGroupToken:
+            def __init__(self):
+                self.cancelled = False
+
+            def cancel(self):
+                self.cancelled = True
+
+        active_token = ActiveGroupToken()
+        world_engine._group_cancel_token = active_token
         world_engine.inject_event(
             "请主动去和陈默讨论复习计划",
             event_type="agent_action",
             target_agent_ids=[su.id],
         )
 
+        assert active_token.cancelled is True
+        assert world_engine._instruction_preempt_requested is True
         # Injection may arrive while the previous group tick is still running.
         # Its route must not be consumed before the matching prompt is injected.
         assert world_engine._pending_speaker_ids == []
         assert world_engine._pending_instruction_routes == [[su.id, chen.id]]
         world_engine._activate_pending_instruction_routes()
+        assert world_engine._instruction_preempt_requested is False
 
         first = world_engine._select_addressed_speaker([
             FakeMessage("继续当前场景。", "user"),
@@ -159,6 +172,22 @@ class TestGroupIdentityProtocol:
         assert "没有唯一指定另一位在场人物" in su_context
         assert "不得擅自把它改成找某个 Agent 聊天" in su_context
         assert "若当前场景无法完成，要明确说明原因" in su_context
+
+    def test_single_agent_instruction_preempts_without_speaker_route(self, db_session):
+        from engines.world.engine import WorldEngine
+
+        su = make_agent("a1", "苏瑶")
+        world_engine = WorldEngine(make_world(), [su], db_session)
+        world_engine.inject_event(
+            "请去弹钢琴",
+            event_type="agent_action",
+            target_agent_ids=[su.id],
+        )
+
+        assert world_engine._instruction_preempt_requested is True
+        assert world_engine._pending_instruction_routes == []
+        world_engine._activate_pending_instruction_routes()
+        assert world_engine._instruction_preempt_requested is False
 
     def test_single_named_addressee_is_selected_directly(self, db_session):
         from engines.world.engine import WorldEngine

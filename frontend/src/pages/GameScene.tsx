@@ -18,8 +18,14 @@ import { pickAccessoryId } from "../game/accessories";
 import { synchronizeScenePause } from "../game/scenePause";
 import {
   BrainDisconnectWatchdog,
+  BrainWhisperTracker,
   getBrainButtonState,
 } from "../game/sceneBrain";
+import {
+  isWhisperMoveNearIntent,
+  resolveMentionedWhisperTarget,
+  resolveWhisperMoveTarget,
+} from "../game/whisper";
 
 /* —— 场景列表 —— */
 const SCENES = [
@@ -152,6 +158,19 @@ export default function GameScenePage() {
   const mountedRef = useRef(false);
   const gameRef = useRef<Phaser.Game | null>(null);
   const [gameReady, setGameReady] = useState(false);
+  const brainWhisperTrackerRef = useRef<BrainWhisperTracker | null>(null);
+  if (brainWhisperTrackerRef.current === null) {
+    brainWhisperTrackerRef.current = new BrainWhisperTracker(
+      (agentId, message) => {
+        gameRef.current?.events.emit(
+          "agent-whisper-feedback",
+          agentId,
+          message,
+        );
+      },
+    );
+  }
+  const brainWhisperTracker = brainWhisperTrackerRef.current;
 
   // ── State 4 Step 81: 场景 Brain 联动 ──
   const [sceneWorldId, setSceneWorldId] = useState<string | null>(null);
@@ -170,6 +189,7 @@ export default function GameScenePage() {
     if (!sceneWorldId || !brainEnabled) return;
     const es = new EventSource(`/api/worlds/${sceneWorldId}/stream`);
     const watchdog = new BrainDisconnectWatchdog(() => {
+      brainWhisperTracker.cancel();
       setBrainConnectionError("AI 连接已断开，已切换为本地模式");
       setBrainEnabled(false);
       setSceneWorldId(null);
@@ -199,6 +219,7 @@ export default function GameScenePage() {
           const fromId = evt.agent_id;
           const msg = evt.message || evt.content;
           const targetIds = evt.data?.target_agent_ids || [];
+          if (fromId) brainWhisperTracker.recordSpeaker(fromId);
           gameRef.current.events.emit("sse-dialogue", {
             fromId,
             fromName: evt.agent_name || fromId,
@@ -223,7 +244,16 @@ export default function GameScenePage() {
       es.close();
       sseRef.current = null;
     };
-  }, [sceneWorldId, brainEnabled]);
+  }, [brainWhisperTracker, sceneWorldId, brainEnabled]);
+
+  useEffect(() => {
+    brainWhisperTracker.setPaused(paused);
+  }, [brainWhisperTracker, paused]);
+
+  useEffect(
+    () => () => brainWhisperTracker.dispose(),
+    [brainWhisperTracker],
+  );
 
   // 场景启动：有 Agent 且 Brain 启用时，请求后端创建 WorldEngine
   const startBrain = useCallback(async () => {
@@ -248,10 +278,11 @@ export default function GameScenePage() {
 
   // 场景切换时断开 SSE
   useEffect(() => {
+    brainWhisperTracker.cancel();
     setSceneWorldId(null);
     setBrainEnabled(false);
     setBrainConnectionError(null);
-  }, [mapId]);
+  }, [brainWhisperTracker, mapId]);
 
   const brainButton = getBrainButtonState(
     agents.length,
@@ -368,6 +399,27 @@ export default function GameScenePage() {
   const handlePanelWhisper = useCallback(
     async (message: string) => {
       if (!selectedAgentId) return;
+      if (isWhisperMoveNearIntent(message)) {
+        brainWhisperTracker.cancel();
+        const target = resolveWhisperMoveTarget(
+          message,
+          selectedAgentId,
+          agents,
+        );
+        const mapScene = gameRef.current?.scene.getScene("MapScene") as
+          | MapScene
+          | undefined;
+        if (!target || !mapScene) {
+          gameRef.current?.events.emit(
+            "agent-whisper-feedback",
+            selectedAgentId,
+            target ? "当前无法移动" : "没有找到要靠近的 Agent",
+          );
+          return;
+        }
+        mapScene.moveAgentNear(selectedAgentId, target.agentId);
+        return;
+      }
       if (brainEnabled && sceneWorldId) {
         try {
           await injectEvent.mutateAsync({
@@ -376,12 +428,26 @@ export default function GameScenePage() {
             targetAgentId: selectedAgentId,
             description: message,
           });
-          gameRef.current?.events.emit(
-            "agent-whisper-feedback",
+          const actor = agents.find(
+            (agent) => agent.agentId === selectedAgentId,
+          );
+          const target = resolveMentionedWhisperTarget(
+            message,
             selectedAgentId,
-            paused
-              ? "耳语已排队，将在继续后由目标 Agent 优先执行"
-              : "耳语已排队，目标 Agent 将在下一轮优先执行",
+            agents,
+          );
+          const mapScene = gameRef.current?.scene.getScene("MapScene") as
+            | MapScene
+            | undefined;
+          mapScene?.preparePriorityBrainDialogue();
+          brainWhisperTracker.start(
+            {
+              actorId: selectedAgentId,
+              actorName: actor?.name ?? selectedAgentId,
+              targetId: target?.agentId,
+              targetName: target?.name,
+            },
+            paused,
           );
         } catch {
           gameRef.current?.events.emit(
@@ -396,7 +462,9 @@ export default function GameScenePage() {
     },
     [
       brainEnabled,
+      brainWhisperTracker,
       injectEvent,
+      agents,
       paused,
       sceneWorldId,
       selectedAgentId,
@@ -577,6 +645,7 @@ export default function GameScenePage() {
               type="button"
               onClick={() => {
                 if (brainEnabled) {
+                  brainWhisperTracker.cancel();
                   setBrainEnabled(false);
                   setSceneWorldId(null);
                   setBrainConnectionError(null);

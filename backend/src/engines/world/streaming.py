@@ -59,13 +59,23 @@ class WorldStreamingMixin:
             )
             # Poll every 0.5s — allow instant pause even during LLM generation
             while not task.done():
-                if self.world.status == "paused":
+                if (
+                    self.world.status == "paused"
+                    or getattr(self, "_instruction_preempt_requested", False)
+                ):
                     task.cancel()
                     try:
                         await task
                     except (asyncio.CancelledError, Exception):
                         pass
-                    logger.info(f"Solo tick cancelled (paused) for agent {agent.id}")
+                    reason = (
+                        "paused"
+                        if self.world.status == "paused"
+                        else "priority instruction"
+                    )
+                    logger.info(
+                        f"Solo tick cancelled ({reason}) for agent {agent.id}"
+                    )
                     return
                 await asyncio.wait([task], timeout=0.5)
             response = task.result()
@@ -101,6 +111,9 @@ class WorldStreamingMixin:
                 cancellation_token=self._group_cancel_token,
             )
             async for message in stream:
+                if getattr(self, "_instruction_preempt_requested", False):
+                    self._group_cancel_token.cancel()
+                    break
                 if self.world.status == "paused":
                     self._group_cancel_token.cancel()
                     break

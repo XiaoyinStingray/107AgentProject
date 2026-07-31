@@ -3,6 +3,7 @@ import { ITEM_FRAME, DECOR_FRAME, WALL_DECOR_FRAME, BG_FRAME, FG_FRAME } from ".
 import { AgentSprite, AgentSpriteData } from "../sprites/AgentSprite";
 import { getDialogue, fetchDialogue } from "../dialogue";
 import { AutonomousMover } from "../AutonomousMover";
+import type { MovementReservation } from "../AutonomousMover";
 import { emotionEngine, RANDOM_EVENTS } from "../emotion/EmotionEngine";
 import type { EmotionChange, SceneEvent } from "../emotion/EmotionEngine";
 import { playbackQueue } from "../audio/DialoguePlaybackQueue";
@@ -10,7 +11,9 @@ import type { Emotion } from "../sprites/AgentSprite";
 import {
   buildWhisperContext,
   chooseWhisperApproachTile,
+  isWhisperMoveNearIntent,
   normalizeWhisper,
+  resolveWhisperMoveTarget,
   resolveWhisperTarget,
   type PendingWhisper,
   type WhisperAgent,
@@ -103,6 +106,7 @@ export class MapScene extends Phaser.Scene {
   private activeSessions: Map<string, ConversationSession> = new Map();
   private busyAgents: Set<string> = new Set();
   private pendingWhispers: Map<string, PendingWhisper> = new Map();
+  private movementReservations: Map<string, string> = new Map();
 
   constructor() {
     super({ key: "MapScene" });
@@ -501,13 +505,23 @@ export class MapScene extends Phaser.Scene {
         if (existing.emotion !== d.emotion) existing.setEmotion(d.emotion as any);
         if (existing.action !== d.action) existing.setAction(d.action as any);
       } else {
-        const sprite = new AgentSprite(this, d);
-        sprite.setData("name", d.name);
+        const placement = this.findNearestAvailableTile(
+          d.agentId,
+          d.tileX,
+          d.tileY,
+          Math.max(this.mapData?.width ?? 16, this.mapData?.height ?? 12),
+        );
+        const placedData = placement
+          ? { ...d, tileX: placement.tileX, tileY: placement.tileY }
+          : d;
+        const sprite = new AgentSprite(this, placedData);
+        sprite.setData("name", placedData.name);
         this.agentSprites.set(d.agentId, sprite);
         const mover = new AutonomousMover(sprite, this, undefined,
           (tx, ty) => this.isWalkable(tx, ty),
           (tx, ty) => this.isOccupiedByOther(d.agentId, tx, ty),
           { w: this.mapData?.width ?? 16, h: this.mapData?.height ?? 12 },
+          this.createMovementReservation(),
         );
         // 66-S: 注入物品 + Agent 位置
         mover.setItems((this.mapData?.items ?? []).map((it) => ({ type: it.type, tileX: it.tileX, tileY: it.tileY })));
@@ -516,7 +530,7 @@ export class MapScene extends Phaser.Scene {
         );
         if (!this.paused) mover.start();
         this.movers.set(d.agentId, mover);
-        this.setupAgentInteraction(sprite, d);
+        this.setupAgentInteraction(sprite, placedData);
       }
     }
   }
@@ -586,9 +600,10 @@ export class MapScene extends Phaser.Scene {
       this.tweens.killTweensOf(sprite);
     });
     this.clearConversationState();
-    this.setAgents(data);
+    const placements = this.normalizeAgentPlacements(data);
+    this.setAgents(placements);
 
-    for (const snapshot of data) {
+    for (const snapshot of placements) {
       const sprite = this.agentSprites.get(snapshot.agentId);
       if (!sprite) continue;
       sprite.setTile(snapshot.tileX, snapshot.tileY);
@@ -618,6 +633,14 @@ export class MapScene extends Phaser.Scene {
       tileX: agent.tileX,
       tileY: agent.tileY,
     }));
+    if (isWhisperMoveNearIntent(normalized)) {
+      const moveTarget = resolveWhisperMoveTarget(normalized, agentId, agents);
+      if (!moveTarget) {
+        this.showAgentBubble(agentId, "没有找到要靠近的 Agent");
+        return false;
+      }
+      return this.moveAgentNear(agentId, moveTarget.agentId);
+    }
     const target = resolveWhisperTarget(normalized, agentId, agents);
     if (!target) {
       this.showAgentBubble(agentId, "没有找到可互动的目标");
@@ -664,6 +687,67 @@ export class MapScene extends Phaser.Scene {
       speaker.emotion ?? "neutral",
     );
     return true;
+  }
+
+  /** Move one Agent to a free cardinal tile beside another Agent. */
+  moveAgentNear(agentId: string, targetAgentId: string): boolean {
+    const sprite = this.agentSprites.get(agentId);
+    const target = this.agentSprites.get(targetAgentId);
+    if (!sprite || !target || agentId === targetAgentId) {
+      if (sprite) this.showAgentBubble(agentId, "没有找到要靠近的 Agent");
+      return false;
+    }
+
+    const targetName = target.getData("name") || targetAgentId;
+    const distance =
+      Math.abs(sprite.tileX - target.tileX) +
+      Math.abs(sprite.tileY - target.tileY);
+    if (distance === 1) {
+      this.showAgentBubble(agentId, `已经在 ${targetName} 旁边`);
+      return true;
+    }
+
+    const mover = this.movers.get(agentId);
+    if (!mover) {
+      this.showAgentBubble(agentId, "当前无法移动");
+      return false;
+    }
+    const approach = chooseWhisperApproachTile(
+      {
+        agentId,
+        name: sprite.getData("name") || agentId,
+        tileX: sprite.tileX,
+        tileY: sprite.tileY,
+      },
+      {
+        agentId: targetAgentId,
+        name: targetName,
+        tileX: target.tileX,
+        tileY: target.tileY,
+      },
+      (tileX, tileY) =>
+        this.isInsideMap(tileX, tileY) &&
+        this.isWalkable(tileX, tileY) &&
+        !this.isOccupiedByOther(agentId, tileX, tileY),
+    );
+    if (!approach) {
+      this.showAgentBubble(agentId, `${targetName} 旁边暂时没有空位`);
+      return false;
+    }
+
+    mover.pushCommand(approach.tileX, approach.tileY);
+    this.showAgentBubble(
+      agentId,
+      this.paused
+        ? `已收到，继续后前往 ${targetName} 身边`
+        : `已收到，正前往 ${targetName} 身边`,
+    );
+    return true;
+  }
+
+  /** Drop stale ordinary subtitles before a priority Brain instruction. */
+  preparePriorityBrainDialogue(): void {
+    playbackQueue.clear();
   }
 
   /** 显示 Agent 头顶气泡（直接模式，用于非对话通知） */
@@ -728,14 +812,16 @@ export class MapScene extends Phaser.Scene {
     // 清除旧精灵
     this.agentSprites.forEach((s) => s.destroy());
     this.agentSprites.clear();
+    this.movementReservations.clear();
+    const placements = this.normalizeAgentPlacements(data);
 
     // 66-S: 注册 Agent 到情绪引擎 + 启动情绪循环
-    data.forEach((d) => emotionEngine.registerAgent(d.agentId, d.name));
+    placements.forEach((d) => emotionEngine.registerAgent(d.agentId, d.name));
     emotionEngine.setScene(this.mapData?.id ?? "library");
     emotionEngine.stop(); // 重置定时器
     emotionEngine.start();
 
-    data.forEach((d) => {
+    placements.forEach((d) => {
       const sprite = new AgentSprite(this, d);
       sprite.setData("name", d.name);
       this.agentSprites.set(d.agentId, sprite);
@@ -748,6 +834,7 @@ export class MapScene extends Phaser.Scene {
         (tx, ty) => this.isWalkable(tx, ty),
         (tx, ty) => this.isOccupiedByOther(d.agentId, tx, ty),
         { w: this.mapData?.width ?? 16, h: this.mapData?.height ?? 12 },
+        this.createMovementReservation(),
       );
       // 66-S: 注入物品位置 + Agent 位置查询
       mover.setItems((this.mapData?.items ?? []).map((it) => ({ type: it.type, tileX: it.tileX, tileY: it.tileY })));
@@ -1091,17 +1178,19 @@ export class MapScene extends Phaser.Scene {
     // a 远离 b
     const txA = Math.max(0, Math.min(W - 1, a.tileX + (dx >= 0 ? 1 : -1)));
     const tyA = Math.max(0, Math.min(H - 1, a.tileY + (dy >= 0 ? 1 : -1)));
-    if (this.isWalkable(txA, tyA) && !this.isOccupiedByOther(a.agentId, txA, tyA)) {
+    const destinationA = this.reserveMovementDestination(a.agentId, txA, tyA);
+    if (destinationA) {
       a.action = "walk";
       this.tweens.add({
         targets: a,
-        x: txA * TILE_S + TILE_S / 2,
-        y: tyA * TILE_S + TILE_S / 2,
+        x: destinationA.tileX * TILE_S + TILE_S / 2,
+        y: destinationA.tileY * TILE_S + TILE_S / 2,
         duration: 250,
         ease: "Sine.easeInOut",
         onComplete: () => {
+          this.releaseMovementDestination(a.agentId);
           if (!this.scene) return;
-          a.tileX = txA; a.tileY = tyA;
+          a.tileX = destinationA.tileX; a.tileY = destinationA.tileY;
           a.setAction("idle");
         },
       });
@@ -1110,17 +1199,19 @@ export class MapScene extends Phaser.Scene {
     // b 远离 a
     const txB = Math.max(0, Math.min(W - 1, b.tileX + (dx >= 0 ? -1 : 1)));
     const tyB = Math.max(0, Math.min(H - 1, b.tileY + (dy >= 0 ? -1 : 1)));
-    if (this.isWalkable(txB, tyB) && !this.isOccupiedByOther(b.agentId, txB, tyB)) {
+    const destinationB = this.reserveMovementDestination(b.agentId, txB, tyB);
+    if (destinationB) {
       b.action = "walk";
       this.tweens.add({
         targets: b,
-        x: txB * TILE_S + TILE_S / 2,
-        y: tyB * TILE_S + TILE_S / 2,
+        x: destinationB.tileX * TILE_S + TILE_S / 2,
+        y: destinationB.tileY * TILE_S + TILE_S / 2,
         duration: 250,
         ease: "Sine.easeInOut",
         onComplete: () => {
+          this.releaseMovementDestination(b.agentId);
           if (!this.scene) return;
-          b.tileX = txB; b.tileY = tyB;
+          b.tileX = destinationB.tileX; b.tileY = destinationB.tileY;
           b.setAction("idle");
         },
       });
@@ -1183,7 +1274,118 @@ export class MapScene extends Phaser.Scene {
       if (id === selfId) continue;
       if (sprite.tileX === tx && sprite.tileY === ty) return true;
     }
+    const tileKey = this.tileKey(tx, ty);
+    for (const [id, reservedTile] of this.movementReservations) {
+      if (id !== selfId && reservedTile === tileKey) return true;
+    }
     return false;
+  }
+
+  /**
+   * Give every movement source the same destination-reservation protocol.
+   * Reserving before the tween starts prevents same-frame moves into one tile.
+   */
+  private createMovementReservation(): MovementReservation {
+    return {
+      reserve: (agentId, tileX, tileY) =>
+        this.reserveMovementDestination(agentId, tileX, tileY),
+      release: (agentId) => this.releaseMovementDestination(agentId),
+    };
+  }
+
+  private reserveMovementDestination(
+    agentId: string,
+    tileX: number,
+    tileY: number,
+  ): { tileX: number; tileY: number } | null {
+    this.releaseMovementDestination(agentId);
+    const destination = this.findNearestAvailableTile(agentId, tileX, tileY, 2);
+    if (!destination) return null;
+    this.movementReservations.set(
+      agentId,
+      this.tileKey(destination.tileX, destination.tileY),
+    );
+    return destination;
+  }
+
+  private releaseMovementDestination(agentId: string): void {
+    this.movementReservations.delete(agentId);
+  }
+
+  private tileKey(tileX: number, tileY: number): string {
+    return `${tileX},${tileY}`;
+  }
+
+  /** Find the nearest walkable tile that is neither occupied nor reserved. */
+  private findNearestAvailableTile(
+    agentId: string,
+    tileX: number,
+    tileY: number,
+    maxRadius: number,
+  ): { tileX: number; tileY: number } | null {
+    const width = this.mapData?.width ?? 16;
+    const height = this.mapData?.height ?? 12;
+    for (let radius = 0; radius <= maxRadius; radius++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        const dy = radius - Math.abs(dx);
+        const candidates = dy === 0 ? [[dx, 0]] : [[dx, -dy], [dx, dy]];
+        for (const [offsetX, offsetY] of candidates) {
+          const candidateX = tileX + offsetX;
+          const candidateY = tileY + offsetY;
+          if (
+            candidateX < 0 || candidateX >= width ||
+            candidateY < 0 || candidateY >= height
+          ) continue;
+          if (!this.isWalkable(candidateX, candidateY)) continue;
+          if (this.isOccupiedByOther(agentId, candidateX, candidateY)) continue;
+          return { tileX: candidateX, tileY: candidateY };
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * De-duplicate initial/checkpoint coordinates without moving valid Agents.
+   */
+  private normalizeAgentPlacements(data: AgentSpriteData[]): AgentSpriteData[] {
+    const width = this.mapData?.width ?? 16;
+    const height = this.mapData?.height ?? 12;
+    const usedTiles = new Set<string>();
+
+    return data.map((agent) => {
+      let placement: { tileX: number; tileY: number } | null = null;
+      const maxRadius = Math.max(width, height);
+      for (let radius = 0; radius <= maxRadius && !placement; radius++) {
+        for (let dx = -radius; dx <= radius && !placement; dx++) {
+          const dy = radius - Math.abs(dx);
+          const candidates = dy === 0 ? [[dx, 0]] : [[dx, -dy], [dx, dy]];
+          for (const [offsetX, offsetY] of candidates) {
+            const candidateX = agent.tileX + offsetX;
+            const candidateY = agent.tileY + offsetY;
+            const key = this.tileKey(candidateX, candidateY);
+            if (
+              candidateX < 0 || candidateX >= width ||
+              candidateY < 0 || candidateY >= height ||
+              usedTiles.has(key) ||
+              !this.isWalkable(candidateX, candidateY)
+            ) continue;
+            placement = { tileX: candidateX, tileY: candidateY };
+            break;
+          }
+        }
+      }
+
+      if (!placement) return agent;
+      usedTiles.add(this.tileKey(placement.tileX, placement.tileY));
+      return { ...agent, ...placement };
+    });
+  }
+
+  private isInsideMap(tileX: number, tileY: number): boolean {
+    const width = this.mapData?.width ?? 16;
+    const height = this.mapData?.height ?? 12;
+    return tileX >= 0 && tileX < width && tileY >= 0 && tileY < height;
   }
 
   /** 某 tile 是否可放置 Agent（非墙壁/非门） */
@@ -1231,6 +1433,7 @@ export class MapScene extends Phaser.Scene {
     this.activeSessions.clear();
     this.busyAgents.clear();
     this.pendingWhispers.clear();
+    this.movementReservations.clear();
     playbackQueue.clear();
   }
 

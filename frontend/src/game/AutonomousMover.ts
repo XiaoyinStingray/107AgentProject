@@ -59,6 +59,15 @@ export interface ItemPosition {
   tileY: number;
 }
 
+export interface MovementReservation {
+  reserve(
+    agentId: string,
+    tileX: number,
+    tileY: number,
+  ): { tileX: number; tileY: number } | null;
+  release(agentId: string): void;
+}
+
 /**
  * 自主移动器 — 每个 Agent 实例化一个。
  *
@@ -94,6 +103,7 @@ export class AutonomousMover {
    * @param isWalkable  可通行判定函数
    * @param isOccupied  重叠检测函数
    * @param mapBounds  地图宽高 {w, h}
+   * @param reservation  场景级目标格预订器
    */
   constructor(
     sprite: AgentSprite,
@@ -102,6 +112,7 @@ export class AutonomousMover {
     private isWalkable: (tx: number, ty: number) => boolean = () => true,
     private isOccupied: (tx: number, ty: number) => boolean = () => false,
     private mapBounds: { w: number; h: number } = { w: 12, h: 8 },
+    private reservation?: MovementReservation,
   ) {
     this.sprite = sprite;
     this.scene = scene;
@@ -136,6 +147,7 @@ export class AutonomousMover {
     this.active = false;
     this.timer?.destroy();
     this.timer = null;
+    this.reservation?.release(this.sprite.agentId);
   }
 
   /** 更新配置（供后续动态调整） */
@@ -204,6 +216,8 @@ export class AutonomousMover {
 
     const target = this.decideTarget();
     if (!target) return;
+    const destination = this.reserveDestination(target.tx, target.ty);
+    if (!destination) return;
 
     // ── 66-S: 情绪影响移动速度 ──
     let duration = 350;
@@ -218,19 +232,25 @@ export class AutonomousMover {
 
     // 动画移动
     this.sprite.action = "walk";
-    const px = target.tx * 64 + 32;
-    const py = target.ty * 64 + 32;
+    const px = destination.tx * 64 + 32;
+    const py = destination.ty * 64 + 32;
     this.scene.tweens.add({
       targets: this.sprite,
       x: px, y: py,
       duration,
       ease: "Sine.easeInOut",
       onComplete: () => {
+        this.reservation?.release(this.sprite.agentId);
         if (!this.scene || !this.active) return;
-        this.sprite.tileX = target.tx;
-        this.sprite.tileY = target.ty;
+        this.sprite.tileX = destination.tx;
+        this.sprite.tileY = destination.ty;
         this.sprite.setAction("idle");
-        this.scene.game.events.emit("agent-moved", this.sprite.agentId, target.tx, target.ty);
+        this.scene.game.events.emit(
+          "agent-moved",
+          this.sprite.agentId,
+          destination.tx,
+          destination.ty,
+        );
       },
     });
   }
@@ -239,10 +259,15 @@ export class AutonomousMover {
   private executeNextCommand(): void {
     const cmd = this.commandQueue.shift();
     if (!cmd) return;
+    const destination = this.reserveDestination(cmd.tileX, cmd.tileY);
+    if (!destination) {
+      this.scheduleQueuedCommand();
+      return;
+    }
 
     this.sprite.action = "walk";
-    const px = cmd.tileX * 64 + 32;
-    const py = cmd.tileY * 64 + 32;
+    const px = destination.tx * 64 + 32;
+    const py = destination.ty * 64 + 32;
     const duration = 300;
     this.scene.tweens.add({
       targets: this.sprite,
@@ -250,17 +275,46 @@ export class AutonomousMover {
       duration,
       ease: "Sine.easeInOut",
       onComplete: () => {
+        this.reservation?.release(this.sprite.agentId);
         if (!this.scene || !this.active) return;
-        this.sprite.tileX = cmd.tileX;
-        this.sprite.tileY = cmd.tileY;
+        this.sprite.tileX = destination.tx;
+        this.sprite.tileY = destination.ty;
         this.sprite.setAction("idle");
-        this.scene.game.events.emit("agent-moved", this.sprite.agentId, cmd.tileX, cmd.tileY);
+        this.scene.game.events.emit(
+          "agent-moved",
+          this.sprite.agentId,
+          destination.tx,
+          destination.ty,
+        );
         // 队列中还有命令则继续执行
-        if (this.commandQueue.length > 0) {
-          this.scene.time.delayedCall(100, () => this.executeNextCommand());
-        }
+        this.scheduleQueuedCommand();
       },
     });
+  }
+
+  private reserveDestination(
+    tileX: number,
+    tileY: number,
+  ): { tx: number; ty: number } | null {
+    if (this.reservation) {
+      const destination = this.reservation.reserve(
+        this.sprite.agentId,
+        tileX,
+        tileY,
+      );
+      return destination
+        ? { tx: destination.tileX, ty: destination.tileY }
+        : null;
+    }
+    if (!this.isWalkable(tileX, tileY) || this.isOccupied(tileX, tileY)) {
+      return null;
+    }
+    return { tx: tileX, ty: tileY };
+  }
+
+  private scheduleQueuedCommand(): void {
+    if (!this.active || this.commandQueue.length === 0) return;
+    this.scene.time.delayedCall(100, () => this.executeNextCommand());
   }
 
   /**

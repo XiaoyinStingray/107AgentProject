@@ -107,6 +107,7 @@ describe("MapScene dialogue lifecycle", () => {
       dialogueCooldowns: new Map([["a|b", Date.now()]]),
       activeSessions: new Map([["a|b", { timer: sessionTimer }]]),
       busyAgents: new Set(["a", "b"]),
+      movementReservations: new Map([["a", "1,1"]]),
       pendingWhispers: new Map([["a", "测试耳语"]]),
     });
 
@@ -118,6 +119,7 @@ describe("MapScene dialogue lifecycle", () => {
     expect(scene.dialogueCooldowns.size).toBe(0);
     expect(scene.activeSessions.size).toBe(0);
     expect(scene.busyAgents.size).toBe(0);
+    expect(scene.movementReservations.size).toBe(0);
     expect(playbackMocks.clear).toHaveBeenCalledOnce();
   });
 
@@ -141,12 +143,14 @@ describe("MapScene dialogue lifecycle", () => {
     const scene = Object.create(MapScene.prototype) as any;
     Object.assign(scene, {
       paused: true,
+      wallMap: [],
       movers: new Map([["agent-a", mover]]),
       agentSprites: new Map([["agent-a", sprite]]),
       tweens: { killTweensOf: vi.fn() },
       dialogueCooldowns: new Map(),
       activeSessions: new Map(),
       busyAgents: new Set(),
+      movementReservations: new Map(),
       pendingWhispers: new Map(),
       setAgents: vi.fn(),
     });
@@ -204,6 +208,126 @@ describe("MapScene dialogue lifecycle", () => {
     expect(scene.receiveWhisper("missing", "测试")).toBe(false);
   });
 
+  it("executes a move-near whisper without creating a dialogue request", () => {
+    const speaker = {
+      agentId: "agent-a",
+      tileX: 1,
+      tileY: 1,
+      getData: vi.fn(() => "苏敏"),
+    };
+    const target = {
+      agentId: "agent-b",
+      tileX: 8,
+      tileY: 8,
+      getData: vi.fn(() => "陈墨"),
+    };
+    const mover = { pushCommand: vi.fn() };
+    const scene = Object.create(MapScene.prototype) as any;
+    Object.assign(scene, {
+      paused: false,
+      mapData: { width: 16, height: 12 },
+      agentSprites: new Map([
+        ["agent-a", speaker],
+        ["agent-b", target],
+      ]),
+      movers: new Map([["agent-a", mover]]),
+      pendingWhispers: new Map(),
+      showAgentBubble: vi.fn(),
+      isWalkable: vi.fn(() => true),
+      isOccupiedByOther: vi.fn(() => false),
+    });
+
+    expect(scene.receiveWhisper("agent-a", "移动到陈墨旁边")).toBe(true);
+    expect(mover.pushCommand).toHaveBeenCalledWith(7, 8);
+    expect(scene.pendingWhispers.size).toBe(0);
+    expect(scene.showAgentBubble).toHaveBeenCalledWith(
+      "agent-a",
+      "已收到，正前往 陈墨 身边",
+    );
+  });
+
+  it("reports move-near boundary states instead of silently doing nothing", () => {
+    const speaker = {
+      agentId: "agent-a",
+      tileX: 7,
+      tileY: 8,
+      getData: vi.fn(() => "苏敏"),
+    };
+    const target = {
+      agentId: "agent-b",
+      tileX: 8,
+      tileY: 8,
+      getData: vi.fn(() => "陈墨"),
+    };
+    const mover = { pushCommand: vi.fn() };
+    const scene = Object.create(MapScene.prototype) as any;
+    Object.assign(scene, {
+      paused: false,
+      mapData: { width: 16, height: 12 },
+      agentSprites: new Map([
+        ["agent-a", speaker],
+        ["agent-b", target],
+      ]),
+      movers: new Map([["agent-a", mover]]),
+      showAgentBubble: vi.fn(),
+      isWalkable: vi.fn(() => true),
+      isOccupiedByOther: vi.fn(() => false),
+    });
+
+    expect(scene.moveAgentNear("agent-a", "agent-b")).toBe(true);
+    expect(mover.pushCommand).not.toHaveBeenCalled();
+    expect(scene.showAgentBubble).toHaveBeenLastCalledWith(
+      "agent-a",
+      "已经在 陈墨 旁边",
+    );
+
+    speaker.tileX = 1;
+    speaker.tileY = 1;
+    scene.paused = true;
+    expect(scene.moveAgentNear("agent-a", "agent-b")).toBe(true);
+    expect(mover.pushCommand).toHaveBeenCalledWith(7, 8);
+    expect(scene.showAgentBubble).toHaveBeenLastCalledWith(
+      "agent-a",
+      "已收到，继续后前往 陈墨 身边",
+    );
+  });
+
+  it("rejects a move-near whisper when every adjacent tile is blocked", () => {
+    const speaker = {
+      agentId: "agent-a",
+      tileX: 1,
+      tileY: 1,
+      getData: vi.fn(() => "苏敏"),
+    };
+    const target = {
+      agentId: "agent-b",
+      tileX: 8,
+      tileY: 8,
+      getData: vi.fn(() => "陈墨"),
+    };
+    const mover = { pushCommand: vi.fn() };
+    const scene = Object.create(MapScene.prototype) as any;
+    Object.assign(scene, {
+      paused: false,
+      mapData: { width: 16, height: 12 },
+      agentSprites: new Map([
+        ["agent-a", speaker],
+        ["agent-b", target],
+      ]),
+      movers: new Map([["agent-a", mover]]),
+      showAgentBubble: vi.fn(),
+      isWalkable: vi.fn(() => true),
+      isOccupiedByOther: vi.fn(() => true),
+    });
+
+    expect(scene.moveAgentNear("agent-a", "agent-b")).toBe(false);
+    expect(mover.pushCommand).not.toHaveBeenCalled();
+    expect(scene.showAgentBubble).toHaveBeenCalledWith(
+      "agent-a",
+      "陈墨 旁边暂时没有空位",
+    );
+  });
+
   it("routes Brain SSE dialogue through the serialized playback queue", () => {
     const speaker = { emotion: "happy" };
     const scene = Object.create(MapScene.prototype) as any;
@@ -225,6 +349,57 @@ describe("MapScene dialogue lifecycle", () => {
       "happy",
     );
     expect(scene.receiveSseDialogue({ ...event, fromId: "missing" })).toBe(false);
+  });
+
+  it("clears stale subtitle playback before a priority Brain whisper", () => {
+    const scene = Object.create(MapScene.prototype) as MapScene;
+
+    scene.preparePriorityBrainDialogue();
+
+    expect(playbackMocks.clear).toHaveBeenCalledOnce();
+  });
+
+  it("reserves different destinations for simultaneous movers", () => {
+    const scene = Object.create(MapScene.prototype) as any;
+    Object.assign(scene, {
+      mapData: { width: 6, height: 6 },
+      wallMap: [],
+      agentSprites: new Map(),
+      movementReservations: new Map(),
+    });
+
+    const first = scene.reserveMovementDestination("agent-a", 3, 3);
+    const second = scene.reserveMovementDestination("agent-b", 3, 3);
+
+    expect(first).toEqual({ tileX: 3, tileY: 3 });
+    expect(second).not.toEqual(first);
+    expect(scene.movementReservations.get("agent-a")).toBe("3,3");
+    expect(scene.movementReservations.get("agent-b")).not.toBe("3,3");
+
+    scene.releaseMovementDestination("agent-a");
+    const third = scene.reserveMovementDestination("agent-c", 3, 3);
+    expect(third).toEqual({ tileX: 3, tileY: 3 });
+  });
+
+  it("moves duplicate checkpoint coordinates to nearby free tiles", () => {
+    const scene = Object.create(MapScene.prototype) as any;
+    Object.assign(scene, {
+      mapData: { width: 6, height: 6 },
+      wallMap: [],
+    });
+    const agents = [
+      { agentId: "agent-a", tileX: 2, tileY: 2 },
+      { agentId: "agent-b", tileX: 2, tileY: 2 },
+      { agentId: "agent-c", tileX: 2, tileY: 2 },
+    ];
+
+    const placements = scene.normalizeAgentPlacements(agents);
+    const uniqueTiles = new Set(
+      placements.map((agent: any) => `${agent.tileX},${agent.tileY}`),
+    );
+
+    expect(placements[0]).toMatchObject({ tileX: 2, tileY: 2 });
+    expect(uniqueTiles.size).toBe(3);
   });
 
   it("blocks late SSE movement and stops every active sprite while paused", () => {

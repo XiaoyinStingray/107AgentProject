@@ -19,6 +19,10 @@ export interface WhisperTile {
 
 const MAX_WHISPER_LENGTH = 300;
 const SOCIAL_INTENT_PATTERN = /聊天|聊聊|交流|对话|谈谈|说话|讨论|打招呼|找.{0,4}人/;
+const MOVE_NEAR_PATTERN =
+  /(?:移动|移位|走|过去|前往|靠近|接近|挪|站到|来到|去到|去).{0,16}(?:旁边|身边|附近|边上|面前)|(?:靠近|接近).{0,12}/;
+const NEGATED_MOVE_PATTERN =
+  /(?:不要|别|不必|无需|禁止).{0,6}(?:移动|移位|走|过去|前往|靠近|接近|挪|站到|来到|去到|去)/;
 
 /** Normalize a whisper before it enters local or Brain context. */
 export function normalizeWhisper(message: string): string {
@@ -40,9 +44,11 @@ export function resolveWhisperTarget(
   if (!speaker) return null;
 
   const candidates = agents.filter((agent) => agent.agentId !== speakerId);
-  const mentioned = candidates
-    .filter((agent) => agent.name.length > 0 && message.includes(agent.name))
-    .sort((a, b) => b.name.length - a.name.length)[0];
+  const mentioned = resolveMentionedWhisperTarget(
+    message,
+    speakerId,
+    agents,
+  );
   if (mentioned) return mentioned;
 
   if (!SOCIAL_INTENT_PATTERN.test(message)) return null;
@@ -55,6 +61,38 @@ export function resolveWhisperTarget(
         Math.abs(agent.tileY - speaker.tileY),
     }))
     .sort((a, b) => a.distance - b.distance)[0]?.agent ?? null;
+}
+
+/** Resolve only a participant explicitly named in the instruction. */
+export function resolveMentionedWhisperTarget(
+  message: string,
+  speakerId: string,
+  agents: WhisperAgent[],
+): WhisperAgent | null {
+  return agents
+    .filter(
+      (agent) =>
+        agent.agentId !== speakerId &&
+        agent.name.length > 0 &&
+        message.includes(agent.name),
+    )
+    .sort((a, b) => b.name.length - a.name.length)[0] ?? null;
+}
+
+/** Whether the instruction explicitly asks the selected Agent to move near someone. */
+export function isWhisperMoveNearIntent(message: string): boolean {
+  const normalized = normalizeWhisper(message);
+  return MOVE_NEAR_PATTERN.test(normalized) && !NEGATED_MOVE_PATTERN.test(normalized);
+}
+
+/** Resolve the explicitly named destination Agent of a move-near instruction. */
+export function resolveWhisperMoveTarget(
+  message: string,
+  speakerId: string,
+  agents: WhisperAgent[],
+): WhisperAgent | null {
+  if (!isWhisperMoveNearIntent(message)) return null;
+  return resolveMentionedWhisperTarget(message, speakerId, agents);
 }
 
 /** Pick a free cardinal tile next to the target, closest to the speaker. */

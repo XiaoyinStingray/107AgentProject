@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   BrainDisconnectWatchdog,
+  BrainWhisperTracker,
   getBrainButtonState,
 } from "./sceneBrain";
 
@@ -47,5 +48,54 @@ describe("scene Brain helpers", () => {
     vi.advanceTimersByTime(100);
 
     expect(disconnected).not.toHaveBeenCalled();
+  });
+
+  it("tracks an instructed actor followed by the named target", () => {
+    vi.useFakeTimers();
+    const feedback = vi.fn();
+    const tracker = new BrainWhisperTracker(feedback, 100);
+
+    tracker.start({
+      actorId: "a",
+      actorName: "苏敏",
+      targetId: "b",
+      targetName: "陈墨",
+    });
+    expect(feedback).toHaveBeenLastCalledWith(
+      "a",
+      "耳语执行中：等待 苏敏 发言",
+    );
+
+    expect(tracker.recordSpeaker("c")).toBe(false);
+    expect(tracker.recordSpeaker("a")).toBe(true);
+    expect(feedback).toHaveBeenLastCalledWith(
+      "a",
+      "耳语已执行：苏敏 已发言，等待 陈墨 回应",
+    );
+
+    expect(tracker.recordSpeaker("b")).toBe(true);
+    expect(feedback).toHaveBeenLastCalledWith(
+      "a",
+      "耳语执行完成：陈墨 已回应",
+    );
+    vi.advanceTimersByTime(100);
+    expect(feedback).toHaveBeenCalledTimes(3);
+  });
+
+  it("pauses its deadline and reports a visible timeout after resume", () => {
+    vi.useFakeTimers();
+    const feedback = vi.fn();
+    const tracker = new BrainWhisperTracker(feedback, 100);
+
+    tracker.start({ actorId: "a", actorName: "苏敏" }, true);
+    vi.advanceTimersByTime(200);
+    expect(feedback).toHaveBeenCalledOnce();
+
+    tracker.setPaused(false);
+    vi.advanceTimersByTime(100);
+    expect(feedback).toHaveBeenLastCalledWith(
+      "a",
+      "耳语执行超时：苏敏 未产生可见发言",
+    );
   });
 });

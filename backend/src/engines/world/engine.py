@@ -56,6 +56,7 @@ class WorldEngine(
         ] = {}
         self._pending_instruction_routes: list[list[str]] = []
         self._pending_speaker_ids: list[str] = []
+        self._instruction_preempt_requested = False
         self._goal_check_pending = False
 
         # === State 4 D2: 行为指纹采集器 ===
@@ -228,10 +229,13 @@ class WorldEngine(
 
     def _activate_pending_instruction_routes(self) -> None:
         """Activate speaker routes at the same tick boundary as instructions."""
+        has_pending_instruction = bool(self._pending_agent_instructions)
         while self._pending_instruction_routes:
             self._pending_speaker_ids.extend(
                 self._pending_instruction_routes.pop(0)
             )
+        if has_pending_instruction:
+            self._instruction_preempt_requested = False
 
     def _build_agent_context(self, agent: LifeAgent, shared_context: str) -> str:
         """Add an explicit identity lock and participant aliases to World context."""
