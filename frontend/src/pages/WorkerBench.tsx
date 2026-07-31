@@ -130,22 +130,27 @@ export default function WorkerBench() {
     } catch {}
   }, []);
 
-  const [followUp, setFollowUp] = useState("");
+  const [accepted, setAccepted] = useState(false);
 
-  // 重置 = 新任务（清空工作区，下次执行用新 workspace）
+  // 重置 = 新任务
   const handleReset = useCallback(() => {
     reset();
     setTask("");
-    setFollowUp("");
     setCurrentRunId(null);
+    setAccepted(false);
   }, [reset]);
 
+  // 认可交付
+  const handleAccept = useCallback(() => {
+    setAccepted(true);
+  }, []);
+
   // 追加对话——复用当前工作区
-  const handleFollowUp = useCallback(() => {
-    if (!followUp.trim() || !currentRunId) return;
-    execute(buildRequest(followUp.trim(), true));
-    setFollowUp("");
-  }, [followUp, currentRunId, execute, buildRequest]);
+  const handleFollowUp = useCallback((instruction: string) => {
+    if (!instruction.trim() || !currentRunId) return;
+    setAccepted(false);
+    execute(buildRequest(instruction.trim(), true));
+  }, [currentRunId, execute, buildRequest]);
 
   // 使用示例任务
   const handleExample = useCallback(
@@ -245,28 +250,6 @@ export default function WorkerBench() {
                 >
                   ↺ 新任务
                 </button>
-                {/* 追加对话 */}
-                <div className="flex items-center gap-1">
-                  <input
-                    type="text"
-                    value={followUp}
-                    onChange={(e) => setFollowUp(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter" && followUp.trim()) handleFollowUp(); }}
-                    placeholder="继续对话…（如：把第三段改短一点）"
-                    className="w-56 bg-bg-primary border border-border rounded px-2 py-1
-                               text-xs font-mono text-text-primary placeholder-text-muted/50
-                               focus:outline-none focus:border-cyan-700/50"
-                  />
-                  <button
-                    onClick={handleFollowUp}
-                    disabled={!followUp.trim()}
-                    className="px-2 py-1 bg-cyan-700 hover:bg-cyan-600 disabled:bg-bg-secondary
-                               disabled:text-text-muted text-white text-xs font-mono rounded
-                               transition-colors"
-                  >
-                    发送
-                  </button>
-                </div>
               </>
             )}
 
@@ -458,6 +441,9 @@ export default function WorkerBench() {
             events={events}
             connected={connected}
             done={done}
+            onAccept={handleAccept}
+            onRevise={handleFollowUp}
+            onNewTask={handleReset}
           />
         </div>
       </div>

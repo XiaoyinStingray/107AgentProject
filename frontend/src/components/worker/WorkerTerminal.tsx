@@ -272,12 +272,21 @@ interface WorkerTerminalProps {
   events: WorkerEvent[];
   connected: boolean;
   done: boolean;
+  /** 用户点击认可后的回调 */
+  onAccept?: () => void;
+  /** 继续修改的回调 */
+  onRevise?: (instruction: string) => void;
+  /** 新任务回调 */
+  onNewTask?: () => void;
 }
 
 export default function WorkerTerminal({
   events,
   connected,
   done,
+  onAccept,
+  onRevise,
+  onNewTask,
 }: WorkerTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -332,23 +341,92 @@ export default function WorkerTerminal({
 
         {/* 加载指示器 */}
         {connected && !done && (
-          <div className="flex items-center gap-2 py-1">
-            <span className="text-text-muted text-xs animate-pulse">▊</span>
-            <span className="text-text-muted text-xs">Agent 思考中...</span>
+          <div className="flex items-center gap-3 py-2 px-4 border-t border-border bg-bg-secondary">
+            <span className="w-3 h-3 rounded-full bg-cyan-400 animate-pulse" />
+            <span className="text-xs font-mono text-cyan-400">
+              Agent 工作中… {events.filter(e => e.type === "worker.tool_start").length > 0
+                ? `已执行 ${events.filter(e => e.type === "worker.tool_start").length} 次工具调用`
+                : "正在制定计划"}
+            </span>
           </div>
         )}
       </div>
 
-      {/* 底部状态栏 */}
-      {done && (
-        <div className="px-3 py-2 border-t border-border bg-bg-secondary">
-          <div className="text-xs font-mono text-text-muted">
-            {events.filter((e) => e.type === "worker.tool_start").length} 次工具调用
-            {" · "}
-            {events.filter((e) => e.type === "worker.file_updated").length} 次文件变更
-          </div>
+      {/* 完成卡片 */}
+      {done && <CompletionCard events={events} onAccept={onAccept} onRevise={onRevise} onNewTask={onNewTask} />}
+    </div>
+  );
+}
+
+
+/** 完成卡片——用户验收入口 */
+function CompletionCard({
+  events, onAccept, onRevise, onNewTask
+}: {
+  events: WorkerEvent[];
+  onAccept?: () => void;
+  onRevise?: (instruction: string) => void;
+  onNewTask?: () => void;
+}) {
+  const [followUp, setFollowUp] = React.useState("");
+  const doneEvt = events.find(e => e.type === "worker.done");
+  const summaryEvt = events.find(e => e.type === "worker.summary");
+  const steps = (doneEvt?.data as Record<string,unknown>|null)?.total_steps ?? "?";
+  const files = ((doneEvt?.data as Record<string,unknown>|null)?.files ?? []) as string[];
+  const toolCount = events.filter(e => e.type === "worker.tool_start").length;
+
+  return (
+    <div className="border-t-2 border-cyan-700/50 bg-bg-card">
+      <div className="p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <span className="text-lg">✅</span>
+          <span className="text-sm font-mono text-emerald-400 font-semibold">
+            交付物就绪 — {String(steps)} 步, {files.length} 个文件, {toolCount} 次工具调用
+          </span>
         </div>
-      )}
+        {summaryEvt && (
+          <p className="text-xs font-mono text-text-muted ml-7">
+            {(summaryEvt.data as Record<string,unknown>|null)?.deliverable_summary as string}
+          </p>
+        )}
+        <div className="flex items-center gap-2 ml-7">
+          <button onClick={onAccept}
+                  className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white
+                             text-xs font-mono rounded transition-colors">
+            ✓ 认可交付
+          </button>
+          <button onClick={onNewTask}
+                  className="px-4 py-1.5 bg-bg-secondary hover:bg-bg-primary text-text-secondary
+                             text-xs font-mono rounded border border-border transition-colors">
+            ↺ 新任务
+          </button>
+        </div>
+        <div className="flex items-center gap-2 ml-7">
+          <span className="text-xs font-mono text-text-muted shrink-0">或继续修改：</span>
+          <input type="text" value={followUp}
+                 onChange={e => setFollowUp(e.target.value)}
+                 onKeyDown={e => { if (e.key === "Enter" && followUp.trim()) { onRevise?.(followUp.trim()); setFollowUp(""); } }}
+                 placeholder="把第三章改短一点 / 加一个对比表格 / 翻译成英文…"
+                 className="flex-1 bg-bg-primary border border-border rounded px-2 py-1
+                            text-xs font-mono text-text-primary placeholder-text-muted/50
+                            focus:outline-none focus:border-cyan-700/50" />
+          <button onClick={() => { if (followUp.trim()) { onRevise?.(followUp.trim()); setFollowUp(""); } }}
+                  disabled={!followUp.trim()}
+                  className="px-3 py-1 bg-cyan-700 hover:bg-cyan-600 disabled:bg-bg-secondary
+                             disabled:text-text-muted text-white text-xs font-mono rounded
+                             transition-colors shrink-0">
+            发送
+          </button>
+        </div>
+        {files.length > 0 && (
+          <div className="ml-7 pt-2 border-t border-border/50">
+            <div className="text-xs font-mono text-text-muted mb-1">产出文件：</div>
+            {files.map((f: string) => (
+              <div key={f} className="text-xs font-mono text-cyan-400 ml-2">📄 {f}</div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
