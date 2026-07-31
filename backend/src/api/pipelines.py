@@ -91,7 +91,7 @@ async def suggest_pipeline(req: PipelineSuggestRequest):
     logger.info(f"POST /api/pipelines/suggest: {req.goal[:80]}")
     try:
         from llm.client import create_model_client
-        from autogen_agentchat.messages import TextMessage
+        from autogen_core.models import UserMessage
 
         client = create_model_client()
         if client is None:
@@ -100,7 +100,7 @@ async def suggest_pipeline(req: PipelineSuggestRequest):
         prompt = f"用户目标：{req.goal}\n可用 Agent ID：{', '.join(req.agent_ids) if req.agent_ids else '(全部可用)'}"
         response = await client.create(
             messages=[
-                TextMessage(content=f"{SUGGEST_PROMPT}\n\n{prompt}", source="pipeline_suggest"),
+                UserMessage(content=f"{SUGGEST_PROMPT}\n\n{prompt}", source="pipeline_suggest"),
             ],
         )
         text = response.content if hasattr(response, 'content') else str(response)
