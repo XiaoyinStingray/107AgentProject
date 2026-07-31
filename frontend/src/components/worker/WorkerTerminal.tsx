@@ -368,7 +368,7 @@ function CompletionCard({
   onRevise?: (instruction: string) => void;
   onNewTask?: () => void;
 }) {
-  const [followUp, setFollowUp] = React.useState("");
+  const [followUp, setFollowUp] = useState("");
   const doneEvt = events.find(e => e.type === "worker.done");
   const summaryEvt = events.find(e => e.type === "worker.summary");
   const steps = (doneEvt?.data as Record<string,unknown>|null)?.total_steps ?? "?";

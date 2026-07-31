@@ -71,6 +71,13 @@ export default function WorkerBench() {
   const { events, connected, done, error, execute, cancel, reset, hydrate } =
     useWorkerExecute();
 
+  // 双重保险：done 状态可能未及时更新，从 events 推断
+  const effectiveDone = done || (
+    events.length > 0 &&
+    (events[events.length - 1]?.type === "worker.done" ||
+     events[events.length - 1]?.type === "worker.error")
+  );
+
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   const [reconnectNotice, setReconnectNotice] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
@@ -466,7 +473,7 @@ export default function WorkerBench() {
           <WorkerTerminal
             events={events}
             connected={connected}
-            done={done}
+            done={effectiveDone}
             onAccept={handleAccept}
             onRevise={handleFollowUp}
             onNewTask={handleReset}
