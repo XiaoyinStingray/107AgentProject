@@ -525,3 +525,21 @@
 - **根因**：加载操作只更新 React `agents`；`MapScene.syncAgentsInPlace()` 为避免普通状态同步干扰实时移动，明确不使用 React 坐标覆盖已有 sprite，导致存档恢复也走了同一条非覆盖路径。
 - **影响**：无法从相同场面起点比较不同干预结果，Checkpoint 只实现了部分恢复。
 - **人工复现**：暂停并保存 Checkpoint，移动角色，再加载该 Checkpoint。
+
+---
+
+## 2026-07-31: State 5 — Worker + scenes bug 修复
+
+### BUG-039：场景启动 Crash — WorldRow 传入不存在的 scenario_id 参数
+
+- **状态**：✅ 已修复 (2026-07-31)
+- **优先级**：P0（场景启动 500 错误，M11 完全不可用）
+- **发现日期**：2026-07-31
+- **环境**：`POST /api/scenes/library/start`
+- **复现步骤**：
+  1. 启动后端
+  2. 调用 `POST /api/scenes/library/start` 任意场景
+- **实际结果**：返回 500 Internal Server Error，Traceback：`TypeError: 'scenario_id' is an invalid keyword argument for WorldRow`
+- **根因**：`scenes.py` 第 302 行和 315 行在构造 `WorldRow(...)` 时传入了 `scenario_id="builtin_study"` 和 `scenario_id=scenario_row.id`。`WorldRow` ORM 模型没有 `scenario_id` 列——场景数据应存入 `scenario_json` 列（JSON 字符串）。
+- **修复**：两处 `scenario_id=...` 改为 `scenario_json=_json.dumps({"id": ..., "name": ...})`，与 `worlds.py` 中 `_sync_world_to_db` 的序列化格式一致。
+- **关联位置**：`backend/src/api/scenes.py` — lines 302, 315

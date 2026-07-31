@@ -299,7 +299,7 @@ async def start_scene(scene_id: str, body: StartSceneRequest):
                 id=str(uuid.uuid4()),
                 name=f"Scene: {scene_id}",
                 agent_ids_json=_json.dumps(body.agent_ids),
-                scenario_id="builtin_study",
+                scenario_json=_json.dumps({"id": "builtin_study", "name": "Scene Study"}),
                 world_type="scene",
                 status="running",
             )
@@ -312,7 +312,7 @@ async def start_scene(scene_id: str, body: StartSceneRequest):
                 id=str(uuid.uuid4()),
                 name=f"Scene: {scene_id}",
                 agent_ids_json=_json.dumps(body.agent_ids),
-                scenario_id=scenario_row.id,
+                scenario_json=_json.dumps({"id": scenario_row.id, "name": scenario_row.name}),
                 world_type="scene",
                 status="running",
             )
