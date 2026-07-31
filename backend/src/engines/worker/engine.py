@@ -443,7 +443,7 @@ class AgentWorker:
         # 构建上下文
         plan_summary = "\n".join(s["title"] for s in self._plan_steps) if self._plan_steps else "（无详细计划）"
         completed_text = "\n".join(
-            f"- {s.get('title', '?')} → {s.get('result', '?')[:100]}"
+            f"- {s.get('title', '?')} → {str(s.get('result', '?'))[:100]}"
             for s in self._completed_steps
         ) if self._completed_steps else "（无）"
 
@@ -500,24 +500,35 @@ class AgentWorker:
             reason=reason,
         ).__dict__)
 
-        if action == "tool_call":
+        # 容错：如果 decision 值本身是已知工具名，视为 tool_call
+        known_tool_names = {t.name for t in self._tools}
+        if action in known_tool_names:
+            tool_name = action
+            tool_args = decision.get("tool_args", {}) or {}
+            if "query" not in tool_args and "path" not in tool_args and "code" not in tool_args and "content" not in tool_args:
+                # Agent 把 tool_args 放在了顶层 JSON 而不是嵌套的 tool_args 字段
+                tool_args = {k: v for k, v in decision.items()
+                            if k not in ("decision", "tool_name", "reason", "deliverable_summary")}
+            logger.info(f"AgentWorker: LLM used '{action}' directly as decision, auto-corrected to tool_call")
+            self._pending_decision = {"tool_name": tool_name, "tool_args": tool_args}
+            self._transition(WorkerState.EXECUTING)
+
+        elif action == "tool_call":
             tool_name = decision.get("tool_name", "")
             tool_args = decision.get("tool_args", {}) or {}
 
             # 验证工具名
-            if tool_name not in {t.name for t in self._tools}:
+            if tool_name not in known_tool_names:
                 yield _sse_event("worker.thought", WorkerThoughtData(
                     step_index=self._step_index,
                     thought=f"警告：Agent 请求了未知工具 '{tool_name}'，引导 Agent 选择正确的工具",
                 ).__dict__)
-                # 不进入 ERROR，让 Agent 在下一轮重新决定
                 self._completed_steps.append({
                     "title": f"Step {self._step_index}: 决策错误 (未知工具: {tool_name})",
-                    "result": f"工具 '{tool_name}' 未注册。可用工具: {', '.join(t.name for t in self._tools)}",
+                    "result": f"工具 '{tool_name}' 未注册。可用工具: {', '.join(known_tool_names)}",
                 })
                 return
 
-            # 保存决策到待执行
             self._pending_decision = {"tool_name": tool_name, "tool_args": tool_args}
             self._transition(WorkerState.EXECUTING)
 
@@ -525,11 +536,11 @@ class AgentWorker:
             self._transition(WorkerState.DONE)
 
         else:
-            # deliverable 或其他 → 视为 tool_call 的特殊形式
-            logger.info(f"AgentWorker: decision='{action}' → treating as logical step")
+            # 未知 action → 记录但不崩溃
+            logger.warning(f"AgentWorker: unknown decision='{action}' → recording as skipped step")
             self._completed_steps.append({
-                "title": f"Step {self._step_index}: {action}",
-                "result": decision.get("deliverable_summary", reason),
+                "title": f"Step {self._step_index}: 未知决策 ({action})",
+                "result": f"Agent 返回了未识别的决策类型: {action}。{reason}",
             })
             # 继续下一轮
 

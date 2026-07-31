@@ -62,6 +62,12 @@ export default function WorkerBench() {
 
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   const [reconnectNotice, setReconnectNotice] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [history, setHistory] = useState<Array<{
+    run_id: string; agent_name: string; task: string; running: boolean;
+    state: string; steps: number; files: Array<{path: string; size: number}>;
+    created_at: string;
+  }>>([]);
 
   // 追踪 runId——从第一个 worker.started 事件中提取
   useEffect(() => {
@@ -116,6 +122,13 @@ export default function WorkerBench() {
   const handleCancel = useCallback(() => {
     cancel();
   }, [cancel]);
+
+  const loadHistory = useCallback(async () => {
+    try {
+      const resp = await fetch("/api/workers/history");
+      if (resp.ok) setHistory(await resp.json());
+    } catch {}
+  }, []);
 
   const [followUp, setFollowUp] = useState("");
 
@@ -257,6 +270,17 @@ export default function WorkerBench() {
               </>
             )}
 
+            {/* 历史记录 */}
+            <button
+              onClick={() => { setShowHistory(!showHistory); if (!showHistory) loadHistory(); }}
+              className={`p-2 rounded border transition-colors ${
+                showHistory ? "border-cyan-700/30 text-cyan-400" : "border-border text-text-muted"
+              }`}
+              title="历史记录"
+            >
+              🕐
+            </button>
+
             {/* 面板切换 */}
             <button
               onClick={() => setShowPanel(!showPanel)}
@@ -391,6 +415,33 @@ export default function WorkerBench() {
           </div>
         )}
       </div>
+
+      {/* 历史面板 */}
+      {showHistory && (
+        <div className="border-b border-border max-h-48 overflow-y-auto bg-bg-secondary">
+          {history.length === 0 ? (
+            <p className="px-4 py-3 text-xs text-text-muted font-mono">暂无历史记录</p>
+          ) : (
+            history.map((h) => (
+              <div key={h.run_id}
+                   className="flex items-center gap-3 px-4 py-2 border-b border-border/50
+                              hover:bg-bg-primary/50 transition-colors cursor-pointer"
+                   onClick={() => setCurrentRunId(h.run_id)}>
+                <span className={`w-2 h-2 rounded-full shrink-0 ${h.running ? "bg-emerald-400 animate-pulse" : "bg-text-muted"}`} />
+                <span className="text-xs font-mono text-text-secondary w-20 truncate">{h.agent_name}</span>
+                <span className="text-xs font-mono text-text-muted flex-1 truncate">{h.task}</span>
+                <span className="text-xs font-mono text-text-muted">{h.steps} 步</span>
+                <span className="text-xs font-mono text-text-muted">
+                  {h.files?.length || 0} 文件
+                </span>
+                <span className="text-xs font-mono text-text-muted/50 w-16 text-right">
+                  {h.created_at?.slice(11, 16)}
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+      )}
 
       {/* ── 主体区域 ── */}
       <div className="flex-1 flex min-h-0">

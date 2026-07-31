@@ -315,6 +315,34 @@ async def unlock_worker_file(run_id: str, path: str = ""):
     return {"path": path, "locked": False}
 
 
+@router.get("/history")
+async def list_worker_history():
+    """列出所有已完成和运行中的 Worker（历史记录）。"""
+    history = []
+    for rid, e in _active_workers.items():
+        worker = e["worker"]
+        # 提取文件列表
+        files = []
+        try:
+            f_list = await worker._workspace.list_files()
+            files = [{"path": f.path, "size": f.size} for f in f_list]
+        except Exception:
+            pass
+        history.append({
+            "run_id": rid,
+            "agent_name": e["agent_name"],
+            "task": e["task"][:120],
+            "running": e.get("running", False),
+            "state": worker.state.value if hasattr(worker.state, 'value') else str(worker.state),
+            "steps": worker._step_index,
+            "files": files,
+            "created_at": e["created_at"],
+        })
+    # 最新在前
+    history.sort(key=lambda h: h["created_at"], reverse=True)
+    return history
+
+
 @router.get("/running/list")
 async def list_running_workers():
     """列出所有活跃 Worker——供全局状态栏显示。"""
