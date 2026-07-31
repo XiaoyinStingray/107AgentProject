@@ -202,7 +202,12 @@ async def create_pipeline(req: PipelineCreateRequest):
 @router.get("/")
 async def list_pipelines():
     return [
-        {"id": p.id, "name": p.name, "description": p.description, "node_count": len(p.nodes), "status": p.status.value}
+        {
+            "id": p.id, "name": p.name, "description": p.description,
+            "node_count": len(p.nodes), "status": p.status.value,
+            "nodes": [{"id": n.id, "title": n.title, "agent_id": n.agent_id,
+                       "task": n.task, "depends_on": n.depends_on} for n in p.nodes],
+        }
         for p in _pipelines.values()
     ]
 
