@@ -222,15 +222,15 @@ class AgentWorker:
     # 公共 API
     # ─────────────────────────────────────────────────────────────────
 
-    async def execute(self, task: str) -> AsyncGenerator[str, None]:
+    async def execute(self, task: str, is_follow_up: bool = False) -> AsyncGenerator[str, None]:
         """执行任务——返回 SSE 事件生成器。
 
         Args:
             task: 用户的任务描述
-
-        Yields:
-            SSE 格式的字符串 ("data: {json}\\n\\n")
+            is_follow_up: 是否为追加任务（复用工作区时设为 True）
         """
+        self._is_follow_up = is_follow_up
+
         if self._state != WorkerState.IDLE:
             yield _sse_event("worker.error", WorkerErrorData(
                 step_index=None,
@@ -313,7 +313,7 @@ class AgentWorker:
             self._transition(WorkerState.DONE)
 
     def cancel(self):
-        """请求取消。Worker 在下一个状态检查点停止。"""
+        """Cancel the worker at the next state checkpoint."""
         logger.info(f"AgentWorker.cancel: run_id={self._run_id}")
         self._cancel_requested = True
 
@@ -329,18 +329,18 @@ class AgentWorker:
     def workspace(self):
         return self._workspace
 
-    # ── 文件锁（用户编辑时禁止 Agent 写入）──
+    # -- file locking (block Agent writes during user editing) --
 
     def lock_file(self, path: str):
-        """锁定文件——Agent 的 write_file 工具将拒绝写入此路径。"""
+        """Lock file so agent's write_file tool rejects it."""
         self._locked_files.add(path.replace("\\", "/"))
 
     def unlock_file(self, path: str):
-        """解锁文件。"""
+        """Unlock file."""
         self._locked_files.discard(path.replace("\\", "/"))
 
     def is_file_locked(self, path: str) -> bool:
-        """检查文件是否被用户锁定。"""
+        """Check if file is locked by user."""
         return path.replace("\\", "/") in self._locked_files
 
     # ─────────────────────────────────────────────────────────────────
@@ -469,6 +469,7 @@ class AgentWorker:
             last_action=last_action,
             last_result=last_result,
             tools=self._tools,
+            is_follow_up=getattr(self, "_is_follow_up", False),
         )
 
         # 调用 LLM

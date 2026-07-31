@@ -135,6 +135,7 @@ def build_decision_prompt(
     last_action: str,
     last_result: str,
     tools: list[ToolSpec] | None = None,
+    is_follow_up: bool = False,
 ) -> str:
     """构建 Agent 决策 prompt。"""
     from engines.worker.tools import WORKER_TOOLS as DEFAULT_TOOLS
@@ -151,6 +152,9 @@ def build_decision_prompt(
         last_result=last_result or "（无）",
         tool_list=tool_list,
     )
+
+    if is_follow_up and step_index == 1:
+        prompt += "\n\n⚠️ 这是追加任务！工作区已有的文件是上一轮的产出。请先 read_file 读取已有内容，在此基础上修改，不要从头写。"
 
     if step_index == 1:
         prompt += f"\n\n{PLANNING_HINT}"

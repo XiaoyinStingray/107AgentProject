@@ -224,20 +224,37 @@ async def execute_worker_task(req: WorkerExecuteRequest):
 
     # 创建 Workspace——如果 reuse_run_id 指定且已有工作区，则复用
     workspace = None
+    logger.info(f"reuse_run_id={req.reuse_run_id!r}, active_workers={list(_active_workers.keys())}")
     if req.reuse_run_id:
         existing = _active_workers.get(req.reuse_run_id)
-        if existing and existing.get("worker"):
-            workspace = existing["worker"]._workspace
-            logger.info(f"Reusing workspace from run {req.reuse_run_id}")
+        if existing:
+            worker_obj = existing.get("worker")
+            if worker_obj is not None:
+                workspace = worker_obj._workspace
+                logger.info(f"Reusing workspace from run {req.reuse_run_id}: {workspace.location_description}")
+            else:
+                # 磁盘恢复的条目——尝试重建 LocalWorkspace
+                from pathlib import Path
+                ws_root = Path.home() / "workspaces" / req.reuse_run_id
+                if ws_root.exists():
+                    from engines.worker.workspace import LocalWorkspace
+                    workspace = LocalWorkspace(str(Path.home() / "workspaces"), req.reuse_run_id)
+                    logger.info(f"Rebuilt workspace for restored run {req.reuse_run_id}: {workspace.location_description}")
+        else:
+            logger.warning(f"reuse_run_id={req.reuse_run_id} not found in _active_workers")
     if workspace is None:
         workspace = _create_workspace(
             req.workspace_type,
             req.workspace_config or {},
             req.agent_id,
         )
+        logger.info(f"Created new workspace: {workspace.location_description if workspace else 'default'}")
 
     # 创建 Worker
+    is_follow_up = bool(req.reuse_run_id and workspace is not None)
     worker = AgentWorker(agent=agent, workspace=workspace, base_dir=req.workspace_config.get("path"))
+    if is_follow_up:
+        logger.info(f"Follow-up task reusing workspace from run {req.reuse_run_id}")
 
     # 注册到内存表
     _active_workers[worker.run_id] = {
@@ -253,7 +270,7 @@ async def execute_worker_task(req: WorkerExecuteRequest):
     async def event_generator():
         entry = _active_workers.get(worker.run_id)
         try:
-            async for event in worker.execute(req.task):
+            async for event in worker.execute(req.task, is_follow_up=is_follow_up):
                 yield event
                 # 保存解析后的事件供重连回放（去掉 "data: " 前缀，解析 JSON）
                 if entry and entry.get("events") is not None:

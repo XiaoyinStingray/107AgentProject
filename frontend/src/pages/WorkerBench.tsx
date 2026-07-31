@@ -88,14 +88,15 @@ export default function WorkerBench() {
     created_at: string;
   }>>([]);
 
-  // 追踪 runId——从第一个 worker.started 事件中提取
+  // 追踪 runId——从 events 中保持最新值
+  const latestRunId = useMemo(() => {
+    const started = [...events].reverse().find((e) => e.type === "worker.started");
+    return started?.data?.run_id as string | undefined;
+  }, [events]);
+
   useEffect(() => {
-    if (currentRunId) return; // 已设置
-    const started = events.find((e) => e.type === "worker.started");
-    if (started?.data?.run_id) {
-      setCurrentRunId(started.data.run_id as string);
-    }
-  }, [events, currentRunId]);
+    if (latestRunId) setCurrentRunId(latestRunId);
+  }, [latestRunId]);
 
   // unmount 时不 cancel——worker 后台继续跑
   // 用户点"停止"才 cancel
@@ -485,7 +486,18 @@ export default function WorkerBench() {
             connected={connected}
             done={effectiveDone}
             onAccept={handleAccept}
-            onRevise={handleFollowUp}
+            onRevise={(instruction: string) => {
+              // 直接使用 currentRunId，不通过闭包
+              if (!instruction.trim()) return;
+              setAccepted(false);
+              execute({
+                agent_id: effectiveAgentId,
+                task: instruction.trim(),
+                workspace_type: workspaceConfig.type,
+                workspace_config: { path: workspaceConfig.path },
+                reuse_run_id: currentRunId || latestRunId,
+              });
+            }}
             onNewTask={handleReset}
           />
         </div>
