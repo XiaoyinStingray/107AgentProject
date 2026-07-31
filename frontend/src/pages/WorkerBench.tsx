@@ -5,13 +5,14 @@
  * 顶部: 任务输入栏 + 执行/停止按钮 + 状态指示器
  */
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect, useMemo } from "react";
 import { useWorkerExecute } from "../api/workers";
 import WorkerTerminal from "../components/worker/WorkerTerminal";
 import WorkspacePanel from "../components/worker/WorkspacePanel";
 import WorkspaceSelector, {
   type WorkspaceConfig,
 } from "../components/worker/WorkspaceSelector";
+import { useAgents } from "../api/agents";
 
 // =============================================================================
 // 常量
@@ -28,14 +29,33 @@ const EXAMPLE_TASKS = [
 // =============================================================================
 
 export default function WorkerBench() {
+  const { data: agents = [] } = useAgents();
   const [task, setTask] = useState("");
-  const [agentId, setAgentId] = useState("");
+  const [agentId, setAgentId] = useState("__builtin__");
+  const [customAgentId, setCustomAgentId] = useState("");
+  const [showAgentDropdown, setShowAgentDropdown] = useState(false);
   const [showPanel, setShowPanel] = useState(true);
   const [showWorkspaceConfig, setShowWorkspaceConfig] = useState(false);
   const [workspaceConfig, setWorkspaceConfig] = useState<WorkspaceConfig>({
     type: "local",
     path: "",
   });
+
+  // 内置默认 Agent
+  const BUILTIN_AGENT = useMemo(() => ({
+    id: "__builtin__",
+    name: "⚡ 默认 Worker",
+    persona: { mbti: "ISTJ", narrative: "内置高效任务执行者——不需创建 Agent 即可使用" },
+  }), []);
+
+  // Agent 列表：内置 + 已有
+  const agentOptions = useMemo(() => [
+    BUILTIN_AGENT,
+    ...agents,
+  ], [agents, BUILTIN_AGENT]);
+
+  const selectedAgent = agentOptions.find((a) => a.id === agentId);
+  const effectiveAgentId = agentId === "__builtin__" ? "worker-default" : agentId;
 
   const { events, connected, done, error, execute, cancel, reset } =
     useWorkerExecute();
@@ -44,7 +64,7 @@ export default function WorkerBench() {
   const handleExecute = useCallback(() => {
     if (!task.trim()) return;
     execute({
-      agent_id: agentId || "worker-default",
+      agent_id: effectiveAgentId,
       task: task.trim(),
       workspace_type: workspaceConfig.type,
       workspace_config: workspaceConfig.type === "cloud"
@@ -175,21 +195,91 @@ export default function WorkerBench() {
           </div>
         </div>
 
-        {/* Agent ID 输入（可选） */}
+        {/* Agent 选择器 */}
         {!connected && (
           <>
             <div className="mt-2 flex items-center gap-2">
               <span className="text-xs font-mono text-text-muted">Agent:</span>
-              <input
-                type="text"
-                value={agentId}
-                onChange={(e) => setAgentId(e.target.value)}
-                placeholder="(默认 Worker)"
-                disabled={connected}
-                className="bg-transparent border-b border-border text-xs font-mono
-                           text-text-secondary placeholder-text-muted px-1
-                           focus:outline-none focus:border-cyan-700/50 w-48"
-              />
+
+              {/* 下拉选择 */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowAgentDropdown(!showAgentDropdown)}
+                  disabled={connected}
+                  className="flex items-center gap-2 px-2 py-1 bg-surface border border-border
+                             rounded text-xs font-mono text-text-secondary
+                             hover:border-cyan-700/30 transition-colors min-w-[180px]
+                             disabled:opacity-50"
+                >
+                  <span className="truncate flex-1 text-left">
+                    {selectedAgent
+                      ? `${selectedAgent.persona?.mbti ? `[${selectedAgent.persona.mbti}] ` : ""}${selectedAgent.name}`
+                      : "选择 Agent…"}
+                  </span>
+                  <span className="text-text-muted shrink-0">▼</span>
+                </button>
+
+                {showAgentDropdown && (
+                  <div className="absolute top-full left-0 mt-1 w-80 max-h-60 overflow-y-auto
+                                  bg-surface border border-border rounded shadow-lg z-50">
+                    {agentOptions.map((agent) => (
+                      <button
+                        key={agent.id}
+                        onClick={() => { setAgentId(agent.id); setShowAgentDropdown(false); }}
+                        className={`w-full text-left px-3 py-2 text-xs font-mono
+                                    hover:bg-cyan-900/20 transition-colors
+                                    ${agent.id === agentId ? "bg-cyan-900/10 border-l-2 border-cyan-500" : ""}`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={agent.id === "__builtin__"
+                            ? "text-cyan-400" : "text-accent-green"}>
+                            {agent.id === "__builtin__" ? "⚡" : "🎭"}
+                          </span>
+                          <span className="text-text-primary">
+                            {agent.name}
+                          </span>
+                          {agent.id !== "__builtin__" && agent.persona?.mbti && (
+                            <span className="text-accent-purple/70">{agent.persona.mbti}</span>
+                          )}
+                        </div>
+                        <p className="text-text-muted mt-0.5 ml-6 line-clamp-1">
+                          {agent.id === "__builtin__"
+                            ? "内置 Worker Agent — 高效任务执行"
+                            : agent.persona?.narrative?.slice(0, 80)}
+                        </p>
+                      </button>
+                    ))}
+                    {/* 自定义 ID 输入 */}
+                    <div className="border-t border-border px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-text-muted">或输入 ID:</span>
+                        <input
+                          type="text"
+                          value={customAgentId}
+                          onChange={(e) => { setCustomAgentId(e.target.value); if (e.target.value) setAgentId(e.target.value); }}
+                          placeholder="手动输入 Agent ID"
+                          className="flex-1 bg-transparent border-b border-border text-xs font-mono
+                                     text-text-secondary placeholder-text-muted px-1
+                                     focus:outline-none focus:border-cyan-700/50"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 关闭下拉的遮罩 */}
+              {showAgentDropdown && (
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setShowAgentDropdown(false)}
+                />
+              )}
+
+              <span className="text-xs text-text-muted">
+                {agents.length === 0 ? "(暂无已创建 Agent)" : `(${agents.length} 个可用)`}
+              </span>
+
               <button
                 onClick={() => setShowWorkspaceConfig(!showWorkspaceConfig)}
                 className={`text-xs font-mono px-2 py-0.5 rounded border transition-colors ${
