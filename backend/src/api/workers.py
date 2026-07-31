@@ -266,6 +266,44 @@ async def get_worker_events(run_id: str):
     }
 
 
+class FileWriteRequest(BaseModel):
+    """用户编辑工作区文件的请求。"""
+    path: str = Field(..., description="文件路径")
+    content: str = Field(..., description="新内容")
+    lock: bool = Field(default=True, description="编辑期间锁定文件，禁止 Agent 写入")
+
+
+@router.put("/{run_id}/files/{path:path}")
+async def write_worker_file(run_id: str, path: str, req: FileWriteRequest):
+    """用户编辑工作区文件（区别于 Agent 的 write_file 工具调用）。
+
+    如果 lock=True，编辑期间 Agent 无法写入此文件。
+    """
+    entry = _active_workers.get(run_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Worker {run_id!r} 未找到")
+    worker = entry["worker"]
+    try:
+        if req.lock:
+            worker.lock_file(path)
+        await worker._workspace.write_file(path, req.content)
+        return {"path": path, "size": len(req.content), "locked": req.lock}
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{run_id}/unlock")
+async def unlock_worker_file(run_id: str, path: str = ""):
+    """解锁文件——用户关闭编辑器后调用，允许 Agent 恢复写入。"""
+    entry = _active_workers.get(run_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Worker {run_id!r} 未找到")
+    entry["worker"].unlock_file(path)
+    return {"path": path, "locked": False}
+
+
 @router.get("/running/list")
 async def list_running_workers():
     """列出所有活跃 Worker——供全局状态栏显示。"""

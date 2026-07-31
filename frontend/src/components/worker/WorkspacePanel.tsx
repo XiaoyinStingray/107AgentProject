@@ -160,6 +160,9 @@ export default function WorkspacePanel({ events, runId, connected }: WorkspacePa
   const [viewingFile, setViewingFile] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editContent, setEditContent] = useState("");
+  const [saving, setSaving] = useState(false);
 
   // 点击文件 → 获取内容
   const openFile = useCallback(async (path: string) => {
@@ -182,11 +185,38 @@ export default function WorkspacePanel({ events, runId, connected }: WorkspacePa
     }
   }, [runId]);
 
-  // 关闭文件查看器
-  const closeFile = useCallback(() => {
+  // 关闭文件查看器（同时解锁）
+  const closeFile = useCallback(async () => {
+    if (viewingFile && runId) {
+      try { await fetch(`/api/workers/${runId}/unlock?path=${encodeURIComponent(viewingFile)}`, { method: "POST" }); } catch {}
+    }
     setViewingFile(null);
     setFileContent(null);
-  }, []);
+    setEditing(false);
+  }, [viewingFile, runId]);
+
+  // 进入编辑模式
+  const startEdit = useCallback(() => {
+    setEditContent(fileContent || "");
+    setEditing(true);
+  }, [fileContent]);
+
+  // 保存编辑
+  const saveEdit = useCallback(async () => {
+    if (!viewingFile || !runId) return;
+    setSaving(true);
+    try {
+      const resp = await fetch(`/api/workers/${runId}/files/${encodeURIComponent(viewingFile)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: viewingFile, content: editContent, lock: false }),
+      });
+      if (resp.ok) {
+        setFileContent(editContent);
+        setEditing(false);
+      }
+    } catch {} finally { setSaving(false); }
+  }, [viewingFile, runId, editContent]);
 
   // 从事件中提取文件信息
   const files = useMemo(() => {
@@ -279,16 +309,48 @@ export default function WorkspacePanel({ events, runId, connected }: WorkspacePa
               <span className="text-xs font-mono text-text-primary truncate" title={viewingFile}>
                 {viewingFile}
               </span>
+              {editing && <span className="text-xs text-yellow-400">[编辑中]</span>}
             </div>
-            <button onClick={closeFile}
-                    className="text-text-muted hover:text-text-primary text-lg leading-none px-1">
-              ✕
-            </button>
+            <div className="flex items-center gap-1">
+              {!editing ? (
+                <button onClick={startEdit}
+                        className="text-xs font-mono px-2 py-0.5 rounded border border-border
+                                   text-text-muted hover:text-cyan-400 hover:border-cyan-700/30 transition-colors">
+                  编辑
+                </button>
+              ) : (
+                <>
+                  <button onClick={saveEdit} disabled={saving}
+                          className="text-xs font-mono px-2 py-0.5 rounded bg-cyan-700
+                                     hover:bg-cyan-600 text-white transition-colors disabled:opacity-50">
+                    {saving ? "保存中…" : "保存"}
+                  </button>
+                  <button onClick={() => setEditing(false)}
+                          className="text-xs font-mono px-2 py-0.5 rounded border border-border
+                                     text-text-muted hover:text-text-secondary transition-colors">
+                    取消
+                  </button>
+                </>
+              )}
+              <button onClick={closeFile}
+                      className="text-text-muted hover:text-text-primary text-lg leading-none px-1 ml-1">
+                ✕
+              </button>
+            </div>
           </div>
-          {/* 文件内容 */}
+          {/* 文件内容 / 编辑器 */}
           <div className="flex-1 overflow-y-auto p-3">
             {fileLoading ? (
               <p className="text-xs text-text-muted font-mono">加载中…</p>
+            ) : editing ? (
+              <textarea
+                value={editContent}
+                onChange={(e) => setEditContent(e.target.value)}
+                className="w-full h-full min-h-[300px] bg-bg-primary border border-border rounded
+                           text-xs font-mono text-text-primary p-2 resize-none
+                           focus:outline-none focus:border-cyan-700/50"
+                spellCheck={false}
+              />
             ) : fileContent !== null ? (
               <pre className="text-xs font-mono text-text-secondary whitespace-pre-wrap break-all">
                 {fileContent}

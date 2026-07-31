@@ -123,11 +123,28 @@ export default function WorkerBench() {
     cancel();
   }, [cancel]);
 
+  const [followUp, setFollowUp] = useState("");
+
   // 重置
   const handleReset = useCallback(() => {
     reset();
     setTask("");
+    setFollowUp("");
   }, [reset]);
+
+  // 追加对话——用当前 workspace 重新执行
+  const handleFollowUp = useCallback(() => {
+    if (!followUp.trim() || !currentRunId) return;
+    execute({
+      agent_id: effectiveAgentId,
+      task: followUp.trim(),
+      workspace_type: workspaceConfig.type,
+      workspace_config: workspaceConfig.type === "cloud"
+        ? { host: workspaceConfig.host, port: workspaceConfig.port, user: workspaceConfig.user, key: workspaceConfig.key, path: workspaceConfig.path }
+        : { path: workspaceConfig.path },
+    });
+    setFollowUp("");
+  }, [followUp, currentRunId, effectiveAgentId, workspaceConfig, execute]);
 
   // 使用示例任务
   const handleExample = useCallback(
@@ -219,13 +236,37 @@ export default function WorkerBench() {
               </button>
             )}
             {done && (
-              <button
-                onClick={handleReset}
-                className="px-4 py-2 bg-surface hover:bg-surface-dark text-text-secondary
-                           text-sm font-mono rounded border border-border transition-colors"
-              >
-                ↺ 新任务
-              </button>
+              <>
+                <button
+                  onClick={handleReset}
+                  className="px-4 py-2 bg-surface hover:bg-surface-dark text-text-secondary
+                             text-sm font-mono rounded border border-border transition-colors"
+                >
+                  ↺ 新任务
+                </button>
+                {/* 追加对话 */}
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    value={followUp}
+                    onChange={(e) => setFollowUp(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && followUp.trim()) handleFollowUp(); }}
+                    placeholder="继续对话…（如：把第三段改短一点）"
+                    className="w-56 bg-bg-primary border border-border rounded px-2 py-1
+                               text-xs font-mono text-text-primary placeholder-text-muted/50
+                               focus:outline-none focus:border-cyan-700/50"
+                  />
+                  <button
+                    onClick={handleFollowUp}
+                    disabled={!followUp.trim()}
+                    className="px-2 py-1 bg-cyan-700 hover:bg-cyan-600 disabled:bg-bg-secondary
+                               disabled:text-text-muted text-white text-xs font-mono rounded
+                               transition-colors"
+                  >
+                    发送
+                  </button>
+                </div>
+              </>
             )}
 
             {/* 面板切换 */}

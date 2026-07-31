@@ -207,6 +207,9 @@ class AgentWorker:
         self._files_created: list[str] = []       # 本运行中创建的文件
         self._start_time: float = 0
 
+        # 文件锁 — 用户编辑时禁止 Agent 写入
+        self._locked_files: set[str] = set()
+
         # 重试计数
         self._llm_errors = 0
         self._parse_errors = 0
@@ -316,6 +319,24 @@ class AgentWorker:
     @property
     def run_id(self) -> str:
         return self._run_id
+
+    @property
+    def workspace(self):
+        return self._workspace
+
+    # ── 文件锁（用户编辑时禁止 Agent 写入）──
+
+    def lock_file(self, path: str):
+        """锁定文件——Agent 的 write_file 工具将拒绝写入此路径。"""
+        self._locked_files.add(path.replace("\\", "/"))
+
+    def unlock_file(self, path: str):
+        """解锁文件。"""
+        self._locked_files.discard(path.replace("\\", "/"))
+
+    def is_file_locked(self, path: str) -> bool:
+        """检查文件是否被用户锁定。"""
+        return path.replace("\\", "/") in self._locked_files
 
     # ─────────────────────────────────────────────────────────────────
     # 状态处理
@@ -526,6 +547,26 @@ class AgentWorker:
             tool_name=tool_name,
             args_summary=args_summary[:100],
         ).__dict__)
+
+        # 文件锁检查：write_file 时如果用户正在编辑该文件，拒绝执行
+        if tool_name == "write_file" and tool_args:
+            target_path = tool_args.get("path", "")
+            if target_path and self.is_file_locked(target_path):
+                duration_ms = 0
+                yield _sse_event("worker.tool_result", WorkerToolResultData(
+                    step_index=self._step_index,
+                    tool_name=tool_name,
+                    result_summary="文件正在被用户编辑，暂时锁定",
+                    result_detail=f"文件 '{target_path}' 正在被用户编辑中，Agent 写入被阻止。用户关闭编辑器后锁自动释放。",
+                    duration_ms=0,
+                    success=False,
+                ).__dict__)
+                self._completed_steps.append({
+                    "title": f"Step {self._step_index}: {tool_name} (被锁)",
+                    "result": f"文件 {target_path} 正在被用户编辑",
+                })
+                self._transition(WorkerState.REFLECTING)
+                return
 
         # 执行工具
         start_time = time.monotonic()
