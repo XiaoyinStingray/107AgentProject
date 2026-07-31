@@ -174,17 +174,15 @@ export default function WorkerBench() {
     setAccepted(false);
   }, [reset]);
 
-  // 认可交付——持久化到后端，避免状态抖动
-  const [accepting, setAccepting] = useState(false);
-  const handleAccept = useCallback(async () => {
-    if (accepting) return;
-    setAccepting(true);
-    if (currentRunId) {
-      try { await fetch(`/api/workers/${currentRunId}/accept`, { method: "POST" }); } catch {}
-    }
+  // 认可交付——先更新 UI，后台持久化
+  const handleAccept = useCallback(() => {
+    if (accepted) return;
     setAccepted(true);
-    setAccepting(false);
-  }, [currentRunId, accepting]);
+    // 后台静默持久化，不阻塞 UI
+    if (currentRunId) {
+      fetch(`/api/workers/${currentRunId}/accept`, { method: "POST" }).catch(() => {});
+    }
+  }, [currentRunId, accepted]);
 
   // 追加对话——复用当前工作区（直接传 currentRunId，不绕 buildRequest）
   const handleFollowUp = useCallback((instruction: string) => {
