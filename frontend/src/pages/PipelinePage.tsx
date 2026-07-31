@@ -2,17 +2,11 @@
  * PipelinePage — 模板选择 + 编辑 + 运行。
  */
 
-import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useAgents } from "../api/agents";
 
 interface PNode { id: string; title: string; agent_id: string; task: string; depends_on: string[]; }
 interface Pipeline { id?: string; name: string; description: string; nodes: PNode[]; }
-
-class Err extends React.Component<{children:React.ReactNode},{e:string|null}> {
-  state={e:null as string|null};
-  static getDerivedStateFromError(err:Error){return{e:err.message};}
-  render(){if(this.state.e)return <div className="p-8 text-center"><p className="text-rose-400 text-sm font-mono">渲染错误: {this.state.e}</p><button onClick={()=>this.setState({e:null})} className="mt-2 text-xs text-cyan-400">重试</button></div>;return this.props.children;}
-}
 
 export default function PipelinePage() {
   const { data: agents = [] } = useAgents();
@@ -118,7 +112,6 @@ export default function PipelinePage() {
   const sc = (s:string) => ({running:"border-blue-500 bg-blue-900/20 text-blue-400",complete:"border-emerald-500 bg-emerald-900/20 text-emerald-400",error:"border-rose-500 bg-rose-900/20 text-rose-400",skipped:"border-gray-500 bg-gray-900/20 text-gray-400"}[s]||"border-border bg-bg-secondary text-text-secondary");
 
   return (
-    <Err>
     <div className="flex flex-col h-full">
       {/* 顶部 */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-bg-secondary shrink-0">
@@ -273,6 +266,5 @@ export default function PipelinePage() {
         </div>
       </div>
     </div>
-    </Err>
   );
 }

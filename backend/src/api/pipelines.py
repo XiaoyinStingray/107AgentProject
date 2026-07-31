@@ -49,6 +49,54 @@ class PipelineSuggestRequest(BaseModel):
 _pipelines: dict[str, PipelineSpec] = {}
 _active_runs: dict[str, object] = {}
 
+_pipelines_file = None
+
+
+def _get_pipelines_path():
+    global _pipelines_file
+    if _pipelines_file is None:
+        from pathlib import Path
+        _pipelines_file = Path.home() / ".lifelab_pipelines.json"
+    return _pipelines_file
+
+
+def _save_pipelines():
+    try:
+        import json as _json
+        data = []
+        for p in _pipelines.values():
+            data.append({
+                "id": p.id, "name": p.name, "description": p.description,
+                "nodes": [{"id": n.id, "title": n.title, "agent_id": n.agent_id,
+                           "task": n.task, "depends_on": n.depends_on} for n in p.nodes],
+            })
+        _get_pipelines_path().write_text(_json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
+    except Exception:
+        pass
+
+
+def _load_pipelines():
+    try:
+        import json as _json
+        path = _get_pipelines_path()
+        if path.exists():
+            data = _json.loads(path.read_text(encoding='utf-8'))
+            for d in data:
+                _pipelines[d["id"]] = PipelineSpec(
+                    id=d["id"], name=d["name"], description=d.get("description", ""),
+                    nodes=[PipelineNodeSpec(
+                        id=n["id"], title=n["title"], agent_id=n.get("agent_id", "worker-default"),
+                        task=n["task"], depends_on=n.get("depends_on", []),
+                    ) for n in d.get("nodes", [])],
+                )
+            logger.info(f"Loaded {len(data)} pipelines from disk")
+    except Exception as e:
+        logger.warning(f"Failed to load pipelines: {e}")
+
+
+# Load on import
+_load_pipelines()
+
 
 # =============================================================================
 # LLM 管道建议
@@ -146,6 +194,7 @@ async def create_pipeline(req: PipelineCreateRequest):
     if not valid:
         raise HTTPException(status_code=400, detail=f"管道配置无效: {msg}")
     _pipelines[pipeline_id] = pipeline
+    _save_pipelines()
     logger.info(f"Pipeline created: {pipeline_id} — {req.name} ({len(nodes)} nodes)")
     return {"id": pipeline_id, "name": req.name, "node_count": len(nodes), "status": "draft"}
 
@@ -184,6 +233,7 @@ async def update_pipeline(pipeline_id: str, req: PipelineCreateRequest):
     if not valid:
         raise HTTPException(status_code=400, detail=f"管道配置无效: {msg}")
     _pipelines[pipeline_id] = pipeline
+    _save_pipelines()
     return {"id": pipeline_id, "name": req.name, "node_count": len(nodes)}
 
 
@@ -192,6 +242,7 @@ async def delete_pipeline(pipeline_id: str):
     if pipeline_id not in _pipelines:
         raise HTTPException(status_code=404, detail="管道不存在")
     del _pipelines[pipeline_id]
+    _save_pipelines()
     return {"status": "deleted"}
 
 
