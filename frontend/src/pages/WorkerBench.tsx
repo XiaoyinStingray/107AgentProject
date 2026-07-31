@@ -57,7 +57,7 @@ export default function WorkerBench() {
   const selectedAgent = agentOptions.find((a) => a.id === agentId);
   const effectiveAgentId = agentId === "__builtin__" ? "worker-default" : agentId;
 
-  const { events, connected, done, error, execute, cancel, reset } =
+  const { events, connected, done, error, execute, cancel, reset, hydrate } =
     useWorkerExecute();
 
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
@@ -91,7 +91,21 @@ export default function WorkerBench() {
         if (running.length > 0) {
           const latest = running[running.length - 1];
           setCurrentRunId(latest.run_id);
-          setReconnectNotice(`检测到后台运行的 Worker: ${latest.task?.slice(0, 60)}…`);
+          // 加载历史事件并还原终端
+          try {
+            const evResp = await fetch(`/api/workers/${latest.run_id}/events`, { signal: controller.signal });
+            if (evResp.ok) {
+              const evData = await evResp.json();
+              if (evData.events?.length > 0) {
+                hydrate(evData.events);
+                setReconnectNotice(`已恢复: ${latest.task?.slice(0, 60)}…`);
+              } else {
+                setReconnectNotice(`检测到后台 Worker: ${latest.task?.slice(0, 60)}…（事件为空）`);
+              }
+            }
+          } catch {
+            setReconnectNotice(`检测到后台 Worker: ${latest.task?.slice(0, 60)}…`);
+          }
         }
       } catch {
         if (controller.signal.aborted) return;
@@ -175,7 +189,7 @@ export default function WorkerBench() {
   return (
     <div className="flex flex-col h-full">
       {/* 重连提示 */}
-      {reconnectNotice && (
+      {reconnectNotice && done && (
         <div className="flex items-center justify-between px-4 py-1.5 bg-cyan-900/20 border-b border-cyan-700/30">
           <span className="text-xs font-mono text-cyan-400">{reconnectNotice}</span>
           <button onClick={() => setReconnectNotice(null)}

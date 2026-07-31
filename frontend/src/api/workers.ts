@@ -139,5 +139,18 @@ export function useWorkerExecute() {
     setState({ connected: false, events: [], done: false, error: null });
   }, []);
 
-  return { ...state, execute, cancel, reset };
+  /** 从已保存的事件列表恢复（重连时用） */
+  const hydrate = useCallback((savedEvents: WorkerEvent[]) => {
+    abortRef.current?.abort();
+    const lastEvent = savedEvents[savedEvents.length - 1];
+    const isDone = lastEvent?.type === "worker.done" || lastEvent?.type === "worker.error";
+    setState({
+      connected: false,
+      events: savedEvents.slice(-1000),
+      done: isDone,
+      error: null,
+    });
+  }, []);
+
+  return { ...state, execute, cancel, reset, hydrate };
 }

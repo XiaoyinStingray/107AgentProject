@@ -39,11 +39,13 @@ async def lifespan(app: FastAPI):
     async with async_session() as db:
         await recover_interrupted_bench_runs(db)
 
-    # Phase 26: 启动自主调度器
+    # Phase 26: 恢复历史 Worker + 启动调度器
+    from api.workers import _restore_workers_from_disk
+    await _restore_workers_from_disk()
     from engines.worker.scheduler import get_scheduler
     scheduler = get_scheduler()
     await scheduler.start()
-    logger.info("Life Lab ready (scheduler active)")
+    logger.info("Life Lab ready (scheduler active, workers restored)")
 
     yield
 

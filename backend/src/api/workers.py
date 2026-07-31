@@ -97,6 +97,56 @@ class WorkerStatusResponse(BaseModel):
 _active_workers: dict[str, dict] = {}  # run_id → {worker, agent_name, task, created_at}
 
 
+async def _persist_worker_state(entry: dict):
+    """保存 Worker 状态到工作区目录——重启后可恢复。"""
+    try:
+        worker = entry["worker"]
+        state_file = f"{worker._workspace._root}/worker_state.json"
+        state = {
+            "run_id": worker.run_id,
+            "agent_name": entry["agent_name"],
+            "task": entry["task"],
+            "running": entry.get("running", False),
+            "state": worker.state.value if hasattr(worker.state, 'value') else str(worker.state),
+            "steps": worker._step_index,
+            "created_at": entry["created_at"],
+        }
+        import json
+        from pathlib import Path
+        Path(state_file).write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding='utf-8')
+    except Exception:
+        pass  # 持久化失败不阻塞 Worker
+
+
+async def _restore_workers_from_disk(base_dir: str = None):
+    """从磁盘恢复已完成/运行中的 Worker（服务重启后调用）。"""
+    from pathlib import Path
+    import json as _json
+    root = Path(base_dir or str(Path.home() / "workspaces"))
+    if not root.exists():
+        return
+    for ws_dir in root.iterdir():
+        if not ws_dir.is_dir():
+            continue
+        state_file = ws_dir / "worker_state.json"
+        if not state_file.exists():
+            continue
+        try:
+            state = _json.loads(state_file.read_text(encoding='utf-8'))
+            state["running"] = False  # 重启后标记为非运行
+            _active_workers[state["run_id"]] = {
+                "worker": None,  # 无活跃 engine，仅元数据
+                "agent_name": state.get("agent_name", "?"),
+                "task": state.get("task", ""),
+                "running": False,
+                "events": [],
+                "created_at": state.get("created_at", ""),
+            }
+            logger.info(f"Restored worker: {state['run_id']} — {state.get('task', '')[:50]}")
+        except Exception:
+            pass
+
+
 def _get_or_create_agent(agent_id: str) -> "LifeAgent":
     """从数据库或内存中获取 LifeAgent 实例。
 
@@ -215,6 +265,8 @@ async def execute_worker_task(req: WorkerExecuteRequest):
         finally:
             if entry:
                 entry["running"] = False
+                # 持久化到工作区目录（重启后可恢复）
+                await _persist_worker_state(entry)
             # 保留 worker 在内存中（用户可查询状态、下载产物）
 
     return StreamingResponse(
