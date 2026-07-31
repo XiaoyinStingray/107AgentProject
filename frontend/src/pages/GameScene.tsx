@@ -13,7 +13,6 @@ import { useSyncSceneState, useCheckpoints, useCreateCheckpoint, useDeleteCheckp
 import { useAgents } from "../api/agents";
 import type { AgentResponse } from "../types/agent";
 import { pickAccessoryId } from "../game/accessories";
-import { useSSE } from "../hooks/useSSE";
 
 /* —— 场景列表 —— */
 const SCENES = [
@@ -153,6 +152,7 @@ export default function GameScenePage() {
   const [brainEnabled, setBrainEnabled] = useState(false);
   const startScene = useStartScene();
   const sseRef = useRef<EventSource | null>(null);
+  const sseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // SSE 连接：监听 move_to / agent_message 事件 → 转发到 Phaser
   useEffect(() => {
@@ -194,7 +194,8 @@ export default function GameScenePage() {
 
     es.onerror = () => {
       // EventSource 自动重连，但超时后降级为本地模式
-      setTimeout(() => {
+      if (sseTimeoutRef.current) clearTimeout(sseTimeoutRef.current);
+      sseTimeoutRef.current = setTimeout(() => {
         if (es.readyState === EventSource.CLOSED) {
           setBrainEnabled(false);
         }
@@ -202,6 +203,7 @@ export default function GameScenePage() {
     };
 
     return () => {
+      if (sseTimeoutRef.current) clearTimeout(sseTimeoutRef.current);
       es.close();
       sseRef.current = null;
     };

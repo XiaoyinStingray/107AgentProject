@@ -68,6 +68,13 @@ export default function GroupSandbox() {
   const [restoring, setRestoring] = useState(false);
   const restoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // 清理 restoreTimer（组件卸载时）
+  useEffect(() => {
+    return () => {
+      if (restoreTimerRef.current) clearTimeout(restoreTimerRef.current);
+    };
+  }, []);
+
   // 模拟自然结束时清理活跃 World
   useEffect(() => {
     const hasSessionEnd = events.some((e) => e.type === "session_end");

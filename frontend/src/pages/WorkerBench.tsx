@@ -61,6 +61,7 @@ export default function WorkerBench() {
     useWorkerExecute();
 
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
+  const [reconnectNotice, setReconnectNotice] = useState<string | null>(null);
   const prevConnectedRef = useRef(false);
 
   // 追踪 runId：connected 从 false→true 时记录
@@ -80,26 +81,22 @@ export default function WorkerBench() {
 
   // 重连：组件 mount 时检查是否有活跃 worker
   useEffect(() => {
+    const controller = new AbortController();
     const checkRunning = async () => {
       try {
-        const resp = await fetch("/api/workers/running/list");
+        const resp = await fetch("/api/workers/running/list", { signal: controller.signal });
         const running: Array<{run_id: string; task: string; agent_name: string}> = await resp.json();
         if (running.length > 0) {
           const latest = running[running.length - 1];
           setCurrentRunId(latest.run_id);
-          // 回放事件
-          try {
-            const evResp = await fetch(`/api/workers/${latest.run_id}/events`);
-            const evData = await evResp.json();
-            if (evData.events?.length > 0) {
-              // 手动重建事件列表（绕过 useWorkerExecute 的 fetch 流）
-              // 简单策略：显示重连提示
-            }
-          } catch {}
+          setReconnectNotice(`检测到后台运行的 Worker: ${latest.task?.slice(0, 60)}…`);
         }
-      } catch {}
+      } catch {
+        if (controller.signal.aborted) return;
+      }
     };
     checkRunning();
+    return () => controller.abort();
   }, []);
 
   // 执行任务
@@ -154,6 +151,15 @@ export default function WorkerBench() {
 
   return (
     <div className="flex flex-col h-full">
+      {/* 重连提示 */}
+      {reconnectNotice && (
+        <div className="flex items-center justify-between px-4 py-1.5 bg-cyan-900/20 border-b border-cyan-700/30">
+          <span className="text-xs font-mono text-cyan-400">{reconnectNotice}</span>
+          <button onClick={() => setReconnectNotice(null)}
+                  className="text-xs text-text-muted hover:text-text-primary">✕</button>
+        </div>
+      )}
+
       {/* ── 顶部输入栏 ── */}
       <div className="flex-shrink-0 px-4 py-3 border-b border-border bg-surface-dark">
         <div className="flex items-start gap-3">

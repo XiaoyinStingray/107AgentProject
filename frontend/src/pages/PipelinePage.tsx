@@ -54,13 +54,18 @@ export default function PipelinePage() {
   });
 
   // 加载管道列表
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [execError, setExecError] = useState<string | null>(null);
+
   const loadPipelines = useCallback(async () => {
+    setLoadError(null);
     try {
       const resp = await fetch("/api/pipelines/");
+      if (!resp.ok) { throw new Error(`加载失败 (${resp.status})`); }
       const data = await resp.json();
       setPipelines(data);
-    } catch {
-      // API 不可用
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "无法加载管道列表");
     }
   }, []);
 
@@ -121,6 +126,7 @@ export default function PipelinePage() {
     abortRef.current = controller;
 
     setRun({ running: true, events: [], nodes: {} });
+    setExecError(null);
 
     try {
       const resp = await fetch(`/api/pipelines/${selectedId}/execute`, {
@@ -129,6 +135,13 @@ export default function PipelinePage() {
         body: JSON.stringify({ workspace_type: "local" }),
         signal: controller.signal,
       });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        setExecError(`执行失败 (${resp.status}): ${text.slice(0, 200)}`);
+        setRun((prev) => ({ ...prev, running: false }));
+        return;
+      }
 
       const reader = resp.body?.getReader();
       if (!reader) return;
@@ -247,6 +260,15 @@ export default function PipelinePage() {
           )}
         </div>
       </div>
+
+      {/* 错误提示 */}
+      {(loadError || execError) && (
+        <div className="px-4 py-1.5 bg-rose-900/20 border-b border-rose-700/30">
+          <span className="text-xs font-mono text-rose-400">{loadError || execError}</span>
+          <button onClick={() => { setLoadError(null); setExecError(null); }}
+                  className="ml-2 text-xs text-rose-300 hover:text-rose-200">✕</button>
+        </div>
+      )}
 
       {/* 主体 */}
       <div className="flex-1 flex min-h-0">

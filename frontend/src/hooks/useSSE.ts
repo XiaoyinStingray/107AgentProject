@@ -102,7 +102,7 @@ export function useSSE(worldId: string | null) {
 
     es.onopen = () => {
       setConnected(true);
-      replayMissedEvents(); // SSE 断线重连时补发
+      // replayMissedEvents 由 useEffect 统一触发，避免重复调用
     };
     es.onerror = () => setConnected(false);
     es.onmessage = (e) => {
