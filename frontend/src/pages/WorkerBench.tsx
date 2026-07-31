@@ -118,6 +118,7 @@ export default function WorkerBench() {
               const evData = await evResp.json();
               if (evData.events?.length > 0) {
                 hydrate(evData.events);
+                if (evData.accepted) setAccepted(true);
                 setReconnectNotice(`已恢复: ${latest.task?.slice(0, 60)}…`);
               } else {
                 setReconnectNotice(`检测到后台 Worker: ${latest.task?.slice(0, 60)}…（事件为空）`);
@@ -473,7 +474,7 @@ export default function WorkerBench() {
                               hover:bg-bg-primary/50 transition-colors cursor-pointer"
                    onClick={async () => {
                      setCurrentRunId(h.run_id);
-                     // 加载该 Worker 的聊天记录
+                     setAccepted(h.accepted);
                      try {
                        const evResp = await fetch(`/api/workers/${h.run_id}/events`);
                        if (evResp.ok) {
