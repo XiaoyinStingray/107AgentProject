@@ -169,6 +169,24 @@ async def get_pipeline(pipeline_id: str):
     }
 
 
+@router.put("/{pipeline_id}")
+async def update_pipeline(pipeline_id: str, req: PipelineCreateRequest):
+    """更新已有管道。"""
+    if pipeline_id not in _pipelines:
+        raise HTTPException(status_code=404, detail="管道不存在")
+    nodes = [
+        PipelineNodeSpec(id=n.id, title=n.title, agent_id=n.agent_id, task=n.task,
+                         depends_on=n.depends_on, depends_on_files=n.depends_on_files)
+        for n in req.nodes
+    ]
+    pipeline = PipelineSpec(id=pipeline_id, name=req.name, description=req.description, nodes=nodes)
+    valid, msg = validate_pipeline(pipeline)
+    if not valid:
+        raise HTTPException(status_code=400, detail=f"管道配置无效: {msg}")
+    _pipelines[pipeline_id] = pipeline
+    return {"id": pipeline_id, "name": req.name, "node_count": len(nodes)}
+
+
 @router.delete("/{pipeline_id}")
 async def delete_pipeline(pipeline_id: str):
     if pipeline_id not in _pipelines:
