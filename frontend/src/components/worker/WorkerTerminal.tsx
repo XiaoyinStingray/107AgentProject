@@ -379,6 +379,26 @@ function CompletionCard({
   const files = ((doneEvt?.data as Record<string,unknown>|null)?.files ?? []) as string[];
   const toolCount = events.filter(e => e.type === "worker.tool_start").length;
 
+  if (accepted) {
+    return (
+      <div className="border-t-2 border-emerald-700/50 bg-emerald-900/10">
+        <div className="p-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">🏁</span>
+            <span className="text-sm font-mono text-emerald-400 font-semibold">
+              已验收 — {String(steps)} 步, {files.length} 个文件
+            </span>
+          </div>
+          <button onClick={onNewTask}
+                  className="px-3 py-1 bg-bg-secondary hover:bg-bg-primary text-text-secondary
+                             text-xs font-mono rounded border border-border transition-colors">
+            ↺ 新任务
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="border-t-2 border-cyan-700/50 bg-bg-card">
       <div className="p-4 space-y-3">
@@ -395,13 +415,9 @@ function CompletionCard({
         )}
         <div className="flex items-center gap-2 ml-7">
           <button onClick={onAccept}
-                  disabled={accepted}
-                  className={`px-4 py-1.5 text-white text-xs font-mono rounded transition-colors ${
-                    accepted
-                      ? "bg-emerald-800 cursor-default"
-                      : "bg-emerald-700 hover:bg-emerald-600"
-                  }`}>
-            {accepted ? "✓ 已认可" : "✓ 认可交付"}
+                  className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white
+                             text-xs font-mono rounded transition-colors">
+            ✓ 认可交付
           </button>
           <button onClick={onNewTask}
                   className="px-4 py-1.5 bg-bg-secondary hover:bg-bg-primary text-text-secondary
