@@ -5,7 +5,8 @@
  * 顶部: 任务输入栏 + 执行/停止按钮 + 状态指示器
  */
 
-import React, { useState, useCallback, useEffect, useMemo } from "react";
+import React from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useWorkerExecute } from "../api/workers";
 import WorkerTerminal from "../components/worker/WorkerTerminal";
 import WorkspacePanel from "../components/worker/WorkspacePanel";
@@ -27,6 +28,16 @@ const EXAMPLE_TASKS = [
 // =============================================================================
 // 主组件
 // =============================================================================
+
+/** 防崩溃边界——组件出错时显示错误信息而非黑屏 */
+class ErrorCatcher extends React.Component<{children: React.ReactNode}, {err: string|null}> {
+  state = {err: null as string|null};
+  static getDerivedStateFromError(e: Error) { return {err: e.message}; }
+  render() {
+    if (this.state.err) return <div className="p-8 text-center"><p className="text-rose-400 font-mono text-sm">渲染错误: {this.state.err}</p><button onClick={() => this.setState({err:null})} className="mt-2 text-xs text-cyan-400">重试</button></div>;
+    return this.props.children;
+  }
+}
 
 export default function WorkerBench() {
   const { data: agents = [] } = useAgents();
@@ -187,6 +198,7 @@ export default function WorkerBench() {
   );
 
   return (
+    <ErrorCatcher>
     <div className="flex flex-col h-full">
       {/* 重连提示 */}
       {reconnectNotice && done && (
@@ -462,5 +474,6 @@ export default function WorkerBench() {
         </div>
       </div>
     </div>
+    </ErrorCatcher>
   );
 }

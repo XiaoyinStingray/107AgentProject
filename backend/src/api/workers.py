@@ -101,6 +101,8 @@ async def _persist_worker_state(entry: dict):
     """保存 Worker 状态到工作区目录——重启后可恢复。"""
     try:
         worker = entry["worker"]
+        if worker is None:
+            return  # 磁盘恢复的条目无活跃 engine
         state_file = f"{worker._workspace._root}/worker_state.json"
         state = {
             "run_id": worker.run_id,
@@ -224,7 +226,7 @@ async def execute_worker_task(req: WorkerExecuteRequest):
     workspace = None
     if req.reuse_run_id:
         existing = _active_workers.get(req.reuse_run_id)
-        if existing:
+        if existing and existing.get("worker"):
             workspace = existing["worker"]._workspace
             logger.info(f"Reusing workspace from run {req.reuse_run_id}")
     if workspace is None:
@@ -286,20 +288,34 @@ async def list_worker_history():
     """列出所有已完成和运行中的 Worker（历史记录）。"""
     history = []
     for rid, e in _active_workers.items():
-        worker = e["worker"]
+        worker = e.get("worker")
         files = []
-        try:
-            f_list = await worker._workspace.list_files()
-            files = [{"path": f.path, "size": f.size} for f in f_list]
-        except Exception:
-            pass
+        steps = 0
+        worker_state = "done"
+        if worker is not None:
+            try:
+                f_list = await worker._workspace.list_files()
+                files = [{"path": f.path, "size": f.size} for f in f_list]
+            except Exception:
+                pass
+            steps = worker._step_index
+            worker_state = worker.state.value if hasattr(worker.state, 'value') else str(worker.state)
+        else:
+            # 磁盘恢复的条目——直接读文件系统
+            from pathlib import Path
+            ws_dir = Path.home() / "workspaces" / rid / "files"
+            if ws_dir.exists():
+                for p in ws_dir.rglob("*"):
+                    if p.is_file():
+                        rel = str(p.relative_to(ws_dir)).replace("\\", "/")
+                        files.append({"path": rel, "size": p.stat().st_size})
         history.append({
             "run_id": rid,
             "agent_name": e["agent_name"],
             "task": e["task"][:120],
             "running": e.get("running", False),
-            "state": worker.state.value if hasattr(worker.state, 'value') else str(worker.state),
-            "steps": worker._step_index,
+            "state": worker_state,
+            "steps": steps,
             "files": files,
             "created_at": e["created_at"],
         })
