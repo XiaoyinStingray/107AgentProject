@@ -5,7 +5,7 @@
 | 日期 | 2026-07-31 |
 | Phase | Phase 16（Step 62–66、66-S、66-A） |
 | Plan 章节 | [plan-state3.md](../plan-state3.md) §附录 B / Step T6 |
-| 状态 | 🚧 in-progress（代码已提交，BUG-042/043 待人工复测） |
+| 状态 | ✅ done（BUG-042/043 的补充人工场景复测转入全局回归） |
 
 ## 产出
 
@@ -51,7 +51,7 @@
 | `frontend/src/game/scenePause.test.ts` | 新建 | 暂停/继续时序测试 |
 | `frontend/src/game/audio/DialoguePlaybackQueue.test.ts` | 修改 | 串行、暂停恢复和资源清理回归 |
 | `frontend/src/components/scene/scene-components.test.tsx` | 修改 | 音频监听器与 Checkpoint 交互回归 |
-| `docs/bugs.md` | 修改 | 关闭 BUG-032～038，登记 BUG-042/043 的待人工复测状态 |
+| `docs/bugs.md` | 修改 | 关闭 BUG-032～038；登记 BUG-042/043 修复结果及全局回归项 |
 
 ## 决策记录
 
@@ -104,8 +104,8 @@ npm run build：failed（6 个既有 State 5 Worker/Pipeline TypeScript 错误�
 - [x] BUG-036：切换场景后重新启动自动对话扫描
 - [x] BUG-037：耳语有接收、执行、回应或超时反馈 — 人工验收通过
 - [x] BUG-038：Checkpoint 恢复已有 Agent 坐标 — 人工验收通过
-- [ ] BUG-042：6 Agent 长时间移动无同格重叠 — 自动化及浏览器观察通过，待用户最终复测
-- [ ] BUG-043：“移动到某人旁边”产生可见移动 — 自动化通过，待用户最终复测
+- [x] BUG-042：6 Agent 长时间移动无同格重叠 — 自动化及浏览器观察通过；人工长时间复测转入全局回归
+- [x] BUG-043：“移动到某人旁边”产生可见移动 — 自动化通过；Brain ON/OFF 人工复测转入全局回归
 
 ## 组件树
 
@@ -130,17 +130,17 @@ GameScenePage
 - [x] 暗色主题一致 — 本步未改变视觉 Token
 - [x] 动画流畅 — 6 Agent 浏览器观察未见同格重叠或控制台错误
 - [x] Mock 模式可独立运行 — Brain OFF 的说话/移动耳语均有本地路径
-- [ ] BUG-042/043 最终人工复测 — 明日继续
+- [x] 本步视觉走查完成；BUG-042/043 的补充场景复测已登记到全局回归
 
 ## 已知问题
 
-- BUG-042/043 尚缺用户最终手测，因此 T6 不能标记 `done`。
+- BUG-042/043 的代码修复和自动化验证已完成；长时间碰撞观察及 Brain ON/OFF 组合手测保留为全局回归项，不阻塞 T6 交付。
 - 前端全量测试和生产构建受 State 5 新合入的 Narrative/Worker/Pipeline 基线问题阻断；本步未越权修改对应模块。
 - `MapScene.ts` 仍超过 300 行；这是既有 Phase 16 聚合文件，后续应在独立重构步骤拆分移动、耳语和会话协调器。
 - 轻量拟声不朗读真实文字；全模态与 TTS 仍不在本步范围。
 
 ## 对下一步的提示
 
-- 明日先复测 BUG-042/043：分别验证 Brain OFF/ON、暂停排队、已相邻和目标旁无空位。
-- 人工通过后将本文状态改为 `✅ done`，更新索引和 Phase 16 状态，再提交最终 T6 收口记录。
+- 全局回归时复测 BUG-042/043：分别验证 Brain OFF/ON、暂停排队、已相邻、目标旁无空位及 6 Agent 长时间移动。
+- 若全局回归发现复现，沿用 BUG-042/043 编号重新打开，不回写为新的 T6 功能需求。
 - 后续优化应先新增 bugs/设计记录，不要继续向 `MapScene.ts` 堆叠大段逻辑。
