@@ -293,14 +293,17 @@ export default function WorkspacePanel({ events, runId, connected }: WorkspacePa
         )}
       </div>
 
-      {/* 文件查看器滑出面板 */}
+      {/* 文件查看器——替换文件树的全宽面板 */}
       {viewingFile && (
-        <div className="absolute right-0 top-0 bottom-0 w-[400px] bg-bg-card border-l-2 border-border
-                        shadow-2xl z-30 flex flex-col"
-             style={{boxShadow: "-4px 0 20px rgba(0,0,0,0.5)"}}>
-          {/* 查看器标题栏 */}
-          <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-bg-secondary">
+        <div className="absolute inset-0 bg-bg-card z-40 flex flex-col">
+          {/* 标题栏 */}
+          <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-bg-secondary shrink-0">
             <div className="flex items-center gap-2 min-w-0">
+              <button onClick={closeFile}
+                      className="text-text-muted hover:text-text-primary font-mono text-xs px-2 py-0.5
+                                 border border-border rounded hover:border-cyan-700/30 transition-colors">
+                ← 返回列表
+              </button>
               <span className="text-xs">
                 {viewingFile.endsWith(".md") ? "📝" :
                  viewingFile.endsWith(".py") ? "🐍" :
@@ -332,27 +335,23 @@ export default function WorkspacePanel({ events, runId, connected }: WorkspacePa
                   </button>
                 </>
               )}
-              <button onClick={closeFile}
-                      className="text-text-muted hover:text-text-primary text-lg leading-none px-1 ml-1">
-                ✕
-              </button>
             </div>
           </div>
-          {/* 文件内容 / 编辑器 */}
-          <div className="flex-1 overflow-y-auto p-3">
+          {/* 内容 */}
+          <div className="flex-1 overflow-y-auto p-4">
             {fileLoading ? (
               <p className="text-xs text-text-muted font-mono">加载中…</p>
             ) : editing ? (
               <textarea
                 value={editContent}
                 onChange={(e) => setEditContent(e.target.value)}
-                className="w-full h-full min-h-[300px] bg-bg-primary border border-border rounded
-                           text-xs font-mono text-text-primary p-2 resize-none
+                className="w-full h-full min-h-[400px] bg-bg-primary border border-border rounded
+                           text-sm font-mono text-text-primary p-3 resize-none
                            focus:outline-none focus:border-cyan-700/50"
                 spellCheck={false}
               />
             ) : fileContent !== null ? (
-              <pre className="text-xs font-mono text-text-secondary whitespace-pre-wrap break-all">
+              <pre className="text-sm font-mono text-text-secondary whitespace-pre-wrap break-all leading-relaxed">
                 {fileContent}
               </pre>
             ) : null}

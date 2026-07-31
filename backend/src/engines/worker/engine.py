@@ -180,7 +180,8 @@ class AgentWorker:
             base_dir: 本地工作区基础目录（workspace 为 None 时使用）
         """
         self._agent = agent
-        self._run_id = agent.id[:12] if hasattr(agent, 'id') else str(id(agent))[-12:]
+        import uuid
+        self._run_id = f"run-{uuid.uuid4().hex[:8]}"
         self._agent_name = agent.persona.name if hasattr(agent, 'persona') else "Worker"
 
         # Workspace
