@@ -8,6 +8,12 @@ import { useAgents } from "../api/agents";
 interface PNode { id: string; title: string; agent_id: string; task: string; depends_on: string[]; }
 interface Pipeline { id?: string; name: string; description: string; nodes: PNode[]; }
 
+class Err extends React.Component<{children:React.ReactNode},{e:string|null}> {
+  state={e:null as string|null};
+  static getDerivedStateFromError(err:Error){return{e:err.message};}
+  render(){if(this.state.e)return <div className="p-8 text-center"><p className="text-rose-400 text-sm font-mono">渲染错误: {this.state.e}</p><button onClick={()=>this.setState({e:null})} className="mt-2 text-xs text-cyan-400">重试</button></div>;return this.props.children;}
+}
+
 export default function PipelinePage() {
   const { data: agents = [] } = useAgents();
   const [templates, setTemplates] = useState<Pipeline[]>([]);
@@ -101,6 +107,7 @@ export default function PipelinePage() {
   const sc = (s:string) => ({running:"border-blue-500 bg-blue-900/20 text-blue-400",complete:"border-emerald-500 bg-emerald-900/20 text-emerald-400",error:"border-rose-500 bg-rose-900/20 text-rose-400",skipped:"border-gray-500 bg-gray-900/20 text-gray-400"}[s]||"border-border bg-bg-secondary text-text-secondary");
 
   return (
+    <Err>
     <div className="flex flex-col h-full">
       {/* 顶部 */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-bg-secondary shrink-0">
@@ -198,7 +205,7 @@ export default function PipelinePage() {
                         className="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 disabled:bg-bg-secondary disabled:text-text-muted text-white text-xs font-mono rounded">💾 保存</button>
               </div>
             </div>
-          ) : selectedPipe ? (
+          ) : selectedPipe && selectedPipe.nodes ? (
             /* 预览选中管道 */
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               <div className="flex items-center justify-between">
@@ -255,5 +262,6 @@ export default function PipelinePage() {
         </div>
       </div>
     </div>
+    </Err>
   );
 }
