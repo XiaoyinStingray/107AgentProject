@@ -74,8 +74,9 @@ export default function WorkerBench() {
   // 双重保险：done 状态可能未及时更新，从 events 推断
   const effectiveDone = done || (
     events.length > 0 &&
-    (events[events.length - 1]?.type === "worker.done" ||
-     events[events.length - 1]?.type === "worker.error")
+    ["worker.done", "worker.summary", "worker.error"].includes(
+      events[events.length - 1]?.type ?? ""
+    )
   );
 
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
