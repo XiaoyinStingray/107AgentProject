@@ -103,7 +103,7 @@ export const MENU_SECTIONS: MenuSection[] = [
     title: "M12 Worker", route: "/worker",
     items: [
       { id: 59, emoji: "⚡", label: "终端工作台", priority: "P0" },
-      { id: 60, emoji: "🔗", label: "管道编辑器", priority: "P2" },
+      { id: 60, emoji: "🔗", label: "管道编辑器", priority: "P2", redirect: "/pipeline" },
       { id: 61, emoji: "📁", label: "文件浏览器", priority: "P2" },
     ],
   },
