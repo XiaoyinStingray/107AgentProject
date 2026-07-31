@@ -275,6 +275,18 @@ def _pick_topic(scene_id: str) -> str:
     return f"聊天方向提示：{seed}{label}"
 
 
+WHISPER_CONTEXT_PREFIX = "【用户只对你说的耳语指令】"
+
+
+def _extract_whisper_instruction(message: str) -> str:
+    """Extract the one-shot private instruction from local dialogue context."""
+    marker_index = message.rfind(WHISPER_CONTEXT_PREFIX)
+    if marker_index < 0:
+        return ""
+    instruction = message[marker_index + len(WHISPER_CONTEXT_PREFIX):]
+    return instruction.split(" | ", 1)[0].strip()[:300]
+
+
 async def generate_dialogue_llm(
     from_name: str,
     to_name: str,
@@ -288,6 +300,7 @@ async def generate_dialogue_llm(
     返回 {"message": str, "emotion": str | None}
     """
     logger.info(f"[dialogue] {from_name}→{to_name} @{scene_id} ctx_len={len(message)}")
+    whisper_instruction = _extract_whisper_instruction(message)
 
     try:
         from llm.client import create_model_client
@@ -296,7 +309,13 @@ async def generate_dialogue_llm(
         client = create_model_client("act")
         if client is None:
             logger.warning(f"[dialogue] ⚠️ create_model_client returned None — fallback to mock")
-            return _mock_dialogue(from_name, to_name, scene_id, emotion)
+            return _mock_dialogue(
+                from_name,
+                to_name,
+                scene_id,
+                emotion,
+                whisper_instruction,
+            )
 
         logger.info(f"[dialogue] LLM client OK: {type(client).__name__}")
 
@@ -306,11 +325,18 @@ async def generate_dialogue_llm(
 
         # 用对话历史作上下文
         context_hint = ""
-        if message:
+        if whisper_instruction:
+            context_hint = (
+                "\n用户刚刚只对你下达了以下私密指令："
+                f"{whisper_instruction}\n"
+                "你必须由自己在本轮对话中执行或明确回应这条指令，"
+                "不要把它描述成别人说过的普通对话。"
+            )
+        elif message:
             context_hint = f"\n这是你们之前的对话摘要：{message[:200]}\n请自然接续对话，不要重复前面说过的话。"
 
         # ── 话题引导（概率分配：闲聊 40% / 趣味 35% / 严肃 25%）──
-        topic_hint = _pick_topic(scene_id)
+        topic_hint = "" if whisper_instruction else _pick_topic(scene_id)
 
         system_prompt = """你是一个角色扮演引擎。严格遵守以下规则：
 
@@ -354,13 +380,31 @@ async def generate_dialogue_llm(
     except Exception as e:
         logger.warning(f"[dialogue] ❌ LLM failed: {type(e).__name__}: {e}")
         logger.debug(traceback.format_exc())
-        result = _mock_dialogue(from_name, to_name, scene_id, emotion)
+        result = _mock_dialogue(
+            from_name,
+            to_name,
+            scene_id,
+            emotion,
+            whisper_instruction,
+        )
         result["source"] = "mock"
         return result
 
 
-def _mock_dialogue(from_name: str, to_name: str, scene_id: str, emotion: str) -> dict:
+def _mock_dialogue(
+    from_name: str,
+    to_name: str,
+    scene_id: str,
+    emotion: str,
+    whisper_instruction: str = "",
+) -> dict:
     """模拟对话生成（不调用 LLM）。"""
+    if whisper_instruction:
+        return {
+            "message": f"{to_name}，我按刚才的提醒来找你聊聊。",
+            "emotion": "neutral",
+        }
+
     mock_pool: dict[str, dict[str, dict[str, list[str]]]] = {
         "小林": {
             "小红": {"library": ["安静点，有人在看书","你画的这个配色，RGB值是多少"], "dorm": ["外卖到了吗","代码写完了，你画完了吗"], "classroom": ["这题我会，但不想讲","PPT第三页有错别字"], "art": ["你在这里找灵感？","别碰我的键盘"], "lab": ["数据跑完了吗","这个实验设计有个漏洞"], "sakura": ["花瓣飘进来了","能不能别在花瓣上写代码"]},

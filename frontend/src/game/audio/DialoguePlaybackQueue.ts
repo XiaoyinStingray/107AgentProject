@@ -27,6 +27,9 @@ type QueueState = "idle" | "playing" | "paused";
 export class DialoguePlaybackQueue {
   private queue: QueuedMessage[] = [];
   private state: QueueState = "idle";
+  private processing = false;
+  private nextTimer: ReturnType<typeof setTimeout> | null = null;
+  private generation = 0;
   private audioCtx: AudioContext | null = null;
   private engines: Map<string, AgentVoiceEngine> = new Map();
   private volume = 1.0;          // 0-1（用户控制的比例，乘上 MASTER_VOLUME=0.2）
@@ -86,7 +89,7 @@ export class DialoguePlaybackQueue {
 
   /** 暂停当前播放 */
   pause(): void {
-    if (this.state !== "playing") return;
+    if (this.state === "paused") return;
     this.state = "paused";
     for (const engine of this.engines.values()) engine.pause();
   }
@@ -94,18 +97,27 @@ export class DialoguePlaybackQueue {
   /** 恢复播放 */
   resume(): void {
     if (this.state !== "paused") return;
-    this.state = "playing";
     for (const engine of this.engines.values()) engine.resume();
-    // 如果 resume 后没有在处理的消息，重新触发
-    if (this.queue.length > 0) {
+    if (this.processing) {
+      this.state = "playing";
+    } else if (this.queue.length > 0) {
+      this.state = "playing";
       this.processNext();
+    } else {
+      this.state = "idle";
     }
   }
 
   /** 清空队列 + 打断当前播放 */
   clear(): void {
+    this.generation++;
+    if (this.nextTimer !== null) {
+      clearTimeout(this.nextTimer);
+      this.nextTimer = null;
+    }
     for (const engine of this.engines.values()) engine.abort();
     this.queue.length = 0;
+    this.processing = false;
     this.state = "idle";
   }
 
@@ -118,13 +130,15 @@ export class DialoguePlaybackQueue {
 
   /** 取出并播放下一条 */
   private processNext(): void {
-    if (this.state === "paused") return;
+    if (this.state === "paused" || this.processing) return;
     if (this.queue.length === 0) {
       this.state = "idle";
       return;
     }
 
     this.state = "playing";
+    this.processing = true;
+    const playbackGeneration = this.generation;
     const msg = this.queue.shift()!;
     const engine = this.getEngine(msg.agentId);
     const effectiveVolume = this.enabled && !this.muted ? this.volume : 0;
@@ -138,9 +152,19 @@ export class DialoguePlaybackQueue {
           msg.onBubble(text, msg.agentId, isFirst);
         },
         onComplete: () => {
+          if (
+            playbackGeneration !== this.generation ||
+            !this.processing
+          ) return;
+          this.processing = false;
           msg.onDone();
           // 消息间短暂停顿
-          setTimeout(() => this.processNext(), 100);
+          this.nextTimer = setTimeout(() => {
+            this.nextTimer = null;
+            if (playbackGeneration === this.generation) {
+              this.processNext();
+            }
+          }, 100);
         },
       },
     );

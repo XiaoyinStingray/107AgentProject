@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import Phaser from "phaser";
 import GameCanvas from "../game/GameCanvas";
 import type { AgentSpriteData, Emotion } from "../game/sprites/AgentSprite";
+import type { MapScene } from "../game/scenes/MapScene";
 import Card from "../components/shared/Card";
 import AgentPanel from "../components/scene/AgentPanel";
 import PersonaTamper, { DEFAULT_PERSONALITY } from "../components/scene/PersonaTamper";
@@ -11,8 +12,14 @@ import DirectorPanel from "../components/scene/DirectorPanel";
 import AudioControls from "../components/scene/AudioControls";
 import { useSyncSceneState, useCheckpoints, useCreateCheckpoint, useDeleteCheckpoint, useStartScene } from "../api/scenes";
 import { useAgents } from "../api/agents";
+import { useInjectEvent, usePauseWorld, useStartWorld } from "../api/worlds";
 import type { AgentResponse } from "../types/agent";
 import { pickAccessoryId } from "../game/accessories";
+import { synchronizeScenePause } from "../game/scenePause";
+import {
+  BrainDisconnectWatchdog,
+  getBrainButtonState,
+} from "../game/sceneBrain";
 
 /* —— 场景列表 —— */
 const SCENES = [
@@ -28,7 +35,7 @@ const SCENES = [
 interface AgentPoolEntry {
   agentId: string;
   label: string;   // 显示标签
-  name: string;    // 短名（气泡用）
+  name: string;    // 规范全名（耳语目标解析与后端身份必须一致）
   emoji: string;
   color: string;
 }
@@ -57,11 +64,10 @@ function agentColor(id: string): string {
 function toPoolEntry(a: AgentResponse): AgentPoolEntry {
   const mbti = a.persona?.mbti ?? "";
   const emoji = MBTI_EMOJI[mbti.toUpperCase()] ?? "🤖";
-  const shortName = a.name.length > 2 ? a.name.slice(0, 2) : a.name;
   return {
     agentId: a.id,
     label: `${a.name} ${emoji}`,
-    name: shortName,
+    name: a.name,
     emoji,
     color: agentColor(a.id),
   };
@@ -151,14 +157,29 @@ export default function GameScenePage() {
   const [sceneWorldId, setSceneWorldId] = useState<string | null>(null);
   const [brainEnabled, setBrainEnabled] = useState(false);
   const startScene = useStartScene();
+  const injectEvent = useInjectEvent();
+  const pauseWorld = usePauseWorld();
+  const resumeWorld = useStartWorld();
+  const [sceneControlPending, setSceneControlPending] = useState(false);
+  const [sceneControlError, setSceneControlError] = useState<string | null>(null);
+  const [brainConnectionError, setBrainConnectionError] = useState<string | null>(null);
   const sseRef = useRef<EventSource | null>(null);
-  const sseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // SSE 连接：监听 move_to / agent_message 事件 → 转发到 Phaser
   useEffect(() => {
     if (!sceneWorldId || !brainEnabled) return;
     const es = new EventSource(`/api/worlds/${sceneWorldId}/stream`);
+    const watchdog = new BrainDisconnectWatchdog(() => {
+      setBrainConnectionError("AI 连接已断开，已切换为本地模式");
+      setBrainEnabled(false);
+      setSceneWorldId(null);
+    });
     sseRef.current = es;
+
+    es.onopen = () => {
+      watchdog.markOpen();
+      setBrainConnectionError(null);
+    };
 
     es.onmessage = (e) => {
       try {
@@ -193,17 +214,12 @@ export default function GameScenePage() {
     };
 
     es.onerror = () => {
-      // EventSource 自动重连，但超时后降级为本地模式
-      if (sseTimeoutRef.current) clearTimeout(sseTimeoutRef.current);
-      sseTimeoutRef.current = setTimeout(() => {
-        if (es.readyState === EventSource.CLOSED) {
-          setBrainEnabled(false);
-        }
-      }, 10000);
+      // EventSource 会自动重连；持续不可用才降级，旧连接的计时器必须清理。
+      watchdog.reportError(es);
     };
 
     return () => {
-      if (sseTimeoutRef.current) clearTimeout(sseTimeoutRef.current);
+      watchdog.dispose();
       es.close();
       sseRef.current = null;
     };
@@ -212,24 +228,36 @@ export default function GameScenePage() {
   // 场景启动：有 Agent 且 Brain 启用时，请求后端创建 WorldEngine
   const startBrain = useCallback(async () => {
     if (agents.length === 0) return;
+    setBrainConnectionError(null);
     try {
       const result = await startScene.mutateAsync({
         sceneId: mapId,
         agentIds: agents.map((a) => a.agentId),
       });
+      if (paused) {
+        await pauseWorld.mutateAsync(result.world_id);
+      }
       setSceneWorldId(result.world_id);
       setBrainEnabled(true);
     } catch {
       // 后端不可用时保持本地模式
       setBrainEnabled(false);
+      setBrainConnectionError("AI 世界启动失败，请检查后端与 LLM 配置后重试");
     }
-  }, [agents, mapId, startScene]);
+  }, [agents, mapId, pauseWorld, paused, startScene]);
 
   // 场景切换时断开 SSE
   useEffect(() => {
     setSceneWorldId(null);
     setBrainEnabled(false);
+    setBrainConnectionError(null);
   }, [mapId]);
+
+  const brainButton = getBrainButtonState(
+    agents.length,
+    startScene.isPending,
+    brainEnabled,
+  );
 
   // ── 真实 Agent 池（与 SoloTheater 同源，后端不可用时 mock 兜底）──
   const { data: realAgents = [] } = useAgents();
@@ -336,27 +364,77 @@ export default function GameScenePage() {
     setTamperTargetId(agentId);
   }, []);
 
-  /** AgentPanel 耳语发送 → 气泡 */
+  /** AgentPanel 耳语发送 → Brain 注入或本地一次性指令 */
   const handlePanelWhisper = useCallback(
-    (message: string) => {
+    async (message: string) => {
       if (!selectedAgentId) return;
+      if (brainEnabled && sceneWorldId) {
+        try {
+          await injectEvent.mutateAsync({
+            worldId: sceneWorldId,
+            type: "agent_action",
+            targetAgentId: selectedAgentId,
+            description: message,
+          });
+          gameRef.current?.events.emit(
+            "agent-whisper-feedback",
+            selectedAgentId,
+            paused
+              ? "耳语已排队，将在继续后由目标 Agent 优先执行"
+              : "耳语已排队，目标 Agent 将在下一轮优先执行",
+          );
+        } catch {
+          gameRef.current?.events.emit(
+            "agent-whisper-feedback",
+            selectedAgentId,
+            "耳语发送失败，请稍后重试",
+          );
+        }
+        return;
+      }
       gameRef.current?.events.emit("agent-whisper", selectedAgentId, message);
     },
-    [selectedAgentId],
+    [
+      brainEnabled,
+      injectEvent,
+      paused,
+      sceneWorldId,
+      selectedAgentId,
+    ],
   );
 
-  /** 暂停/继续 */
-  const handleTogglePause = useCallback(() => {
-    const ms = gameRef.current?.scene.getScene("MapScene") as any;
-    if (!ms) return;
-    if (paused) {
-      ms.resumeSimulation();
-      setPaused(false);
-    } else {
-      ms.pauseSimulation();
-      setPaused(true);
+  /** 暂停/继续：Brain 模式下保持前后端状态一致。 */
+  const handleTogglePause = useCallback(async () => {
+    if (sceneControlPending) return;
+    const mapScene = gameRef.current?.scene.getScene("MapScene") as
+      | MapScene
+      | undefined;
+    if (!mapScene) return;
+
+    setSceneControlPending(true);
+    setSceneControlError(null);
+    try {
+      const result = await synchronizeScenePause({
+        paused,
+        scene: mapScene,
+        brainEnabled,
+        worldId: sceneWorldId,
+        pauseWorld: (worldId) => pauseWorld.mutateAsync(worldId),
+        resumeWorld: (worldId) => resumeWorld.mutateAsync(worldId),
+      });
+      setPaused(result.paused);
+      setSceneControlError(result.error);
+    } finally {
+      setSceneControlPending(false);
     }
-  }, [paused]);
+  }, [
+    brainEnabled,
+    pauseWorld,
+    paused,
+    resumeWorld,
+    sceneControlPending,
+    sceneWorldId,
+  ]);
 
   /** 保存存档 */
   const handleSaveCheckpoint = useCallback(
@@ -371,6 +449,10 @@ export default function GameScenePage() {
     (id: string) => {
       const cp = checkpoints.find((c: any) => c.id === id);
       if (!cp?.agents?.length) return;
+      const mapScene = gameRef.current?.scene.getScene("MapScene") as
+        | MapScene
+        | undefined;
+      mapScene?.restoreAgents(cp.agents);
       setAgents(cp.agents);
       saveAgents(mapId, cp.agents);
     },
@@ -493,21 +575,35 @@ export default function GameScenePage() {
             </span>
             <button
               type="button"
-              onClick={() => brainEnabled ? setBrainEnabled(false) : startBrain()}
-              disabled={agents.length === 0 || startScene.isPending}
+              onClick={() => {
+                if (brainEnabled) {
+                  setBrainEnabled(false);
+                  setSceneWorldId(null);
+                  setBrainConnectionError(null);
+                } else {
+                  void startBrain();
+                }
+              }}
+              disabled={brainButton.disabled}
+              title={brainButton.title}
               className={`px-3 py-1 text-xs font-mono rounded border transition-colors ${
                 brainEnabled
                   ? "border-green-500/60 bg-green-500/10 text-green-400"
                   : "border-border text-text-secondary hover:border-text-secondary/40"
               } disabled:opacity-40 disabled:cursor-not-allowed`}
             >
-              {startScene.isPending ? "⏳" : brainEnabled ? "ON ✓" : "OFF"}
+              {brainButton.label}
             </button>
           </div>
           {brainEnabled && sceneWorldId && (
             <div className="mt-1 text-[10px] font-mono text-text-secondary truncate">
               World: {sceneWorldId.slice(0, 12)}...
             </div>
+          )}
+          {brainConnectionError && (
+            <p className="mt-1 text-[10px] font-mono text-red-400">
+              {brainConnectionError}
+            </p>
           )}
         </Card>
 
@@ -601,11 +697,20 @@ export default function GameScenePage() {
           count={checkpoints.length}
           max={30}
           paused={paused}
+          busy={sceneControlPending}
           onSave={handleSaveCheckpoint}
           onLoad={handleLoadCheckpoint}
           onDelete={handleDeleteCheckpoint}
           onTogglePause={handleTogglePause}
         />
+        {sceneControlError && (
+          <p
+            role="alert"
+            className="mt-2 text-[10px] font-mono text-red-400"
+          >
+            {sceneControlError}
+          </p>
+        )}
       </Card>
 
       {/* 已投放 Agent 情绪控制 */}
