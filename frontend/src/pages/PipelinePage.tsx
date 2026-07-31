@@ -26,7 +26,7 @@ export default function PipelinePage() {
 
   const [draft, setDraft] = useState<PipelineDef>({
     name: "", description: "",
-    nodes: [{id:"node1",title:"步骤 1",agent_id:"",task:"",depends_on:[]}],
+    nodes: [{id:"node1",title:"步骤 1",agent_id:"worker-default",task:"",depends_on:[]}],
   });
 
   const loadPipelines = useCallback(async () => {
@@ -179,7 +179,7 @@ export default function PipelinePage() {
                       <select value={node.agent_id}
                               onChange={e=>{const ns=[...draft.nodes];ns[idx]={...node,agent_id:e.target.value};setDraft({...draft,nodes:ns})}}
                               className="w-40 bg-bg-secondary border border-border rounded px-2 py-1 text-xs font-mono text-text-secondary">
-                        <option value="">选择 Agent…</option>
+                        <option value="worker-default">⚡ 默认 Worker</option>
                         {agents.map(a=><option key={a.id} value={a.id}>{a.name} {a.persona?.mbti?`[${a.persona.mbti}]`:""}</option>)}
                       </select>
                     </div>

@@ -23,9 +23,9 @@ router = APIRouter(prefix="/api/pipelines", tags=["pipelines"])
 
 class NodeCreateRequest(BaseModel):
     id: str = Field(..., description="Node ID")
-    title: str = Field(..., description="Node title")
-    agent_id: str = Field(..., description="Agent ID")
-    task: str = Field(..., description="Task description")
+    title: str = Field(default="", description="Node title")
+    agent_id: str = Field(default="worker-default", description="Agent ID")
+    task: str = Field(default="", description="Task description")
     depends_on: list[str] = Field(default_factory=list)
     depends_on_files: list[str] = Field(default_factory=list)
 
@@ -78,11 +78,13 @@ SUGGEST_PROMPT = """你是一个工作流设计专家。用户描述了一个目
 }
 
 规则:
+- 每个节点必须有 agent_id 字段，值为 "worker-default"
 - 3-5 个节点为宜
 - 每个节点任务要具体、可执行
 - 节点间用文件传递数据（前一个节点的产出文件名）
 - id 用英文短标识
-- 有明确依赖关系的节点要设 depends_on"""
+- 有明确依赖关系的节点要设 depends_on
+- 输出必须是纯 JSON 对象，不要加任何说明文字"""
 
 
 @router.post("/suggest")
