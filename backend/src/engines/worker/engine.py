@@ -685,54 +685,54 @@ class AgentWorker:
         else:  # "continue"
             self._transition(WorkerState.DECIDING)
 
-    async def _handle_done(self) -> AsyncGenerator[str, None]:
-        """DONE 状态：生成完成事件和汇总。"""
+    async def _handle_done(self) -> list[str]:
+        """DONE 状态：返回完成事件列表。"""
+        events = []
         total_duration_ms = int((time.monotonic() - self._start_time) * 1000)
 
-        # 列出所有产出物
         try:
             files = await self._workspace.list_files()
             file_paths = [f.path for f in files]
         except Exception:
             file_paths = self._files_created
 
-        yield _sse_event("worker.done", WorkerDoneData(
+        events.append(_sse_event("worker.done", WorkerDoneData(
             reason="任务已完成",
             total_steps=self._step_index,
             files=file_paths,
-        ).__dict__)
+        ).__dict__))
 
-        # 生成汇总（使用最后一次反思的内容）
         summary = f"任务完成。共执行 {self._step_index} 步，产生 {len(file_paths)} 个文件。"
-
-        yield _sse_event("worker.summary", WorkerSummaryData(
+        events.append(_sse_event("worker.summary", WorkerSummaryData(
             deliverable_summary=summary,
             self_rating="3",
             key_findings=[f"产出 {len(file_paths)} 个文件"] + file_paths[:5],
             total_duration_ms=total_duration_ms,
-        ).__dict__)
+        ).__dict__))
 
         logger.info(f"AgentWorker DONE: {self._step_index} steps, "
                     f"{len(file_paths)} files, {total_duration_ms}ms")
+        return events
 
-    async def _handle_error(self) -> AsyncGenerator[str, None]:
-        """ERROR 状态：生成错误事件。"""
-        yield _sse_event("worker.error", WorkerErrorData(
+    async def _handle_error(self) -> list[str]:
+        """ERROR 状态：返回错误事件列表。"""
+        events = [_sse_event("worker.error", WorkerErrorData(
             step_index=self._step_index,
             error_type="fatal",
             message="Worker 遇到致命错误已终止",
             recoverable=False,
-        ).__dict__)
+        ).__dict__)]
         self._transition(WorkerState.DONE)
+        return events
 
-    async def _handle_cancel(self) -> AsyncGenerator[str, None]:
-        """处理取消请求。"""
+    async def _handle_cancel(self) -> list[str]:
+        """处理取消请求——返回取消事件列表。"""
         logger.info(f"AgentWorker cancelled: run_id={self._run_id}")
-        yield _sse_event("worker.done", WorkerDoneData(
+        return [_sse_event("worker.done", WorkerDoneData(
             reason="用户取消",
             total_steps=self._step_index,
             files=self._files_created,
-        ).__dict__)
+        ).__dict__)]
 
     # ─────────────────────────────────────────────────────────────────
     # 内部方法
@@ -752,18 +752,15 @@ class AgentWorker:
         Returns:
             LLM 响应文本，如果失败返回 None
         """
-        from autogen_core.models import SystemMessage, UserMessage
+        from autogen_agentchat.messages import TextMessage
 
         for attempt in range(MAX_LLM_RETRIES):
             try:
-                # 使用 Agent 的 model_client 直接调用
                 agent = self._agent
-                messages = [
-                    SystemMessage(content=system_prompt),
-                    UserMessage(content=user_message, source="worker"),
-                ]
+                # 将 system + user prompt 合并为一条 TextMessage
+                combined = f"{system_prompt}\n\n---\n\n{user_message}"
                 result = await agent.autogen_agent.on_messages(
-                    messages,
+                    [TextMessage(content=combined, source="worker")],
                     cancellation_token=None,
                 )
                 # AutoGen 返回 ChatMessage，提取 content
