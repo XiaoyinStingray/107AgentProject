@@ -210,7 +210,7 @@ export default function PipelinePage() {
               </div>
             </div>
           ) : selectedPipe && selectedPipe.nodes ? (
-            /* 预览选中管道 */
+            /* 预览选中管道 + 运行结果 */
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -240,17 +240,46 @@ export default function PipelinePage() {
                   </div>
                 ))}
               </div>
-              {/* 运行状态 */}
+              {/* 运行结果 */}
               {(run.running||run.events.length>0) && (
-                <div className="p-3 border border-border rounded bg-bg-primary">
-                  <h4 className="text-xs font-mono text-text-secondary mb-2">运行状态</h4>
-                  {Object.entries(run.nodes).map(([nid,status])=>(
-                    <div key={nid} className="flex items-center gap-2 py-0.5">
-                      <span className={`w-2 h-2 rounded-full ${status==="running"?"bg-blue-500 animate-pulse":status==="complete"?"bg-emerald-500":status==="error"?"bg-rose-500":"bg-gray-500"}`}/>
-                      <span className="text-xs font-mono text-text-secondary">{selectedPipe.nodes.find(n=>n.id===nid)?.title||nid}</span>
-                      <span className="text-xs text-text-muted">{status}</span>
+                <div className="space-y-3">
+                  <div className="p-3 border border-border rounded bg-bg-primary">
+                    <h4 className="text-xs font-mono text-text-secondary mb-2">节点状态</h4>
+                    {Object.entries(run.nodes).map(([nid,status])=>(
+                      <div key={nid} className="flex items-center gap-2 py-0.5">
+                        <span className={`w-2 h-2 rounded-full ${status==="running"?"bg-blue-500 animate-pulse":status==="complete"?"bg-emerald-500":status==="error"?"bg-rose-500":"bg-gray-500"}`}/>
+                        <span className="text-xs font-mono text-text-secondary">{selectedPipe.nodes.find(n=>n.id===nid)?.title||nid}</span>
+                        <span className="text-xs text-text-muted">{status}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {/* 各节点事件摘要 */}
+                  {!run.running && (
+                    <div className="space-y-2">
+                      <h4 className="text-xs font-mono text-text-secondary">节点详情</h4>
+                      {selectedPipe.nodes.map(n=>{
+                        const nodeEvts = run.events.filter(e=>e.type==="pipeline.node_event"&&e.data?.node_id===n.id);
+                        const nodeStatus = run.nodes[n.id]||"pending";
+                        return (
+                          <details key={n.id} className="p-2 border border-border rounded bg-bg-primary">
+                            <summary className="cursor-pointer text-xs font-mono text-text-secondary flex items-center gap-2">
+                              <span className={`w-2 h-2 rounded-full ${nodeStatus==="complete"?"bg-emerald-500":nodeStatus==="error"?"bg-rose-500":"bg-gray-500"}`}/>
+                              {n.title} — {nodeEvts.length} 事件
+                            </summary>
+                            <div className="mt-2 max-h-40 overflow-y-auto space-y-0.5">
+                              {nodeEvts.length===0
+                                ? <p className="text-xs text-text-muted font-mono">无事件记录</p>
+                                : nodeEvts.map((ev,i)=>(
+                                  <div key={i} className="text-xs font-mono text-text-muted truncate">
+                                    [{i+1}] {String(ev.data?.sse||"").slice(0,120)}
+                                  </div>
+                                ))}
+                            </div>
+                          </details>
+                        );
+                      })}
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
             </div>

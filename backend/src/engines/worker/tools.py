@@ -219,7 +219,7 @@ def make_worker_tools(workspace) -> list[ToolSpec]:
             return "错误：请提供有效的文件路径。"
         try:
             content = await workspace.read_file(path)
-            return f"--- {path} ---\n{content}"
+            return f"[文件 {path} 内容如下]\n\n{content}"
         except FileNotFoundError:
             return f"文件不存在: {path}。请确认文件名是否正确。工作区中的文件列表可用 list_files 查看。"
         except PermissionError as e:
