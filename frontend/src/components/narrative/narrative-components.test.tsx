@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import NarrativeFactory from "../../pages/NarrativeFactory";
 import { MOCK_AGENTS } from "../../mocks/agents";
@@ -87,7 +88,9 @@ const testQueryClient = new QueryClient({
 function renderNarrativeFactory() {
   return render(
     <QueryClientProvider client={testQueryClient}>
-      <NarrativeFactory />
+      <MemoryRouter>
+        <NarrativeFactory />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
