@@ -330,6 +330,9 @@ async def list_worker_history():
         files = []
         steps = 0
         worker_state = "done"
+        duration_ms = e.get("duration_ms", 0)
+        self_rating = ""
+        key_findings = []
         if worker is not None:
             try:
                 f_list = await worker._workspace.list_files()
@@ -338,8 +341,11 @@ async def list_worker_history():
                 pass
             steps = worker._step_index
             worker_state = worker.state.value if hasattr(worker.state, 'value') else str(worker.state)
+            # 提取元数据
+            duration_ms = getattr(worker, "_total_duration_ms", 0) or duration_ms
+            self_rating = getattr(worker, "_self_rating", "") or ""
+            key_findings = getattr(worker, "_key_findings", []) or []
         else:
-            # 磁盘恢复的条目——直接读文件系统
             from pathlib import Path
             ws_dir = Path.home() / "workspaces" / rid / "files"
             if ws_dir.exists():
@@ -357,6 +363,9 @@ async def list_worker_history():
             "steps": steps,
             "files": files,
             "accepted": accepted,
+            "duration_ms": duration_ms,
+            "self_rating": self_rating,
+            "key_findings": key_findings[:3],
             "created_at": e["created_at"],
         })
     history.sort(key=lambda h: h["created_at"], reverse=True)

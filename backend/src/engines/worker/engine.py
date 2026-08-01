@@ -856,6 +856,11 @@ class AgentWorker:
             total_duration_ms=total_duration_ms,
         ).__dict__))
 
+        # Step 100a: 存储元数据供纪念墙使用
+        self._total_duration_ms = total_duration_ms
+        self._self_rating = "3"
+        self._key_findings = [f"产出 {len(file_paths)} 个文件"] + file_paths[:3]
+
         logger.info(f"AgentWorker DONE: {self._step_index} steps, "
                     f"{len(file_paths)} files, {total_duration_ms}ms")
         return events

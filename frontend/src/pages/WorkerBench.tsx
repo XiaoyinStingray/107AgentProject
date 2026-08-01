@@ -7,6 +7,7 @@
 
 import React from "react";
 import { useState, useCallback, useEffect, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useWorkerExecute } from "../api/workers";
 import WorkerTerminal from "../components/worker/WorkerTerminal";
 import WorkspacePanel from "../components/worker/WorkspacePanel";
@@ -41,6 +42,7 @@ class ErrorCatcher extends React.Component<{children: React.ReactNode}, {err: st
 
 export default function WorkerBench() {
   const { data: agents = [] } = useAgents();
+  const [searchParams] = useSearchParams();
   const [task, setTask] = useState("");
   const [agentId, setAgentId] = useState("__builtin__");
   const [customAgentId, setCustomAgentId] = useState("");
@@ -136,7 +138,26 @@ export default function WorkerBench() {
     return () => controller.abort();
   }, []);
 
-  // 构建通用请求体
+  // 纪念墙跳转：URL 带 ?run_id=xxx → 自动加载该 Worker 历史
+  useEffect(() => {
+    const rid = searchParams.get("run_id");
+    if (!rid) return;
+    const load = async () => {
+      try {
+        const evResp = await fetch(`/api/workers/${rid}/events`);
+        if (evResp.ok) {
+          const evData = await evResp.json();
+          if (evData.events?.length > 0) {
+            hydrate(evData.events);
+            setCurrentRunId(rid);
+            if (evData.accepted) setAccepted(true);
+            setReconnectNotice(`📋 已加载: ${evData.task?.slice(0, 60) || rid}`);
+          }
+        }
+      } catch { /* 静默失败 */ }
+    };
+    load();
+  }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
   const buildRequest = useCallback((taskText: string, reuse: boolean) => ({
     agent_id: effectiveAgentId,
     task: taskText,

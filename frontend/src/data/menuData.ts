@@ -91,7 +91,14 @@ export const MENU_SECTIONS: MenuSection[] = [
     ],
   },
   { title: "M9 Agent Team", route: "/team", items: [] },
-  { title: "M10 LLM Bench", route: "/bench", items: [] },
+  {
+    title: "M10 LLM Bench", route: "/bench",
+    items: [
+      { id: 62, emoji: "⚔️", label: "Agent 实时 PK", priority: "P0", redirect: "/duel" },
+      { id: 63, emoji: "📊", label: "批量评测", priority: "P1", anchor: "runs" },
+      { id: 64, emoji: "📈", label: "排行榜", priority: "P2", anchor: "leaderboard" },
+    ],
+  },
   {
     title: "M11 游戏化场景", route: "/scene",
     items: [
@@ -103,8 +110,10 @@ export const MENU_SECTIONS: MenuSection[] = [
     title: "M12 Worker", route: "/worker",
     items: [
       { id: 59, emoji: "⚡", label: "终端工作台", priority: "P0" },
+      { id: 65, emoji: "🏆", label: "产出纪念墙", priority: "P0", redirect: "/showcase" },
       { id: 60, emoji: "🔗", label: "管道编辑器", priority: "P2", redirect: "/pipeline" },
       { id: 61, emoji: "📁", label: "文件浏览器", priority: "P2" },
+      { id: 66, emoji: "🔀", label: "决策分叉", priority: "P2", redirect: "/worker" },
     ],
   },
 ];

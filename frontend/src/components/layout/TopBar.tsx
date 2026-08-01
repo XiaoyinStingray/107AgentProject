@@ -11,6 +11,12 @@ const ROUTE_LABELS: Record<string, string> = {
   "/control": "控制台",
   "/intervention": "干预台",
   "/archive": "档案馆",
+  "/bench": "LLM Bench",
+  "/worker": "Worker 工作台",
+  "/duel": "Agent 实时 PK",
+  "/showcase": "产出纪念墙",
+  "/scene": "游戏化场景",
+  "/team": "Agent Team",
 };
 
 /**

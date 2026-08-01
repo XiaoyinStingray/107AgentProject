@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useLocation } from "react-router-dom";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
@@ -43,7 +43,14 @@ type NarrativePhase = "setup" | "generating" | "result";
 
 export default function NarrativeFactory() {
   const { data: agents = [] } = useAgents();
-  const { data: worlds = [] } = useWorlds();
+  const { data: allWorlds = [] } = useWorlds();
+  // M5 只读单人/多人世界——不读 Team 和 Scene
+  const worlds = useMemo(
+    () => allWorlds.filter((w: any) =>
+      w.world_type === "solo" || w.world_type === "group" || (!w.world_type && !w.name?.startsWith("Team:") && !w.name?.startsWith("Scene:"))
+    ),
+    [allWorlds],
+  );
 
   // === setup 状态 ===
   const [agentId, setAgentId] = useState<string>("");
