@@ -18,7 +18,7 @@ class CheckpointRow(Base):
     scene_id: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(128), default="")
     agents_json: Mapped[str] = mapped_column(Text, default="[]")  # AgentSpriteData[] JSON
-    created_at: Mapped[str] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     @staticmethod
     async def list_by_scene(db: AsyncSession, scene_id: str) -> list["CheckpointRow"]:
@@ -37,12 +37,16 @@ class CheckpointRow(Base):
         return result.scalar() or 0
 
     @staticmethod
+<<<<<<< Updated upstream
     async def delete_by_scene_and_id(
         db: AsyncSession,
         scene_id: str,
         checkpoint_id: str,
     ) -> bool:
         """Delete one checkpoint only when it belongs to the requested scene."""
+=======
+    async def delete_by_id(db: AsyncSession, checkpoint_id: str, scene_id: str) -> bool:
+>>>>>>> Stashed changes
         result = await db.execute(
             delete(CheckpointRow).where(
                 CheckpointRow.id == checkpoint_id,
@@ -50,6 +54,6 @@ class CheckpointRow(Base):
             )
         )
         await db.commit()
-        return result.rowcount > 0
+        return getattr(result, "rowcount", 0) > 0
 
     MAX_PER_SCENE = 30

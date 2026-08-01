@@ -621,6 +621,9 @@ export default function GameScenePage() {
       mapScene?.restoreAgents(cp.agents);
       setAgents(cp.agents);
       saveAgents(mapId, cp.agents);
+      // BUG-038 修复：强制覆盖 Phaser 精灵坐标
+      const ms = gameRef.current?.scene.getScene("MapScene") as any;
+      ms?.restoreAgents?.(cp.agents);
     },
     [mapId, checkpoints],
   );

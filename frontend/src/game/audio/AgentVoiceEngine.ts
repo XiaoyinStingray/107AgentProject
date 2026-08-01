@@ -97,24 +97,28 @@ export class AgentVoiceEngine {
   /**
    * 异步播放一段文字的情绪拟声。
    * 返回 Promise，resolve 时表示全部分页播放完毕。
+   * BUG-044 修复：volume 支持传 number 或 () => number 回调，逐页动态检查。
    */
   async speak(
     text: string,
     emotion: Emotion,
-    volume: number,
+    volume: number | (() => number),
     callbacks: PlaybackCallbacks,
   ): Promise<void> {
+<<<<<<< Updated upstream
     if (!this.audioCtx || volume <= 0) {
       // 无声模式：仅分页回调
       await this.playSilent(text, callbacks);
       return;
     }
 
+=======
+>>>>>>> Stashed changes
     this.aborted = false;
-    const ctx = this.audioCtx;
     const mod = getEmotionMod(emotion);
     const pages = this.paginate(text);
-    const globalGain = MASTER_VOLUME * volume;
+    // 支持动态音量查询（用于中途开启声音）
+    const getVol = typeof volume === "function" ? volume : () => volume;
 
     for (let pi = 0; pi < pages.length; pi++) {
       if (this.aborted) break;
@@ -128,14 +132,23 @@ export class AgentVoiceEngine {
       const pageText = pages[pi];
       callbacks.onPageText(pageText, pi === 0);
 
-      // 播放当前页的拟声
-      await this.playPageAudio(ctx, pageText, mod, globalGain);
+      // BUG-044 修复：逐页动态检查音频可用性（支持中途开启声音）
+      const currentVolume = getVol();
+      const canPlayAudio = this.audioCtx && currentVolume > 0;
+      if (canPlayAudio) {
+        const ctx = this.audioCtx!;
+        const globalGain = MASTER_VOLUME * currentVolume;
+        await this.playPageAudio(ctx, pageText, mod, globalGain);
 
-      if (this.aborted) break;
+        if (this.aborted) break;
 
-      // 页间阅读停顿
-      const readPause = 600 + Math.random() * 400; // 0.6-1s
-      await this.delay(readPause);
+        // 页间阅读停顿
+        const readPause = 600 + Math.random() * 400;
+        await this.delay(readPause);
+      } else {
+        // 无声模式：仅文字分页 + 阅读停顿
+        await this.delay(500 + Math.random() * 300);
+      }
     }
 
     if (!this.aborted) {
@@ -147,21 +160,7 @@ export class AgentVoiceEngine {
    * 内部
    * ================================================================ */
 
-  /** 无声播放（仅分页 + 停顿，不合成音频） */
-  private async playSilent(text: string, callbacks: PlaybackCallbacks): Promise<void> {
-    this.aborted = false;
-    const pages = this.paginate(text);
-    for (let pi = 0; pi < pages.length; pi++) {
-      if (this.aborted) break;
-      while (this.paused && !this.aborted) {
-        await new Promise<void>((resolve) => { this.pauseResolve = resolve; });
-      }
-      if (this.aborted) break;
-      callbacks.onPageText(pages[pi], pi === 0);
-      await this.delay(500 + Math.random() * 300);
-    }
-    if (!this.aborted) callbacks.onComplete();
-  }
+  // playSilent 已合并到 speak() 主循环中（BUG-044 修复）
 
   /** 为单页文字合成拟声音频 */
   private playPageAudio(

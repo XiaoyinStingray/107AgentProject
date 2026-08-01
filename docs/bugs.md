@@ -465,6 +465,7 @@
 
 ### BUG-032：静音模式的拟声 Promise 提前完成
 
+<<<<<<< Updated upstream
 - **状态**：✅ 已修复（2026-07-31，T6）
 - **优先级**：P1
 - **现象**：关闭声音时，`AgentVoiceEngine.speak()` 在静音播放计时结束前就完成，调用方会误以为当前消息已经播放完毕。
@@ -492,9 +493,30 @@
 - **影响**：产生监听器泄漏，并可能重复暂停或恢复音频。
 - **修复**：使用稳定处理函数注册监听器，并在 effect cleanup 中移除。
 - **回归测试**：`frontend/src/components/scene/scene-components.test.tsx`。
+=======
+- **状态**：✅ 已修复 (2026-07-31, Step 73)
+- **优先级**：P1
+- **根因**：`playSilent()` 调用缺少 `await`，`speak()` 在静音分支提前 resolve
+- **修复**：`AgentVoiceEngine.ts` 第 109 行加 `await`
 
-### BUG-035：Checkpoint 可通过错误场景路径删除
+### BUG-033：暂停后恢复可能并行播放两条对话
 
+- **状态**：✅ 已修复 (2026-07-31, Step 73)
+- **优先级**：P1
+- **根因**：`DialoguePlaybackQueue.resume()` 恢复引擎后无条件调用 `processNext()`，未检查当前消息是否仍在播放
+- **修复**：新增 `currentPlaying` 标志位，`processNext()` 检查该标志防止重复启动；`resume()` 不再调用 `processNext()`，等 `onComplete` 自然推进
+
+### BUG-034：音频控制组件卸载后残留 visibilitychange 监听器
+
+- **状态**：✅ 已修复 (2026-07-31, Step 73)
+- **优先级**：P2
+- **根因**：`handleEnable` 中用匿名函数注册 `visibilitychange`，无 cleanup
+- **修复**：提取为独立 `useEffect`，cleanup 中 `removeEventListener`
+>>>>>>> Stashed changes
+
+### BUG-035：Checkpoint 可以通过错误场景路径删除
+
+<<<<<<< Updated upstream
 - **状态**：✅ 已修复（2026-07-31，T6）
 - **优先级**：P2
 - **现象**：在 `library` 创建的 Checkpoint，可以通过 `/api/scenes/dorm/checkpoints/{id}` 删除。
@@ -532,6 +554,33 @@
 - **影响**：无法从相同场面起点比较不同干预结果，Checkpoint 只实现了部分恢复。
 - **修复**：增加显式 `restoreAgents()` 读档通道，停止 mover/tween 后强制恢复已有 Agent 坐标、动作和起始格。
 - **人工复现**：暂停并保存 Checkpoint，移动角色，再加载该 Checkpoint。
+=======
+- **状态**：✅ 已修复 (2026-07-31, Step 73)
+- **优先级**：P2
+- **根因**：`CheckpointRow.delete_by_id` 只按 ID 匹配，未校验 `scene_id`
+- **修复**：`delete_by_id` 新增 `scene_id` 参数，DELETE 查询同时匹配 `id` 和 `scene_id`
+
+### BUG-036：切换场景后自动对话扫描停止
+
+- **状态**：✅ 已修复 (2026-07-31, Step 73)
+- **优先级**：P1
+- **根因**：`loadMap()` 调用 `destroyScene()` 清理定时器，地图重建后 `buildScene()` 未重启对话扫描器
+- **修复**：`buildScene()` 末尾调用 `startDialogueScanner()`
+
+### BUG-037：耳语内容没有进入 Agent 行为链路
+
+- **状态**：✅ 已修复 (2026-07-31, Step 73)
+- **优先级**：P1
+- **根因**：`agent-whisper` 事件处理器只读取 agentId 并播放闪烁 tween，文本未使用
+- **修复**：处理器接收 `message` 参数，显示思维气泡 + 注入情绪引擎 + 闪烁反馈
+
+### BUG-038：Checkpoint 加载不恢复已有 Agent 的坐标
+
+- **状态**：✅ 已修复 (2026-07-31, Step 73)
+- **优先级**：P1
+- **根因**：`syncAgentsInPlace()` 为避免干扰实时移动，不覆盖已有 sprite 坐标，导致 Checkpoint 恢复也走了同一条非覆盖路径
+- **修复**：新增 `restoreAgents()` 方法，调用 `syncAgentsInPlace(data, true)` 强制覆盖坐标；`handleLoadCheckpoint` 调用该方法
+>>>>>>> Stashed changes
 
 ---
 
@@ -552,10 +601,10 @@
 - **现象**：AI 驱动模式下 Agent 对话超长，偶发 TimeoutError
 - **根因**：两条路径均缺长度约束——
   Path A（interact 端点）：generate_dialogue_llm 无 SystemMessage
-  Path B（WorldEngine+SceneBridge）：build_core_system_message 鼓励"有血有肉的人"但无长度限制；GroupChat task 也无
+  Path B（WorldEngine+SceneBridge）：build_core_system_message 鼓励“有血有肉的人”但无长度限制；GroupChat task 也无
 - **修复（3 处）**：
   1. `scene/engine.py`：新增 system_prompt 硬约束（≤30字、禁止前缀/旁白/元叙述），[SystemMessage, UserMessage] 结构
-  2. `persona/prompt_templates.py`：`_build_identity_section` 新增"对话风格规范"（10-30字、拆分长想法、禁止元叙述）——对所有 LifeAgent 生效
+  2. `persona/prompt_templates.py`：`_build_identity_section` 新增“对话风格规范”（10-30字、拆分长想法、禁止元叙述）——对所有 LifeAgent 生效
   3. `world/messages.py`：`_build_group_task` 新增长度约束（10-30字、拆分长对话）——对每 tick GroupChat 生效
 - **关联位置**：`engines/scene/engine.py`, `engines/persona/prompt_templates.py`, `engines/world/messages.py`
 
@@ -585,6 +634,7 @@
 
 ---
 
+<<<<<<< Updated upstream
 ## 2026-07-31：State 3 T6 — M11 耳语与移动补充修复
 
 ### BUG-042：多个 Agent 可能移动到同一格
@@ -605,3 +655,14 @@
 - **修复**：独立识别“移动/移位/靠近/前往某人旁边”等意图，由场景确定 B 身边的安全格；Brain 开关两种模式走同一条确定性移动路径。
 - **边界反馈**：已相邻、暂停排队、目标不存在、周围无空位均返回明确提示；“去和 B 说话”仍走原对话链路。
 - **回归测试**：M11 定向回归 `45 passed`；前端全量 `351 passed, 7 个既有 NarrativeFactory 测试失败`。
+=======
+## 2026-07-31: Step 73 — 全项目 Bug 清零
+
+### BUG-042：加载 Checkpoint 后存档数量未更新
+
+- **状态**：✅ 已修复 (2026-07-31, Step 73)
+- **优先级**：P2
+- **根因**：`useCreateCheckpoint` / `useDeleteCheckpoint` 的 `onSuccess` 仅调用 `invalidateQueries`，依赖异步重取刷新 UI；在某些时序下缓存更新不及时
+- **修复**：`onSuccess` 中追加 `setQueryData` 乐观更新——创建时 `concat(newCp)`、删除时 `filter(c => c.id !== id)`，确保 count 立即刷新
+- **关联位置**：`frontend/src/api/scenes.ts` — `useCreateCheckpoint`, `useDeleteCheckpoint`
+>>>>>>> Stashed changes
