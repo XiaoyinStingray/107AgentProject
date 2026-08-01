@@ -37,9 +37,17 @@ class CheckpointRow(Base):
         return result.scalar() or 0
 
     @staticmethod
-    async def delete_by_id(db: AsyncSession, checkpoint_id: str) -> bool:
+    async def delete_by_scene_and_id(
+        db: AsyncSession,
+        scene_id: str,
+        checkpoint_id: str,
+    ) -> bool:
+        """Delete one checkpoint only when it belongs to the requested scene."""
         result = await db.execute(
-            delete(CheckpointRow).where(CheckpointRow.id == checkpoint_id)
+            delete(CheckpointRow).where(
+                CheckpointRow.id == checkpoint_id,
+                CheckpointRow.scene_id == scene_id,
+            )
         )
         await db.commit()
         return result.rowcount > 0

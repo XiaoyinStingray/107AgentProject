@@ -3,10 +3,21 @@ import { ITEM_FRAME, DECOR_FRAME, WALL_DECOR_FRAME, BG_FRAME, FG_FRAME } from ".
 import { AgentSprite, AgentSpriteData } from "../sprites/AgentSprite";
 import { getDialogue, fetchDialogue } from "../dialogue";
 import { AutonomousMover } from "../AutonomousMover";
+import type { MovementReservation } from "../AutonomousMover";
 import { emotionEngine, RANDOM_EVENTS } from "../emotion/EmotionEngine";
 import type { EmotionChange, SceneEvent } from "../emotion/EmotionEngine";
 import { playbackQueue } from "../audio/DialoguePlaybackQueue";
 import type { Emotion } from "../sprites/AgentSprite";
+import {
+  buildWhisperContext,
+  chooseWhisperApproachTile,
+  isWhisperMoveNearIntent,
+  normalizeWhisper,
+  resolveWhisperMoveTarget,
+  resolveWhisperTarget,
+  type PendingWhisper,
+  type WhisperAgent,
+} from "../whisper";
 
 /* ── 多轮对话会话 66-S ── */
 interface ConversationSession {
@@ -18,6 +29,17 @@ interface ConversationSession {
   currentRound: number;    // 0-based
   context: string[];       // 之前轮次的消息（LLM 上下文）
   timer: Phaser.Time.TimerEvent | null;
+  whisper?: {
+    speakerId: string;
+    targetName: string;
+  };
+}
+
+interface SseDialogueEvent {
+  fromId: string;
+  fromName: string;
+  message: string;
+  targetIds: string[];
 }
 
 /**
@@ -73,6 +95,10 @@ export class MapScene extends Phaser.Scene {
   private bgImage: Phaser.GameObjects.Image | null = null;
   private fgImages: Phaser.GameObjects.Image[] = [];
   private weatherTweens: Phaser.Tweens.Tween[] = [];
+  private weatherParticles: Phaser.GameObjects.GameObject[] = [];
+  private eventNotifications: Phaser.GameObjects.Text[] = [];
+  private activeBubbles: Set<import("../sprites/ActionBubble").ActionBubble> = new Set();
+  private pendingWeather: string | null = null;
   private agentSprites: Map<string, AgentSprite> = new Map();
   private pendingAgents: AgentSpriteData[] | null = null;
   private wallMap: number[][] = [];  // 墙壁占位 map，0=可通行
@@ -83,6 +109,8 @@ export class MapScene extends Phaser.Scene {
   // 66-S: 多轮对话会话
   private activeSessions: Map<string, ConversationSession> = new Map();
   private busyAgents: Set<string> = new Set();
+  private pendingWhispers: Map<string, PendingWhisper> = new Map();
+  private movementReservations: Map<string, string> = new Map();
 
   constructor() {
     super({ key: "MapScene" });
@@ -92,17 +120,46 @@ export class MapScene extends Phaser.Scene {
    * 生命周期
    * ================================================================ */
 
+  private onAgentWhisper(agentId: string, message: string): void {
+    this.receiveWhisper(agentId, message);
+  }
+
+  private onAgentWhisperFeedback(agentId: string, message: string): void {
+    this.showAgentBubble(agentId, message);
+  }
+
+  private onSseMoveTo(agentId: string, tileX: number, tileY: number): void {
+    if (this.paused) return;
+    const mover = this.movers.get(agentId);
+    if (!mover) return;
+    mover.setSseDriven(true);
+    mover.pushCommand(tileX, tileY);
+  }
+
+  private onSseDialogue(data: SseDialogueEvent): void {
+    this.receiveSseDialogue(data);
+  }
+
+  private onSseEmotion(agentId: string, emotion: string): void {
+    const sprite = this.agentSprites.get(agentId);
+    if (sprite) {
+      sprite.setEmotion(emotion as Emotion);
+    }
+  }
+
+  private onBrainToggle(enabled: boolean): void {
+    (this as any)._brainEnabled = enabled;
+  }
+
   create(): void {
     this.input.dragDistanceThreshold = 8;
     this.ready = true;
-    this.game.events.on("agent-whisper", (agentId: string) => {
-      const sprite = this.agentSprites.get(agentId);
-      if (!sprite) return;
-      this.tweens.add({
-        targets: sprite, alpha: 0.5, duration: 120, yoyo: true, repeat: 2,
-      });
-    });
-    this.startDialogueScanner();
+    this.game.events.on("agent-whisper", this.onAgentWhisper, this);
+    this.game.events.on(
+      "agent-whisper-feedback",
+      this.onAgentWhisperFeedback,
+      this,
+    );
 
     // ── EmotionEngine 66-S ──
     emotionEngine.onEmotionChange((changes: EmotionChange[]) => {
@@ -140,35 +197,13 @@ export class MapScene extends Phaser.Scene {
 
     // ── State 4 Step 81: SSE Brain 联动 ──
     // SSE move_to → 驱动精灵移动
-    this.game.events.on("sse-move-to", (agentId: string, tileX: number, tileY: number) => {
-      const mover = this.movers.get(agentId);
-      if (mover) {
-        mover.setSseDriven(true);
-        mover.pushCommand(tileX, tileY);
-      }
-    });
+    this.game.events.on("sse-move-to", this.onSseMoveTo, this);
     // SSE dialogue → 显示对话气泡
-    this.game.events.on("sse-dialogue", (data: {
-      fromId: string; fromName: string; message: string; targetIds: string[];
-    }) => {
-      // 发言者气泡
-      this.showAgentBubble(data.fromId, data.message, "talk");
-      // 目标气泡（如果有）
-      data.targetIds?.forEach((tid) => {
-        this.showAgentBubble(tid, "", "listen");
-      });
-    });
+    this.game.events.on("sse-dialogue", this.onSseDialogue, this);
     // SSE emotion → 更新精灵情绪
-    this.game.events.on("sse-emotion", (agentId: string, emotion: string) => {
-      const sprite = this.agentSprites.get(agentId);
-      if (sprite) {
-        sprite.setEmotion(emotion as Emotion);
-      }
-    });
+    this.game.events.on("sse-emotion", this.onSseEmotion, this);
     // Brain 开关 → 切换对话数据源
-    this.game.events.on("brain-toggle", (enabled: boolean) => {
-      (this as any)._brainEnabled = enabled;
-    });
+    this.game.events.on("brain-toggle", this.onBrainToggle, this);
 
     // 从 GameCanvas registry 读取初始数据（绕过 getScene 时序问题）
     const agents = this.game.registry.get("pendingAgents") as AgentSpriteData[] | undefined;
@@ -183,19 +218,17 @@ export class MapScene extends Phaser.Scene {
   }
 
   shutdown(): void {
-    this.game.events.off("agent-whisper");
-    this.dialogueTimer?.destroy();
-    this.dialogueCooldowns.clear();
-    // 清理活跃会话
-    for (const [key, s] of this.activeSessions) {
-      s.timer?.destroy();
-      this.busyAgents.delete(s.a.agentId);
-      this.busyAgents.delete(s.b.agentId);
-    }
-    this.activeSessions.clear();
+    this.game.events.off("agent-whisper", this.onAgentWhisper, this);
+    this.game.events.off(
+      "agent-whisper-feedback",
+      this.onAgentWhisperFeedback,
+      this,
+    );
+    this.game.events.off("sse-move-to", this.onSseMoveTo, this);
+    this.game.events.off("sse-dialogue", this.onSseDialogue, this);
+    this.game.events.off("sse-emotion", this.onSseEmotion, this);
+    this.game.events.off("brain-toggle", this.onBrainToggle, this);
     emotionEngine.stop();
-    // 66-A: 清空音频队列（场景切换/卸载不残留声音）
-    playbackQueue.clear();
     this.destroyScene();
   }
 
@@ -263,9 +296,11 @@ export class MapScene extends Phaser.Scene {
     // 3.5 装饰层（地板花纹 + 墙面挂饰）
     this.placeDecors(d);
 
-    // 4. 天气
-    if (d.weather === "sakura" || d.weather === "rain") {
-      this.startWeather(d.weather, W, H);
+    // 4. 天气（含导演面板预设）
+    const weatherType = this.pendingWeather ?? d.weather;
+    this.pendingWeather = null;
+    if (weatherType === "sakura" || weatherType === "rain") {
+      this.startWeather(weatherType, W, H);
     }
 
     // 5. Agent 精灵 — 始终消费 pending（修复 BUG-023）
@@ -286,6 +321,9 @@ export class MapScene extends Phaser.Scene {
         this.fgImages.push(img);
       });
     }
+
+    // destroyScene() 会移除全部 Phaser timer；每次地图重建后必须重启扫描器。
+    this.startDialogueScanner();
   }
 
   /* ================================================================
@@ -406,7 +444,7 @@ export class MapScene extends Phaser.Scene {
         ? this.add.rectangle(px, py, 1, 6, 0x8899CC, 0.5).setDepth(10)
         : this.add.circle(px, py, 2.5, 0xF8BBD0, 0.65).setDepth(10);
 
-      this.itemObjects.push(particle);
+      this.weatherParticles.push(particle);
 
       const tw = this.tweens.add({
         targets: particle,
@@ -426,12 +464,19 @@ export class MapScene extends Phaser.Scene {
    * ================================================================ */
 
   setWeather(type: string): void {
-    if (!this.mapData) return;
-    this.mapData.weather = type as any;
+    // 停止旧 tween 并销毁粒子对象（防止残留）
     this.weatherTweens.forEach((t) => t.stop());
     this.weatherTweens = [];
-    if (type === "sakura" || type === "rain") {
-      this.startWeather(type, this.mapData.width, this.mapData.height);
+    this.weatherParticles.forEach((p) => { try { p.destroy(); } catch { /* */ } });
+    this.weatherParticles = [];
+    if (this.mapData) {
+      this.mapData.weather = type as any;
+      if (type === "sakura" || type === "rain") {
+        this.startWeather(type, this.mapData.width, this.mapData.height);
+      }
+    } else {
+      // mapData 尚未加载（场景切换中），存入待建天气
+      this.pendingWeather = type;
     }
   }
 
@@ -473,13 +518,23 @@ export class MapScene extends Phaser.Scene {
         if (existing.emotion !== d.emotion) existing.setEmotion(d.emotion as any);
         if (existing.action !== d.action) existing.setAction(d.action as any);
       } else {
-        const sprite = new AgentSprite(this, d);
-        sprite.setData("name", d.name);
+        const placement = this.findNearestAvailableTile(
+          d.agentId,
+          d.tileX,
+          d.tileY,
+          Math.max(this.mapData?.width ?? 16, this.mapData?.height ?? 12),
+        );
+        const placedData = placement
+          ? { ...d, tileX: placement.tileX, tileY: placement.tileY }
+          : d;
+        const sprite = new AgentSprite(this, placedData);
+        sprite.setData("name", placedData.name);
         this.agentSprites.set(d.agentId, sprite);
         const mover = new AutonomousMover(sprite, this, undefined,
           (tx, ty) => this.isWalkable(tx, ty),
           (tx, ty) => this.isOccupiedByOther(d.agentId, tx, ty),
           { w: this.mapData?.width ?? 16, h: this.mapData?.height ?? 12 },
+          this.createMovementReservation(),
         );
         // 66-S: 注入物品 + Agent 位置
         mover.setItems((this.mapData?.items ?? []).map((it) => ({ type: it.type, tileX: it.tileX, tileY: it.tileY })));
@@ -488,7 +543,7 @@ export class MapScene extends Phaser.Scene {
         );
         if (!this.paused) mover.start();
         this.movers.set(d.agentId, mover);
-        this.setupAgentInteraction(sprite, d);
+        this.setupAgentInteraction(sprite, placedData);
       }
     }
   }
@@ -516,7 +571,10 @@ export class MapScene extends Phaser.Scene {
     this.movers.forEach((m) => m.stop());
     if (this.dialogueTimer) this.dialogueTimer.paused = true;
     // 取消所有进行中的 tween（停止移动动画）
-    this.tweens.killTweensOf(this.agentSprites);
+    this.agentSprites.forEach((sprite) => {
+      this.tweens.killTweensOf(sprite);
+      if (sprite.action === "walk") sprite.setAction("idle");
+    });
     // 66-A: 暂停音频播放
     playbackQueue.pause();
   }
@@ -547,9 +605,162 @@ export class MapScene extends Phaser.Scene {
     }
   }
 
+  /** 从 Checkpoint 强制恢复全部 Agent 状态；普通同步仍保留实时坐标。 */
+  restoreAgents(data: AgentSpriteData[]): void {
+    const wasPaused = this.paused;
+    this.movers.forEach((mover) => mover.stop());
+    this.agentSprites.forEach((sprite) => {
+      this.tweens.killTweensOf(sprite);
+    });
+    this.clearConversationState();
+    const placements = this.normalizeAgentPlacements(data);
+    this.setAgents(placements);
+
+    for (const snapshot of placements) {
+      const sprite = this.agentSprites.get(snapshot.agentId);
+      if (!sprite) continue;
+      sprite.setTile(snapshot.tileX, snapshot.tileY);
+      sprite.setData("startTileX", snapshot.tileX);
+      sprite.setData("startTileY", snapshot.tileY);
+      sprite.setAction(snapshot.action);
+    }
+
+    if (!wasPaused) {
+      this.movers.forEach((mover) => mover.start());
+    }
+  }
+
   /** 获取指定 Agent 的精灵（供外部调用 showBubble 等） */
   getAgentSprite(agentId: string): AgentSprite | undefined {
     return this.agentSprites.get(agentId);
+  }
+
+  /** Store a one-shot local instruction for the Agent's next conversation. */
+  receiveWhisper(agentId: string, message: string): boolean {
+    const sprite = this.agentSprites.get(agentId);
+    const normalized = normalizeWhisper(message);
+    if (!sprite || !normalized) return false;
+    const agents: WhisperAgent[] = [...this.agentSprites.values()].map((agent) => ({
+      agentId: agent.agentId,
+      name: agent.getData("name") ?? "",
+      tileX: agent.tileX,
+      tileY: agent.tileY,
+    }));
+    if (isWhisperMoveNearIntent(normalized)) {
+      const moveTarget = resolveWhisperMoveTarget(normalized, agentId, agents);
+      if (!moveTarget) {
+        this.showAgentBubble(agentId, "没有找到要靠近的 Agent");
+        return false;
+      }
+      return this.moveAgentNear(agentId, moveTarget.agentId);
+    }
+    const target = resolveWhisperTarget(normalized, agentId, agents);
+    if (!target) {
+      this.showAgentBubble(agentId, "没有找到可互动的目标");
+      return false;
+    }
+
+    this.pendingWhispers.set(agentId, {
+      message: normalized,
+      targetAgentId: target.agentId,
+      targetName: target.name,
+    });
+
+    const distance =
+      Math.abs(sprite.tileX - target.tileX) +
+      Math.abs(sprite.tileY - target.tileY);
+    if (distance <= MapScene.PROXIMITY) {
+      this.showAgentBubble(agentId, `已收到，准备与 ${target.name} 对话`);
+      return true;
+    }
+
+    const approach = chooseWhisperApproachTile(
+      agents.find((agent) => agent.agentId === agentId)!,
+      target,
+      (tileX, tileY) =>
+        this.isWalkable(tileX, tileY) &&
+        !this.isOccupiedByOther(agentId, tileX, tileY),
+    );
+    if (approach) {
+      this.movers.get(agentId)?.pushCommand(approach.tileX, approach.tileY);
+      this.showAgentBubble(agentId, `已收到，正前往 ${target.name}`);
+    } else {
+      this.showAgentBubble(agentId, `已收到，等待接近 ${target.name}`);
+    }
+    return true;
+  }
+
+  /** Route Brain SSE dialogue through the same serialized playback queue. */
+  receiveSseDialogue(data: SseDialogueEvent): boolean {
+    const speaker = this.agentSprites.get(data.fromId);
+    if (!speaker || !data.message.trim()) return false;
+    this.queueDialogue(
+      data.fromId,
+      data.message,
+      speaker.emotion ?? "neutral",
+    );
+    return true;
+  }
+
+  /** Move one Agent to a free cardinal tile beside another Agent. */
+  moveAgentNear(agentId: string, targetAgentId: string): boolean {
+    const sprite = this.agentSprites.get(agentId);
+    const target = this.agentSprites.get(targetAgentId);
+    if (!sprite || !target || agentId === targetAgentId) {
+      if (sprite) this.showAgentBubble(agentId, "没有找到要靠近的 Agent");
+      return false;
+    }
+
+    const targetName = target.getData("name") || targetAgentId;
+    const distance =
+      Math.abs(sprite.tileX - target.tileX) +
+      Math.abs(sprite.tileY - target.tileY);
+    if (distance === 1) {
+      this.showAgentBubble(agentId, `已经在 ${targetName} 旁边`);
+      return true;
+    }
+
+    const mover = this.movers.get(agentId);
+    if (!mover) {
+      this.showAgentBubble(agentId, "当前无法移动");
+      return false;
+    }
+    const approach = chooseWhisperApproachTile(
+      {
+        agentId,
+        name: sprite.getData("name") || agentId,
+        tileX: sprite.tileX,
+        tileY: sprite.tileY,
+      },
+      {
+        agentId: targetAgentId,
+        name: targetName,
+        tileX: target.tileX,
+        tileY: target.tileY,
+      },
+      (tileX, tileY) =>
+        this.isInsideMap(tileX, tileY) &&
+        this.isWalkable(tileX, tileY) &&
+        !this.isOccupiedByOther(agentId, tileX, tileY),
+    );
+    if (!approach) {
+      this.showAgentBubble(agentId, `${targetName} 旁边暂时没有空位`);
+      return false;
+    }
+
+    mover.pushCommand(approach.tileX, approach.tileY);
+    this.showAgentBubble(
+      agentId,
+      this.paused
+        ? `已收到，继续后前往 ${targetName} 身边`
+        : `已收到，正前往 ${targetName} 身边`,
+    );
+    return true;
+  }
+
+  /** Drop stale ordinary subtitles before a priority Brain instruction. */
+  preparePriorityBrainDialogue(): void {
+    playbackQueue.clear();
   }
 
   /** 显示 Agent 头顶气泡（直接模式，用于非对话通知） */
@@ -560,6 +771,7 @@ export class MapScene extends Phaser.Scene {
     import("../sprites/ActionBubble").then(({ ActionBubble }) => {
       const bubble = new ActionBubble(this, message);
       bubble.show(sprite);
+      this.activeBubbles.add(bubble);
     });
   }
 
@@ -586,11 +798,16 @@ export class MapScene extends Phaser.Scene {
       emotion,
       onBubble: (pageText: string, _agentId: string, isFirst: boolean) => {
         if (isFirst || !activeBubble) {
-          // 第一页：新建气泡
+          // 第一页：新建气泡（先销毁旧气泡）
+          if (activeBubble) {
+            this.activeBubbles.delete(activeBubble);
+            try { activeBubble.hide(); } catch { /* */ }
+          }
           import("../sprites/ActionBubble").then(({ ActionBubble }) => {
             const bubble = new ActionBubble(this, pageText);
             bubble.show(sprite);
             activeBubble = bubble;
+            this.activeBubbles.add(bubble);
           });
         } else {
           // 后续页：更新现有气泡文字
@@ -600,7 +817,11 @@ export class MapScene extends Phaser.Scene {
         }
       },
       onDone: () => {
-        activeBubble = null;
+        if (activeBubble) {
+          this.activeBubbles.delete(activeBubble);
+          try { activeBubble.hide(); } catch { /* */ }
+          activeBubble = null;
+        }
         onDone?.();
       },
     });
@@ -614,14 +835,16 @@ export class MapScene extends Phaser.Scene {
     // 清除旧精灵
     this.agentSprites.forEach((s) => s.destroy());
     this.agentSprites.clear();
+    this.movementReservations.clear();
+    const placements = this.normalizeAgentPlacements(data);
 
     // 66-S: 注册 Agent 到情绪引擎 + 启动情绪循环
-    data.forEach((d) => emotionEngine.registerAgent(d.agentId, d.name));
+    placements.forEach((d) => emotionEngine.registerAgent(d.agentId, d.name));
     emotionEngine.setScene(this.mapData?.id ?? "library");
     emotionEngine.stop(); // 重置定时器
     emotionEngine.start();
 
-    data.forEach((d) => {
+    placements.forEach((d) => {
       const sprite = new AgentSprite(this, d);
       sprite.setData("name", d.name);
       this.agentSprites.set(d.agentId, sprite);
@@ -634,6 +857,7 @@ export class MapScene extends Phaser.Scene {
         (tx, ty) => this.isWalkable(tx, ty),
         (tx, ty) => this.isOccupiedByOther(d.agentId, tx, ty),
         { w: this.mapData?.width ?? 16, h: this.mapData?.height ?? 12 },
+        this.createMovementReservation(),
       );
       // 66-S: 注入物品位置 + Agent 位置查询
       mover.setItems((this.mapData?.items ?? []).map((it) => ({ type: it.type, tileX: it.tileX, tileY: it.tileY })));
@@ -701,6 +925,11 @@ export class MapScene extends Phaser.Scene {
       sprite.y = Math.max(TILE_S / 2, Math.min(dragY, MH - TILE_S / 2));
     });
 
+    // 拖拽开始 → 停止自主移动
+    sprite.on("dragstart", () => {
+      this.movers.get(d.agentId)?.stop();
+    });
+
     // 拖拽结束 → 吸附到最近可通行 tile + 重叠检查 + 通知 React
     sprite.on("dragend", () => {
       const W = this.mapData?.width ?? 16;
@@ -716,6 +945,10 @@ export class MapScene extends Phaser.Scene {
       }
       sprite.setTile(tx, ty);
       this.game.events.emit("agent-moved", d.agentId, tx, ty);
+      // 恢复自主移动
+      if (!this.paused) {
+        this.movers.get(d.agentId)?.start();
+      }
     });
   }
 
@@ -751,7 +984,18 @@ export class MapScene extends Phaser.Scene {
     }
 
     // 收集可对话的 pair（按距离排序，最近的优先）
-    const eligible: Array<{ a: AgentSprite; b: AgentSprite; dist: number; pairKey: string }> = [];
+    const eligible: Array<{
+      a: AgentSprite;
+      b: AgentSprite;
+      dist: number;
+      pairKey: string;
+      whisper: {
+        speaker: AgentSprite;
+        listener: AgentSprite;
+        message: string;
+        targetName: string;
+      } | null;
+    }> = [];
 
     for (let i = 0; i < agents.length; i++) {
       for (let j = i + 1; j < agents.length; j++) {
@@ -767,23 +1011,79 @@ export class MapScene extends Phaser.Scene {
         const last = this.dialogueCooldowns.get(pairKey) ?? 0;
         if (now - last < MapScene.COOLDOWN) continue;
 
-        eligible.push({ a, b, dist, pairKey });
+        eligible.push({
+          a,
+          b,
+          dist,
+          pairKey,
+          whisper: this.findWhisperForPair(a, b),
+        });
       }
     }
 
-    eligible.sort((x, y) => x.dist - y.dist);
+    eligible.sort((x, y) => {
+      const whisperPriority = Number(Boolean(y.whisper)) - Number(Boolean(x.whisper));
+      return whisperPriority || x.dist - y.dist;
+    });
 
     // 每次扫描最多启动 1 个新会话（已有多轮在进行中）
-    for (const { a, b, dist, pairKey } of eligible) {
+    for (const { a, b, dist, pairKey, whisper } of eligible) {
       if (this.activeSessions.size >= 1) break; // 同时最多 1 组对话
       this.dialogueCooldowns.set(pairKey, now);
-      this.startConversationSession(a, b, dist);
+      if (whisper) {
+        this.pendingWhispers.delete(whisper.speaker.agentId);
+        this.showAgentBubble(
+          whisper.speaker.agentId,
+          `正在执行耳语：与 ${whisper.targetName} 对话`,
+        );
+        this.startConversationSession(
+          whisper.speaker,
+          whisper.listener,
+          dist,
+          [buildWhisperContext(whisper.message)],
+          {
+            speakerId: whisper.speaker.agentId,
+            targetName: whisper.targetName,
+          },
+        );
+      } else {
+        this.startConversationSession(a, b, dist);
+      }
       break;
     }
   }
 
+  private findWhisperForPair(
+    a: AgentSprite,
+    b: AgentSprite,
+  ): {
+    speaker: AgentSprite;
+    listener: AgentSprite;
+    message: string;
+    targetName: string;
+  } | null {
+    for (const [speaker, listener] of [[a, b], [b, a]] as const) {
+      const whisper = this.pendingWhispers.get(speaker.agentId);
+      if (whisper?.targetAgentId === listener.agentId) {
+        return {
+          speaker,
+          listener,
+          message: whisper.message,
+          targetName: whisper.targetName,
+        };
+      }
+    }
+    return null;
+  }
+
   /** 启动多轮对话会话 */
-  private startConversationSession(a: AgentSprite, b: AgentSprite, dist: number): void {
+  private startConversationSession(
+    a: AgentSprite,
+    b: AgentSprite,
+    dist: number,
+    initialContext: string[] = [],
+    whisper?: ConversationSession["whisper"],
+  ): void {
     const nameA: string = a.getData("name") ?? "?";
     const nameB: string = b.getData("name") ?? "?";
     const rounds = 2 + Math.floor(Math.random() * 3); // 2-4 轮
@@ -807,8 +1107,9 @@ export class MapScene extends Phaser.Scene {
       a, b, nameA, nameB,
       totalRounds: rounds,
       currentRound: 0,
-      context: [],
+      context: [...initialContext],
       timer: null,
+      whisper,
     };
 
     this.activeSessions.set(pairKey, session);
@@ -838,11 +1139,12 @@ export class MapScene extends Phaser.Scene {
       const msg = result.message;
       context.push(msg);
 
-      speaker.setAction("talk");
-      listener.setAction("talk");
-
-      // 情绪触发
-      emotionEngine.onDialogue(speaker.agentId, msg);
+      if (!this.paused) {
+        speaker.setAction("talk");
+        listener.setAction("talk");
+        // 情绪触发
+        emotionEngine.onDialogue(speaker.agentId, msg);
+      }
 
       session.currentRound++;
 
@@ -890,6 +1192,12 @@ export class MapScene extends Phaser.Scene {
     this.busyAgents.delete(b.agentId);
     session.timer?.destroy();
     this.activeSessions.delete(sessionKey);
+    if (session.whisper) {
+      this.showAgentBubble(
+        session.whisper.speakerId,
+        `耳语执行完成：已与 ${session.whisper.targetName} 对话`,
+      );
+    }
   }
 
   /** 对话结束后让双方各退一步（tween 动画，不瞬移） */
@@ -902,17 +1210,19 @@ export class MapScene extends Phaser.Scene {
     // a 远离 b
     const txA = Math.max(0, Math.min(W - 1, a.tileX + (dx >= 0 ? 1 : -1)));
     const tyA = Math.max(0, Math.min(H - 1, a.tileY + (dy >= 0 ? 1 : -1)));
-    if (this.isWalkable(txA, tyA) && !this.isOccupiedByOther(a.agentId, txA, tyA)) {
+    const destinationA = this.reserveMovementDestination(a.agentId, txA, tyA);
+    if (destinationA) {
       a.action = "walk";
       this.tweens.add({
         targets: a,
-        x: txA * TILE_S + TILE_S / 2,
-        y: tyA * TILE_S + TILE_S / 2,
+        x: destinationA.tileX * TILE_S + TILE_S / 2,
+        y: destinationA.tileY * TILE_S + TILE_S / 2,
         duration: 250,
         ease: "Sine.easeInOut",
         onComplete: () => {
+          this.releaseMovementDestination(a.agentId);
           if (!this.scene) return;
-          a.tileX = txA; a.tileY = tyA;
+          a.tileX = destinationA.tileX; a.tileY = destinationA.tileY;
           a.setAction("idle");
         },
       });
@@ -921,17 +1231,19 @@ export class MapScene extends Phaser.Scene {
     // b 远离 a
     const txB = Math.max(0, Math.min(W - 1, b.tileX + (dx >= 0 ? -1 : 1)));
     const tyB = Math.max(0, Math.min(H - 1, b.tileY + (dy >= 0 ? -1 : 1)));
-    if (this.isWalkable(txB, tyB) && !this.isOccupiedByOther(b.agentId, txB, tyB)) {
+    const destinationB = this.reserveMovementDestination(b.agentId, txB, tyB);
+    if (destinationB) {
       b.action = "walk";
       this.tweens.add({
         targets: b,
-        x: txB * TILE_S + TILE_S / 2,
-        y: tyB * TILE_S + TILE_S / 2,
+        x: destinationB.tileX * TILE_S + TILE_S / 2,
+        y: destinationB.tileY * TILE_S + TILE_S / 2,
         duration: 250,
         ease: "Sine.easeInOut",
         onComplete: () => {
+          this.releaseMovementDestination(b.agentId);
           if (!this.scene) return;
-          b.tileX = txB; b.tileY = tyB;
+          b.tileX = destinationB.tileX; b.tileY = destinationB.tileY;
           b.setAction("idle");
         },
       });
@@ -964,6 +1276,8 @@ export class MapScene extends Phaser.Scene {
       align: "center",
     }).setOrigin(0.5).setDepth(50).setAlpha(0);
 
+    this.eventNotifications.push(text);
+
     this.tweens.add({
       targets: text,
       alpha: 1,
@@ -978,7 +1292,10 @@ export class MapScene extends Phaser.Scene {
           duration: 800,
           delay: 2500,
           ease: "Sine.easeIn",
-          onComplete: () => text.destroy(),
+          onComplete: () => {
+            this.eventNotifications = this.eventNotifications.filter((t) => t !== text);
+            text.destroy();
+          },
         });
       },
     });
@@ -994,15 +1311,144 @@ export class MapScene extends Phaser.Scene {
       if (id === selfId) continue;
       if (sprite.tileX === tx && sprite.tileY === ty) return true;
     }
+    const tileKey = this.tileKey(tx, ty);
+    for (const [id, reservedTile] of this.movementReservations) {
+      if (id !== selfId && reservedTile === tileKey) return true;
+    }
     return false;
   }
 
-  /** 某 tile 是否可放置 Agent（非墙壁/非门） */
+  /**
+   * Give every movement source the same destination-reservation protocol.
+   * Reserving before the tween starts prevents same-frame moves into one tile.
+   */
+  private createMovementReservation(): MovementReservation {
+    return {
+      reserve: (agentId, tileX, tileY) =>
+        this.reserveMovementDestination(agentId, tileX, tileY),
+      release: (agentId) => this.releaseMovementDestination(agentId),
+    };
+  }
+
+  private reserveMovementDestination(
+    agentId: string,
+    tileX: number,
+    tileY: number,
+  ): { tileX: number; tileY: number } | null {
+    this.releaseMovementDestination(agentId);
+    const destination = this.findNearestAvailableTile(agentId, tileX, tileY, 2);
+    if (!destination) return null;
+    this.movementReservations.set(
+      agentId,
+      this.tileKey(destination.tileX, destination.tileY),
+    );
+    return destination;
+  }
+
+  private releaseMovementDestination(agentId: string): void {
+    this.movementReservations.delete(agentId);
+  }
+
+  private tileKey(tileX: number, tileY: number): string {
+    return `${tileX},${tileY}`;
+  }
+
+  /** Find the nearest walkable tile that is neither occupied nor reserved. */
+  private findNearestAvailableTile(
+    agentId: string,
+    tileX: number,
+    tileY: number,
+    maxRadius: number,
+  ): { tileX: number; tileY: number } | null {
+    const width = this.mapData?.width ?? 16;
+    const height = this.mapData?.height ?? 12;
+    for (let radius = 0; radius <= maxRadius; radius++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        const dy = radius - Math.abs(dx);
+        const candidates = dy === 0 ? [[dx, 0]] : [[dx, -dy], [dx, dy]];
+        for (const [offsetX, offsetY] of candidates) {
+          const candidateX = tileX + offsetX;
+          const candidateY = tileY + offsetY;
+          if (
+            candidateX < 0 || candidateX >= width ||
+            candidateY < 0 || candidateY >= height
+          ) continue;
+          if (!this.isWalkable(candidateX, candidateY)) continue;
+          if (this.isOccupiedByOther(agentId, candidateX, candidateY)) continue;
+          return { tileX: candidateX, tileY: candidateY };
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * De-duplicate initial/checkpoint coordinates without moving valid Agents.
+   */
+  private normalizeAgentPlacements(data: AgentSpriteData[]): AgentSpriteData[] {
+    const width = this.mapData?.width ?? 16;
+    const height = this.mapData?.height ?? 12;
+    const usedTiles = new Set<string>();
+
+    return data.map((agent) => {
+      let placement: { tileX: number; tileY: number } | null = null;
+      const maxRadius = Math.max(width, height);
+      for (let radius = 0; radius <= maxRadius && !placement; radius++) {
+        for (let dx = -radius; dx <= radius && !placement; dx++) {
+          const dy = radius - Math.abs(dx);
+          const candidates = dy === 0 ? [[dx, 0]] : [[dx, -dy], [dx, dy]];
+          for (const [offsetX, offsetY] of candidates) {
+            const candidateX = agent.tileX + offsetX;
+            const candidateY = agent.tileY + offsetY;
+            const key = this.tileKey(candidateX, candidateY);
+            if (
+              candidateX < 0 || candidateX >= width ||
+              candidateY < 0 || candidateY >= height ||
+              usedTiles.has(key) ||
+              !this.isWalkable(candidateX, candidateY)
+            ) continue;
+            placement = { tileX: candidateX, tileY: candidateY };
+            break;
+          }
+        }
+      }
+
+      if (!placement) return agent;
+      usedTiles.add(this.tileKey(placement.tileX, placement.tileY));
+      return { ...agent, ...placement };
+    });
+  }
+
+  private isInsideMap(tileX: number, tileY: number): boolean {
+    const width = this.mapData?.width ?? 16;
+    const height = this.mapData?.height ?? 12;
+    return tileX >= 0 && tileX < width && tileY >= 0 && tileY < height;
+  }
+
+  /** 某 tile 是否可放置 Agent（非墙壁/非物品） */
   private isWalkable(tx: number, ty: number): boolean {
-    if (!this.wallMap.length) return true; // 无墙壁数据（室外场景）
-    const row = this.wallMap[ty];
-    if (!row) return true;
-    return row[tx] < 0; // -1 = 无墙壁
+    if (!this.wallMap.length) {
+      // 室外场景 — 仅检查边界
+      const W = this.mapData?.width ?? 16;
+      const H = this.mapData?.height ?? 12;
+      if (tx < 0 || tx >= W || ty < 0 || ty >= H) return false;
+    } else {
+      const row = this.wallMap[ty];
+      if (!row) return true;
+      if (row[tx] >= 0) return false; // 墙壁
+    }
+    // 检查是否有物品占据该 tile
+    return !this.isItemTile(tx, ty);
+  }
+
+  /** 某 tile 是否有物品（物品阻挡 Agent 移动） */
+  private isItemTile(tx: number, ty: number): boolean {
+    const items = this.mapData?.items;
+    if (!items) return false;
+    for (const item of items) {
+      if (item.tileX === tx && item.tileY === ty) return true;
+    }
+    return false;
   }
 
   /** 从不可通行的 (tx,ty) 向外搜索最近的可通行 tile */
@@ -1034,12 +1480,37 @@ export class MapScene extends Phaser.Scene {
    * 清理
    * ================================================================ */
 
+  private clearConversationState(): void {
+    this.dialogueCooldowns.clear();
+    for (const session of this.activeSessions.values()) {
+      session.timer?.destroy();
+    }
+    this.activeSessions.clear();
+    this.busyAgents.clear();
+    this.pendingWhispers.clear();
+    this.movementReservations.clear();
+    playbackQueue.clear();
+  }
+
+  private resetDialogueRuntime(): void {
+    this.dialogueTimer?.destroy();
+    this.dialogueTimer = null;
+    this.clearConversationState();
+  }
+
   private destroyScene(): void {
+    this.resetDialogueRuntime();
     // 杀光所有 tween + timer（防止回调在 scene 销毁后触发）
     this.tweens.killAll();
     this.time.removeAllEvents();
 
     this.weatherTweens = [];
+    this.weatherParticles.forEach((p) => { try { p.destroy(); } catch { /* */ } });
+    this.weatherParticles = [];
+    this.eventNotifications.forEach((t) => { try { t.destroy(); } catch { /* */ } });
+    this.eventNotifications = [];
+    this.activeBubbles.forEach((b) => { try { b.hide(); } catch { /* */ } });
+    this.activeBubbles.clear();
     this.movers.forEach((m) => m.destroy());
     this.movers.clear();
     this.agentSprites.forEach((s) => { try { s.destroy(); } catch { /* already gone */ } });

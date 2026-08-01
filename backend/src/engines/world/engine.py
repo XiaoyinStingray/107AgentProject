@@ -10,6 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from engines.agent_factory.factory import LifeAgent
 from engines.agent_factory.memory import MemoryRetriever
 from engines.world.goals import WorldGoalMixin
+from engines.world.instructions import (
+    AgentInstruction,
+    build_private_instruction_context,
+)
 from engines.world.messages import END_TICK_TOKEN, WorldMessageMixin
 from engines.world.state import WorldStateMixin, _resolve_agent_id
 from engines.world.streaming import WorldStreamingMixin
@@ -47,6 +51,12 @@ class WorldEngine(
         # === State 4: Tool 副作用基础设施 ===
         self._pending_messages: list[dict] = []
         self._thought_log: dict[str, list[dict]] = {}
+        self._pending_agent_instructions: dict[
+            str, list[AgentInstruction]
+        ] = {}
+        self._pending_instruction_routes: list[list[str]] = []
+        self._pending_speaker_ids: list[str] = []
+        self._instruction_preempt_requested = False
         self._goal_check_pending = False
 
         # === State 4 D2: 行为指纹采集器 ===
@@ -210,11 +220,22 @@ class WorldEngine(
         State 4: 使用 continuous 模式——Agent 的 system prompt 只在初始化时设置，
         世界状态以 UserMessage 追加到消息历史末尾。Agent 拥有持续的意识流。
         """
+        self._activate_pending_instruction_routes()
         shared_context = self._build_world_context()
         for agent in self.agents.values():
             context = self._build_agent_context(agent, shared_context)
             memories = await self._retriever.retrieve(agent.id, context)
             agent.inject_context(context, memories, mode="continuous")
+
+    def _activate_pending_instruction_routes(self) -> None:
+        """Activate speaker routes at the same tick boundary as instructions."""
+        has_pending_instruction = bool(self._pending_agent_instructions)
+        while self._pending_instruction_routes:
+            self._pending_speaker_ids.extend(
+                self._pending_instruction_routes.pop(0)
+            )
+        if has_pending_instruction:
+            self._instruction_preempt_requested = False
 
     def _build_agent_context(self, agent: LifeAgent, shared_context: str) -> str:
         """Add an explicit identity lock and participant aliases to World context."""
@@ -222,6 +243,13 @@ class WorldEngine(
         aliases = "\n".join(
             f"- {member.autogen_agent.name} = {member.persona.name or member.id}"
             for member in self.agents.values()
+        )
+        pending_instructions = self._pending_agent_instructions.pop(
+            agent.id,
+            [],
+        )
+        instruction_context = build_private_instruction_context(
+            pending_instructions
         )
         return (
             f"{shared_context}\n"
@@ -234,6 +262,7 @@ class WorldEngine(
             "每次回复前先在内部核对自己的身份、上一位发言者和当前被点名对象，"
             "不要输出核对过程。\n"
             "不得代替其他参与者回答、行动或描述其内心。\n"
+            f"{instruction_context}"
             "仅当没有未回答的问题、没有点名他人继续回应且本时间段互动已自然收束时，"
             f"才在回复末尾追加 {END_TICK_TOKEN}。"
         )

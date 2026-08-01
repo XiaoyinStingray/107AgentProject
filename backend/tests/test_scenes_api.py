@@ -1,6 +1,8 @@
 """Phase 16 scenes API + Checkpoint 集成测试 — T5 Layer 2。"""
 
 from collections.abc import AsyncGenerator
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI
@@ -14,6 +16,8 @@ from sqlalchemy.ext.asyncio import (
 from api.scenes import router as scenes_router
 from db import Base, get_db
 from engines.scene.engine import scene_engine
+import models.scenario_orm  # noqa: F401 — 注册 custom_scenarios 测试表
+import models.world_orm  # noqa: F401 — 注册 worlds 测试表
 from models.checkpoint_orm import CheckpointRow
 
 
@@ -38,7 +42,7 @@ def _reset_scene_engine():
 
 
 @pytest.fixture
-async def client(tmp_path) -> AsyncGenerator[AsyncClient, None]:
+async def client(tmp_path, monkeypatch) -> AsyncGenerator[AsyncClient, None]:
     database_path = (tmp_path / "t5-scenes.db").as_posix()
     engine = create_async_engine(f"sqlite+aiosqlite:///{database_path}")
     sessions = async_sessionmaker(
@@ -53,6 +57,11 @@ async def client(tmp_path) -> AsyncGenerator[AsyncClient, None]:
     async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
         async with sessions() as session:
             yield session
+
+    # start_scene 在函数内直接导入 db.async_session，不经过 Depends(get_db)。
+    # 将它指向同一个临时数据库，避免测试接触开发数据库。
+    import db as db_module
+    monkeypatch.setattr(db_module, "async_session", sessions)
 
     app = FastAPI()
     app.include_router(scenes_router)
@@ -161,3 +170,66 @@ async def test_checkpoint_limit_is_enforced_per_scene(
     assert (
         await client.post("/api/scenes/dorm/checkpoints", json=payload)
     ).status_code == 200
+
+
+@pytest.mark.anyio
+async def test_scene_start_persists_serialized_scenario_and_registers_engine(
+    client: AsyncClient,
+    monkeypatch,
+):
+    """Scene World 使用 WorldRow.scenario_json，而不是不存在的 scenario_id。"""
+    import api.sse as sse_api
+    import api.worlds as worlds_api
+    import engines.scene.engine as scene_module
+
+    rebuild_agents = AsyncMock(return_value=[object()])
+    fake_engine = SimpleNamespace(
+        world=SimpleNamespace(status="idle"),
+        scene_bridge=None,
+    )
+    build_engine = AsyncMock(return_value=fake_engine)
+    monkeypatch.setattr(
+        worlds_api,
+        "_rebuild_agents_from_db",
+        rebuild_agents,
+    )
+    monkeypatch.setattr(worlds_api, "_build_world_engine", build_engine)
+
+    bridge_syncs: list[str] = []
+
+    class FakeSceneBridge:
+        def __init__(self, scene_id, engine):
+            self.scene_id = scene_id
+            self.engine = engine
+
+        def sync_to_scene(self):
+            bridge_syncs.append(self.scene_id)
+
+    monkeypatch.setattr(scene_module, "SceneBridge", FakeSceneBridge)
+
+    registered: dict[str, object] = {}
+    monkeypatch.setattr(
+        sse_api,
+        "register_world",
+        lambda world_id, engine: registered.update({world_id: engine}),
+    )
+
+    response = await client.post(
+        "/api/scenes/library/start",
+        json={"agent_ids": ["agent-a"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["scene_id"] == "library"
+    assert payload["status"] == "running"
+    rebuild_agents.assert_awaited_once_with(["agent-a"])
+
+    world = build_engine.await_args.args[0]
+    assert world.world_type == "scene"
+    assert world.scenario.name == "scene_library"
+    assert world.scenario.environment_params == {"scene_id": "library"}
+    assert world.agent_ids == ["agent-a"]
+    assert fake_engine.world.status == "running"
+    assert bridge_syncs == ["library"]
+    assert registered == {payload["world_id"]: fake_engine}

@@ -5,13 +5,14 @@
  * 状态持久化到 localStorage。
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { playbackQueue } from "../../game/audio/DialoguePlaybackQueue";
 
 export default function AudioControls() {
   const [enabled, setEnabled] = useState(false);
   const [muted, setMuted] = useState(false);
   const [volume, setVolume] = useState(0.25);
+  const audioContextRef = useRef<AudioContext | null>(null);
 
   // 初始化：从 localStorage 恢复
   useEffect(() => {
@@ -23,22 +24,45 @@ export default function AudioControls() {
     playbackQueue.setVolume(savedVol);
   }, []);
 
+  // 仅在音频启用期间监听页面可见性，并在卸载时解除监听。
+  useEffect(() => {
+    if (!enabled) return;
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        playbackQueue.pause();
+      } else {
+        playbackQueue.resume();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [enabled]);
+
+  // 页面离开后关闭本组件创建的 AudioContext，避免残留音频资源。
+  useEffect(() => () => {
+    playbackQueue.setEnabled(false, null);
+    const ctx = audioContextRef.current;
+    audioContextRef.current = null;
+    if (
+      ctx &&
+      ctx.state !== "closed" &&
+      typeof ctx.close === "function"
+    ) {
+      void ctx.close();
+    }
+  }, []);
+
   /** 用户点击「启用声音」→ 创建 AudioContext */
   const handleEnable = useCallback(() => {
     if (enabled) return;
     try {
       const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      audioContextRef.current = ctx;
       playbackQueue.setEnabled(true, ctx);
       setEnabled(true);
       try { localStorage.setItem("m11_audio_enabled", "true"); } catch {}
-      // 如果页面失去焦点时暂停，监听 resume
-      document.addEventListener("visibilitychange", () => {
-        if (document.hidden) {
-          playbackQueue.pause();
-        } else {
-          playbackQueue.resume();
-        }
-      }, { once: false });
     } catch {
       // Web Audio 不可用
     }

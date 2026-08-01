@@ -42,6 +42,153 @@ class TestGroupIdentityProtocol:
         assert "不得代替其他参与者" in task
         assert "[SKIP_TURN]" not in task
 
+    def test_targeted_instruction_is_private_and_consumed_once(self, db_session):
+        from engines.world.engine import WorldEngine
+
+        chen = make_agent("a1", "陈默")
+        su = make_agent("a2", "苏瑶")
+        world_engine = WorldEngine(make_world(), [chen, su], db_session)
+        world_engine.inject_event(
+            "请主动去和陈默讨论复习计划",
+            event_type="agent_action",
+            target_agent_ids=[su.id],
+        )
+        shared = world_engine._build_world_context()
+
+        chen_context = world_engine._build_agent_context(chen, shared)
+        first_su_context = world_engine._build_agent_context(su, shared)
+        second_su_context = world_engine._build_agent_context(su, shared)
+
+        assert "用户只对你下达的一次性指令" not in chen_context
+        assert "请主动去和陈默讨论复习计划" in first_su_context
+        assert "互动对象已锁定为：陈默" in first_su_context
+        assert "第一次可见发言必须直接称呼“陈默”" in first_su_context
+        assert "发言后等待陈默回应" in first_su_context
+        assert "请由你本人在本轮行动或发言中立即执行" in first_su_context
+        assert "用户只对你下达的一次性指令" not in second_su_context
+
+    def test_social_instruction_forces_actor_then_named_target(self, db_session):
+        from engines.world.engine import WorldEngine
+
+        chen = make_agent("a1", "陈默")
+        su = make_agent("a2", "苏瑶")
+        song = make_agent("a3", "宋明远")
+        world_engine = WorldEngine(make_world(), [chen, su, song], db_session)
+
+        class ActiveGroupToken:
+            def __init__(self):
+                self.cancelled = False
+
+            def cancel(self):
+                self.cancelled = True
+
+        active_token = ActiveGroupToken()
+        world_engine._group_cancel_token = active_token
+        world_engine.inject_event(
+            "请主动去和陈默讨论复习计划",
+            event_type="agent_action",
+            target_agent_ids=[su.id],
+        )
+
+        assert active_token.cancelled is True
+        assert world_engine._instruction_preempt_requested is True
+        # Injection may arrive while the previous group tick is still running.
+        # Its route must not be consumed before the matching prompt is injected.
+        assert world_engine._pending_speaker_ids == []
+        assert world_engine._pending_instruction_routes == [[su.id, chen.id]]
+        world_engine._activate_pending_instruction_routes()
+        assert world_engine._instruction_preempt_requested is False
+
+        first = world_engine._select_addressed_speaker([
+            FakeMessage("继续当前场景。", "user"),
+        ])
+        second = world_engine._select_addressed_speaker([
+            FakeMessage("陈默，我们讨论一下复习计划。", su.autogen_agent.name),
+        ])
+
+        assert first == su.autogen_agent.name
+        assert second == chen.autogen_agent.name
+        assert world_engine._pending_speaker_ids == []
+        assert world_engine._pending_instruction_routes == []
+
+    @pytest.mark.asyncio
+    async def test_instruction_prompt_and_route_activate_at_same_tick_boundary(
+        self,
+        db_session,
+    ):
+        from engines.world.engine import WorldEngine
+
+        chen = make_agent("a1", "陈默")
+        su = make_agent("a2", "苏瑶")
+        world_engine = WorldEngine(make_world(), [chen, su], db_session)
+        world_engine.inject_event(
+            "去和陈默交流新画展",
+            event_type="agent_action",
+            target_agent_ids=[su.id],
+        )
+        captured_contexts: dict[str, str] = {}
+        original_builder = world_engine._build_agent_context
+
+        def capture_context(agent, shared_context):
+            context = original_builder(agent, shared_context)
+            captured_contexts[agent.id] = context
+            return context
+
+        world_engine._build_agent_context = capture_context
+        await world_engine._inject_world_context()
+
+        assert "去和陈默交流新画展" in captured_contexts[su.id]
+        assert "用户只对你下达的一次性指令" in captured_contexts[su.id]
+        assert "用户只对你下达的一次性指令" not in captured_contexts[chen.id]
+        assert world_engine._pending_instruction_routes == []
+        assert world_engine._pending_speaker_ids == [su.id, chen.id]
+        assert world_engine._pending_agent_instructions == {}
+
+    def test_non_social_instruction_only_forces_actor(self, db_session):
+        from engines.world.engine import WorldEngine
+
+        chen = make_agent("a1", "陈默")
+        su = make_agent("a2", "苏瑶")
+        world_engine = WorldEngine(make_world(), [chen, su], db_session)
+        world_engine.inject_event(
+            "请去弹钢琴",
+            event_type="agent_action",
+            target_agent_ids=[su.id],
+        )
+        assert world_engine._pending_speaker_ids == []
+        world_engine._activate_pending_instruction_routes()
+        shared = world_engine._build_world_context()
+        su_context = world_engine._build_agent_context(su, shared)
+
+        first = world_engine._select_addressed_speaker([
+            FakeMessage("继续当前场景。", "user"),
+        ])
+        follow_up = world_engine._select_addressed_speaker([
+            FakeMessage("我去看看钢琴。", su.autogen_agent.name),
+        ])
+
+        assert first == su.autogen_agent.name
+        assert follow_up is None
+        assert "没有唯一指定另一位在场人物" in su_context
+        assert "不得擅自把它改成找某个 Agent 聊天" in su_context
+        assert "若当前场景无法完成，要明确说明原因" in su_context
+
+    def test_single_agent_instruction_preempts_without_speaker_route(self, db_session):
+        from engines.world.engine import WorldEngine
+
+        su = make_agent("a1", "苏瑶")
+        world_engine = WorldEngine(make_world(), [su], db_session)
+        world_engine.inject_event(
+            "请去弹钢琴",
+            event_type="agent_action",
+            target_agent_ids=[su.id],
+        )
+
+        assert world_engine._instruction_preempt_requested is True
+        assert world_engine._pending_instruction_routes == []
+        world_engine._activate_pending_instruction_routes()
+        assert world_engine._instruction_preempt_requested is False
+
     def test_single_named_addressee_is_selected_directly(self, db_session):
         from engines.world.engine import WorldEngine
 

@@ -101,6 +101,41 @@ describe("DialoguePlaybackQueue", () => {
     expect(second.onBubble).not.toHaveBeenCalled();
   });
 
+  it("keeps a late message queued when pause happens while idle", () => {
+    const queue = new DialoguePlaybackQueue();
+    const late = message("agent-a", "暂停后返回的消息");
+
+    queue.pause();
+    queue.enqueue(late);
+
+    expect(voiceMock.MockVoiceEngine.instances).toHaveLength(0);
+    expect(late.onBubble).not.toHaveBeenCalled();
+
+    queue.resume();
+
+    expect(voiceMock.MockVoiceEngine.instances).toHaveLength(1);
+    expect(late.onBubble).toHaveBeenCalledWith(
+      "暂停后返回的消息",
+      "agent-a",
+      true,
+    );
+  });
+
+  it("returns to idle when an empty paused queue resumes", () => {
+    const queue = new DialoguePlaybackQueue();
+    const later = message("agent-a", "恢复后加入");
+
+    queue.pause();
+    queue.resume();
+    queue.enqueue(later);
+
+    expect(later.onBubble).toHaveBeenCalledWith(
+      "恢复后加入",
+      "agent-a",
+      true,
+    );
+  });
+
   it("clears pending messages and aborts the active engine", async () => {
     const queue = new DialoguePlaybackQueue();
     const first = message("agent-a", "第一条");
