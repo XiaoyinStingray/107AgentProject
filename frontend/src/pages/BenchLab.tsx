@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import { useBenchRuns, useBenchRun, useCreateBenchRun, useDeleteBenchRun, useBenchTemplates, useCreateBenchTemplate, useDeleteBenchTemplate, useCancelBenchRun, useBenchByScenario, useBenchFingerprint, useDegradation } from "../api/bench";
 import { useAgents } from "../api/agents";
 import Card from "../components/shared/Card";
@@ -8,6 +9,18 @@ import HexagonChart from "../components/bench/HexagonChart";
 import CompareView from "../components/bench/CompareView";
 
 export default function BenchLab() {
+  const { hash } = useLocation();
+
+  // 侧边栏锚点跳转：监听 hash 变化滚动到对应区域
+  useEffect(() => {
+    if (!hash) return;
+    const id = hash.replace("#", "");
+    const el = document.getElementById(id);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [hash]);
+
   const { data: runs = [] } = useBenchRuns();
   const createRun = useCreateBenchRun();
   const deleteRun = useDeleteBenchRun();
@@ -245,7 +258,7 @@ export default function BenchLab() {
         </div>
       ) : (
         <div>
-          <h3 className="text-sm font-mono text-text-secondary mb-3">历史评测</h3>
+          <h3 id="runs" className="text-sm font-mono text-text-secondary mb-3">历史评测</h3>
           {runs.length === 0 ? (
             <EmptyState title="暂无评测记录" description="配置 LLM 并开始第一次评测" />
           ) : (
@@ -305,7 +318,7 @@ function LeaderboardTable({ runs }: { runs: { id: string; name: string; llm_mode
 
   return (
     <Card className="p-4 mt-6">
-      <h3 className="text-sm font-mono text-text-primary mb-3">🏆 排行榜</h3>
+      <h3 id="leaderboard" className="text-sm font-mono text-text-primary mb-3">🏆 排行榜</h3>
       <div className="flex gap-2 mb-3">
         <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="bg-bg-secondary border border-border rounded px-2 py-1 text-xs font-mono text-text-primary">
           <option value="综合">综合分</option>

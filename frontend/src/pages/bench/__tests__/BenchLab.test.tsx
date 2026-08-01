@@ -11,6 +11,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 import BenchLab from "../../BenchLab";
 import type { BenchRunDetail, BenchRunSummary } from "../../../types/bench";
 
@@ -112,7 +113,7 @@ describe("BenchLab", () => {
   it("disables deletion while a bench run is active", () => {
     hookState.runs = [RUNNING_RUN];
 
-    render(<BenchLab />);
+    render(<MemoryRouter><BenchLab /></MemoryRouter>);
 
     const deleteButton = screen.getByRole("button", { name: "删除" });
     expect(deleteButton).toBeDisabled();
@@ -124,7 +125,7 @@ describe("BenchLab", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       json: async () => ({ ok: false, error: "认证失败" }),
     }));
-    render(<BenchLab />);
+    render(<MemoryRouter><BenchLab /></MemoryRouter>);
     fireEvent.change(screen.getByPlaceholderText("API Key"), {
       target: { value: "sk-invalid" },
     });
@@ -139,7 +140,7 @@ describe("BenchLab", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       json: async () => ({ ok: true, elapsed: 0.2, response: "OK" }),
     }));
-    render(<BenchLab />);
+    render(<MemoryRouter><BenchLab /></MemoryRouter>);
     const apiKeyInput = screen.getByPlaceholderText("API Key");
     fireEvent.change(apiKeyInput, { target: { value: "sk-secret" } });
 
@@ -166,7 +167,7 @@ describe("BenchLab", () => {
       [runB.id]: detailFor(runB),
     };
     vi.spyOn(Math, "random").mockReturnValue(0.5);
-    render(<BenchLab />);
+    render(<MemoryRouter><BenchLab /></MemoryRouter>);
 
     fireEvent.click(screen.getByRole("button", { name: /盲测对比/ }));
 
@@ -185,7 +186,7 @@ describe("BenchLab", () => {
       completedRun("run-3", "第三次", 50, "2026-07-29T00:00:00Z"),
     ];
 
-    render(<BenchLab />);
+    render(<MemoryRouter><BenchLab /></MemoryRouter>);
 
     expect(screen.getByText("⚠️ 综合连续下降，可能退化")).toBeInTheDocument();
     expect(screen.getByText("🏆 排行榜")).toBeInTheDocument();
@@ -208,7 +209,7 @@ describe("BenchLab", () => {
         "model-b",
       ),
     ];
-    render(<BenchLab />);
+    render(<MemoryRouter><BenchLab /></MemoryRouter>);
     const leaderboard = screen.getByText("🏆 排行榜").parentElement;
     expect(leaderboard).not.toBeNull();
 
