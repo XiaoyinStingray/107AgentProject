@@ -18,15 +18,17 @@
 | 99c | A | 涂鸦指令 | M11, 99b | 画线→Agent 跟随 / 画圈→聚集 / 画叉→避开 + 形状识别容错 | 3h |
 | 99d | A | 对话选项分支 | 98, 99 | 3 选项回复 → 预设情绪分支 → Agent 即时反应 + 历史影响后续搭话频率 | 2h |
 | **🔧 B线：M10/M12 增强** | | | | | |
-| 100 | B | Worker 工具增强 | State 5 | pip install(venv隔离) + Git clone(只读) + prompt引用规范 | 4h |
+| 100 | B | Worker 工具增强 | State 5 | DeepSeek原生搜索 + 沙盒全栈化(venv/pip/git/sqlite/npm) + 结构化配方 | 6h |
 | 100a | B | M12 产出展示墙 | State 5 | 卡片瀑布流 + Markdown/JSON/Python 预览 + 飞入动画 + 分享 | 4h |
 | 100b | B | M10 实时 Agent 对战 | State 5 | 双 Worker 同任务 → 左右分屏 SSE → 比分实时拉扯 → 六维终判 | 5h |
+| 100c | B | M12 决策分叉 | 100, 100a | 决策点快照恢复 → 注入替代决策 → 分叉路线 → 双路线并排对比 | 4h |
 | **📦 C线：零成本推广** | | | | | |
 | 101 | C | Demo 模式 + Git Releases | State 5 | 预录回放（零 API Key 体验）+ pip install 打包 + 首次引导 | 5h |
 | 102 | C | 内容传播方案 | 98, 100 | 3 条病毒视频脚本 + GitHub Pages 落地页 + 一键安装 | 4h |
 | T14 | — | 三线集成测试 | 98–102 | A线全交互+B线沙盒+对战+展示墙+C线Demo+打包 | 5h |
 
-> **共 14 个 Step。** A 线 6 步 (18h)，B 线 3 步 (13h)，C 线 2 步 (9h)，测试 1 步 (5h)。三线独立可并行。
+> **共 15 个 Step。** A 线 6 步 (18h)，B 线 4 步 (17h)，C 线 2 步 (9h)，测试 1 步 (5h)。三线独立可并行。
+> **总计估时：** ~49 小时。ABC 并行实际约 20-22 小时。
 > **总计估时：** ~45 小时。ABC 并行实际约 18-20 小时。
 > **总计估时：** ~27 小时。ABC 并行实际约 12-14 小时。
 > **总计估时：** ~36 小时（一人+AI）。ABC 并行实际约 15-18 小时。
@@ -474,68 +476,326 @@ Agent 搭话: "你有没有想过...如果考试突然取消会怎样？"
 
 ### Step 100 — Worker 工具增强
 
-> **目标：** 3 个东西——① pip install（Agent 能装 pandas/numpy 做数据分析）② Git clone（Agent 能读开源项目代码）③ 引用 prompt（Agent 产出自动带来源脚注）。
+> **目标：** 修两个根本问题 + 加一个深度能力。① 搜索——扔掉 DuckDuckGo，用 DeepSeek 原生搜索（国内可用、零额外 API）。② 沙盒——从"裸 Python"变成真正的开发环境。③ 配方——预设结构化的研究方法论。
 
-#### ① pip install
+#### ① 搜索：DeepSeek 原生搜索 → DuckDuckGo
 
-```python
-# sandbox.py
-
-async def ensure_package(self, packages: str) -> str:
-    """在隔离的 venv 中安装包。首次创建 venv，后续复用。"""
-    venv_dir = self.workspace / ".venv"
-    if not (venv_dir / "pyvenv.cfg").exists():
-        await run_subprocess([sys.executable, "-m", "venv", str(venv_dir)])
-    
-    pip = str(venv_dir / "bin" / "pip")  # or Scripts/pip.exe on Windows
-    result = await run_subprocess([pip, "install", "--quiet"] + packages.split())
-    
-    if result.returncode == 0:
-        return f"✅ 已安装: {packages}"
-    return f"❌ 安装失败: {result.stderr[:200]}"
-```
-
-复杂度：一行 subprocess 调用 + venv 隔离。已经验证过 `run_python` 的沙盒模式，是一样的技术栈。
-
-#### ② Git clone（只读）
+**为什么扔掉 DuckDuckGo：** 国内网络环境不稳定。DeepSeek 的 Chat Completions API 本身支持 `web_search` tool——AutoGen `OpenAIChatCompletionClient` 传 `tools` 参数即可。搜索在 DeepSeek 服务器端完成，结果直接注入 LLM 上下文。零额外 HTTP 请求、零额外 API Key。
 
 ```python
-async def git_clone(self, url: str) -> str:
-    """克隆仓库到 workspace。只允许 https:// 协议——禁止 SSH/git@。"""
-    if not url.startswith("https://"):
-        return "❌ 仅支持 https:// 协议的仓库"
+# llm/client.py — 修改 create_model_client
+
+# DeepSeek 原生搜索通过 OpenAI 兼容的 tools 接口暴露
+# 在 OpenAIChatCompletionClient 创建时注册
+
+model_info = {
+    "vision": False,
+    "function_calling": True,
+    "json_output": True,
+    "family": "deepseek",
+}
+
+client = OpenAIChatCompletionClient(
+    model=settings.llm_model,
+    api_key=settings.llm_api_key,
+    base_url=settings.llm_base_url,
+    model_info=model_info,
+    # DeepSeek 原生搜索通过 tools 参数启用
+    # tools=[{"type": "web_search", "web_search": {"search_term": "..."}}]
+    # AutoGen 的 AssistantAgent 在 tools 中包含 web_search 时自动处理
+)
+```
+
+**Worker 中的用法：** Agent 的决策 prompt 里仍然说"你可以用 web_search"。但 `web_search` tool handler 不再是 httpx 调 DuckDuckGo——而是让 Agent **把搜索意图交给 DeepSeek**。
+
+实际实现有两条路：
+
+**方案 A（推荐）：利用 AutoGen tool use。** 把 `web_search` 注册为 AutoGen tool。AutoGen 调用 DeepSeek API 时，DeepSeek 检测到 web_search tool call → 自动搜索 → 返回结果。AutoGen 把搜索结果当作 tool result 给 Agent。
+
+```python
+# tools.py — web_search 不再调 DuckDuckGo
+async def web_search(query: str) -> str:
+    """搜索互联网。搜索结果由 DeepSeek API 原生提供。"""
+    # 这个函数实际上不会被"执行"——DeepSeek API 在服务端拦截 web_search tool call，
+    # 自己完成搜索并把结果作为 tool response 返回。
+    # 这里的实现是 fallback：如果 LLM 不是 DeepSeek 或不支持原生搜索，调 DuckDuckGo。
+    if _supports_native_search():
+        return ""  # DeepSeek 会替换这个返回值
+    return await _duckduckgo_fallback(query)
+```
+
+**方案 B：如果原生搜索不稳定，回退到 Bing/SerpAPI。** 不用 DuckDuckGo，用 Bing Web Search API（有免费层，每月 1000 次）或 SerpAPI。这两个在国内都能正常访问。
+
+**关键：** Worker 的 tool 接口不变。Agent 看到的仍然是"你可以调用 web_search"。换的是底层的搜索实现。
+
+#### ② 沙盒：玻璃盒工作区
+
+**设计哲学：不追求开发环境。追求"每一步都看得见"。**
+
+不做的事：不要求用户装 Git、不装 venv 那层壳、不跑 npm、不启 Web 服务。这些要么依赖环境、要么编码坑多、要么"功能强但没人用得上"。
+
+做的事：**让 Agent 的每一次文件操作都有迹可循——自动快照 + 实时预览 + 决策溯源。零环境依赖，纯 Python + 前端。**
+
+```
+用户看到的不是黑盒终端，而是三个面板:
+
+┌─ 决策溯源 ───────────┐  ┌─ 文件预览 ───────────┐
+│                      │  │                      │
+│ ● 搜索"AI框架2025"   │  │ # AI Agent 框架      │
+│   → 找到5条结果       │  │ 对比报告             │
+│                      │  │                      │
+│ ● 搜索"开源对比"      │  │ ## 开源 vs 商业      │
+│   → 交叉验证数据      │  │ 在调研的5个框架中...  │
+│                      │  │                      │
+│ ● 写报告初稿          │  │ [实时更新中...]      │
+│   → report.md        │  │                      │
+│                      │  │                      │
+│ ● 自检: 数据矛盾       │  └──────────────────────┘
+│   → 修正市场规模      │
+│                      │  ┌─ 文件时间轴 ─────────┐
+│                      │  │ report.md            │
+│                      │  │ 14:30 初稿 (2.1KB)  │
+│                      │  │ 14:32 修正 (2.3KB)  │
+│                      │  │ 14:35 终版 (3.0KB)  │
+│                      │  │ [查看] [对比] [恢复] │
+└──────────────────────┘  └──────────────────────┘
+```
+
+**为什么是新意：** 其他 agent 产品让你看"结果"。我们让你看"过程"——Agent 为什么做这个决定、文件怎么一步步演变的。像 Figma 的版本历史 + IDE 的 diff + 终端的滚动，三合一。但实现比 git 简单得多。
+
+**为什么稳：**
+
+| 组件 | 依赖 | 复杂度 |
+|------|------|--------|
+| 快照 | 纯 Python `shutil.copy`——文件写入前复制到 `.snapshots/` | 20 行 |
+| 预览 | 前端 SSE `file_updated` 事件携带文件内容 diff → 局部更新预览面板 | 已有 SSE + 新前端组件 |
+| 溯源 | Agent 决策 prompt 里已有的 `reason` 字段 → 前端渲染为可折叠时间线 | 零后端改动 |
+| 编码 | `write_file`/`read_file` 强制 UTF-8 + `surrogateescape` 兜底——不信任系统编码 | 5 行改动 |
+
+##### 快照系统（Snapshots——替代 Git）
+
+不需要用户装 Git。不需要 Agent 理解 git 命令。`write_file` 自动保存上一版本。
+
+```python
+# workspace.py — write_file 增加快照逻辑
+
+async def write_file(self, path: str, content: str) -> str:
+    full_path = (self.root / path).resolve()
+    assert full_path.is_relative_to(self.root)
     
-    repo_name = url.rstrip("/").split("/")[-1].replace(".git", "")
-    target = self.workspace / repo_name
-    await run_subprocess(["git", "clone", "--depth=1", url, str(target)])
-    files = list(target.glob("*"))
-    return f"✅ 已克隆 {repo_name}（{len(files)} 个顶层文件）"
+    # 自动快照: 文件已存在 → 复制到 .snapshots/ 再覆盖
+    if full_path.exists():
+        snapshot_dir = self.root / ".snapshots"
+        snapshot_dir.mkdir(exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        snapshot_name = f"{path}.{timestamp}"
+        shutil.copy2(full_path, snapshot_dir / snapshot_name)
+    
+    # 强制 UTF-8 + surrogateescape 兜底（解决系统编码不一致问题）
+    full_path.parent.mkdir(parents=True, exist_ok=True)
+    full_path.write_text(content, encoding="utf-8", errors="surrogateescape")
+    
+    snapshot_count = len(list((self.root / ".snapshots").glob(f"{path}.*")))
+    return f"✅ 已写入 {path} ({len(content)} 字符, 版本 #{snapshot_count + 1})"
 ```
 
-复杂度：一行 git clone，`--depth=1` 避免大仓库。
+**Agent 怎么用快照：** 不需要新 tool。`read_file` 加一个可选参数：
 
-#### ③ 引用 prompt（零新代码）
+```python
+# read_file 扩展: 读历史版本
+async def read_file(self, path: str, snapshot: str | None = None) -> str:
+    if snapshot:
+        full_path = self.root / ".snapshots" / snapshot
+    else:
+        full_path = (self.root / path).resolve()
+    assert full_path.is_relative_to(self.root)
+    return full_path.read_text(encoding="utf-8", errors="surrogateescape")
+```
 
-不是新工具。是在 Agent 的决策 prompt 里多一段：
+Agent 在决策 prompt 中被告知："你可以用 `read_file('report.md')` 读当前版本，用 `read_file('report.md', snapshot='report.md.20260801_143000')` 读历史版本。用 `list_files('.snapshots')` 列出版本历史。"
+
+##### 实时预览（Live Preview）
+
+Agent 每调一次 `write_file` → SSE `file_updated` 事件携带文件内容。前端预览面板自动刷新——不是等 Agent 全写完。用户看着报告长出来。
+
+```typescript
+// WorkerTerminal.tsx — 新增预览面板
+
+const [previewFile, setPreviewFile] = useState<string | null>(null)
+const [previewContent, setPreviewContent] = useState("")
+
+// SSE 事件处理
+case "worker.file_updated":
+  const lastFile = event.data.files[event.data.files.length - 1]
+  setPreviewFile(lastFile.path)
+  setPreviewContent(lastFile.preview)  // 后端返回前 5000 字符
+  break
+```
+
+**后端：`file_updated` SSE 事件新增 `preview` 字段——文件内容的前 5000 字符。** 5000 字符够渲染 Markdown 的 80% 内容，同时不撑爆 SSE 带宽。
+
+##### 决策溯源（Decision Trace）
+
+Agent 每一步决策的 `reason` 字段已经在 Worker engine 中记录了。前端加一个可折叠的时间线面板——显示"Agent 做了什么 + 为什么这样做"。
 
 ```
-## 产出物的格式要求
-当你写 Markdown 报告时，必须遵守：
-- 每一条数据/声明后面附上来源 URL（Markdown 脚注格式）
-- 在报告末尾列出所有来源的完整信息
-- 在来源列表后附加一个"可信度自评"段（高/中/低 + 一句话理由）
+▸ 14:30:12  web_search "开源 AI Agent 框架 2025"
+   原因: 需要先了解市场上主流的开源框架
+   结果: 找到 5 条 (1.2s)
+
+▸ 14:31:05  web_search "AutoGen vs CrewAI benchmark"
+   原因: 上一步的结果显示 AutoGen 和 CrewAI 被提及最多，需要对比数据
+   结果: 找到 3 条 (0.9s)
+
+▸ 14:32:20  write_file report.md (v1)
+   原因: 数据足够——可以写初稿了
+   结果: ✅ report.md (2.1KB, 版本 #1)
+
+▸ 14:33:45  read_file report.md
+   原因: 我在第三步的数据可能和二步搜索的来源可靠度不一致
+   结果: 发现问题——市场规模差异太大，已修正 report.md (版本 #2)
 ```
 
-Agent 会自动遵守——LLM 不需要新代码就能理解这个要求。和 State 5 的 Worker 决策 prompt 改动方式一样。
+**实现：** Worker 已有的 `decision_log` JSONL 文件 → 前端 SSE `worker.step_decision` 事件已经携带 `reason` 字段 → 新增 `DecisionTrace` 组件按时间线渲染。零后端新代码。
+
+##### 编码兜底
+
+```python
+# 所有文件 I/O 统一走这两个函数——不在引擎代码里裸调 open()
+
+def safe_write(path: Path, content: str) -> None:
+    """写入文件，强制 UTF-8。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8", errors="surrogateescape")
+
+def safe_read(path: Path) -> str:
+    """读取文件。先用 UTF-8，失败回退 chardet 检测。"""
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        raw = path.read_bytes()
+        import chardet
+        encoding = chardet.detect(raw)["encoding"] or "utf-8"
+        return raw.decode(encoding, errors="replace")
+```
+
+`chardet` 是纯 Python 库，无系统依赖。只在 UTF-8 失败时触发——正常情况零开销。
+
+##### 新增的 tool（与搜索、配方合并统计）
+
+| Tool | 新增/保留 | 说明 |
+|------|----------|------|
+| `web_search` | 重写 | DuckDuckGo → DeepSeek 原生 / Bing fallback |
+| `run_python` | 保留 | 加 UTF-8 强制输出编码 |
+| `write_file` | 增强 | 自动快照 + 强制 UTF-8 + SSE 携带 preview |
+| `read_file` | 增强 | 支持 snapshot 参数读历史版本 + chardet 兜底 |
+| `list_files` | 增强 | `.snapshots` 目录可见——Agent 可以列出版本历史 |
+| `install_package` | 新增 | 极简 pip——`sys.executable -m pip install --target {workspace}/.packages {pkg}`。不建 venv，不加壳。 |
+
+总计 6 个 tool。不新增 npm/git/SQLite/Web 服务——那些需要环境依赖。
+
+#### ③ 配方：结构化研究方法论
+
+不是"预填任务描述"的模板。是 Agent **被强制执行**一套严谨流程。每个配方是一个决策图——Agent 不能跳过步骤。
+
+```python
+# recipes/research.py
+
+RECIPE_DEEP_RESEARCH = {
+    "name": "深度调研",
+    "description": "多角度搜索 → 交叉验证 → 魔鬼代言人 → 报告 + 自评",
+    "phases": [
+        {
+            "id": "multi_angle_search",
+            "title": "多角度搜索",
+            "instruction": "用至少 3 个不同角度的关键词搜索同一主题。保存所有原始结果。",
+            "required_tools": ["web_search", "write_file"],
+            "output": "sources/raw/*.md",
+        },
+        {
+            "id": "cross_verify",
+            "title": "交叉验证",
+            "instruction": (
+                "从上一步搜索结果中提取 5 条关键声明。"
+                "对每条声明做二次验证搜索，标注可信度（高/中/低/矛盾）。"
+            ),
+            "required_tools": ["web_search", "write_file"],
+            "output": "sources/verification.json",
+        },
+        {
+            "id": "devils_advocate",
+            "title": "魔鬼代言人",
+            "instruction": (
+                "你的报告初稿已完成。现在你必须反问自己 3 个问题:\n"
+                "1. 这个结论最强的反方论点是什么？\n"
+                "2. 什么数据能推翻我现在的判断？\n"
+                "3. 我的报告最弱的部分在哪里？\n\n"
+                "把答案写入 report_critique.md。"
+            ),
+            "required_tools": ["write_file"],
+            "output": "report_critique.md",
+        },
+        {
+            "id": "final_report",
+            "title": "最终报告",
+            "instruction": (
+                "基于验证过的声明写最终报告。每条引用附来源 URL + 可信度标记。"
+                "末尾附: 方法论、局限性、下一步建议。"
+            ),
+            "required_tools": ["write_file"],
+            "output": "report.md",
+        },
+    ],
+}
+```
+
+**Agent 执行配方时：**
+- AgentWorker 在决策 prompt 中注入当前 phase 的 `instruction`
+- 当前 phase 的 required_tools 突出显示（非 required 的 tool 仍可用）
+- 当前 phase 完成后满足 `output` 条件 → 自动推进到下一个 phase
+- 配方的每个 phase 都有 step 记录
+
+**预设配方：**
+
+| 配方 | 核心流程 | 产出 |
+|------|---------|------|
+| 深度调研 | 多角度搜索→交叉验证→魔鬼代言人→报告 | report.md + verification.json + critique.md |
+| 代码审查 | clone→读代码→运行测试→写 review | review.md + test_results.txt |
+| 数据分析 | 读数据→pip install→清洗→分析→图表 | analysis.py + charts/ + report.md |
+| 竞品对比 | 多关键词搜索→提取特征→对比表→结论 | comparison.md + features.json |
+| 漏洞检查 | clone→安全扫描→依赖审计→报告 | security_report.md |
 
 #### 涉及文件
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `backend/src/engines/worker/sandbox.py` | 修改 | 新增 `ensure_package`、`git_clone` 方法 |
-| `backend/src/engines/worker/tools.py` | 修改 | 新增 `install_package`、`git_clone` 两个 tool handler |
-| `backend/src/engines/worker/prompts.py` | 修改 | 决策 prompt 增加包管理/Git 能力描述 + 引用格式要求 |
-| `backend/tests/test_worker_sandbox.py` | 修改 | 新增 venv 创建 + pip install + git clone 测试 |
+| `backend/src/llm/client.py` | 修改 | DeepSeek 原生搜索——tools 参数注册 |
+| `backend/src/engines/worker/tools.py` | **重写** | web_search→DeepSeek/Bing + install_package(pip极简) + write_file/read_file/list_files 增强 |
+| `backend/src/engines/worker/sandbox.py` | **重写** | 快照系统(shutil.copy) + 编码兜底(safe_read/safe_write) |
+| `backend/src/engines/worker/engine.py` | 修改 | 配方执行模式——phase 推进 + required_tools + file_updated 加 preview |
+| `backend/src/engines/worker/recipes.py` | **新建** | 5 个配方定义 + phase 验证逻辑 |
+| `backend/src/engines/worker/prompts.py` | 修改 | 决策 prompt 加快照/历史版本读取说明 + 配方 phase instruction |
+| `frontend/src/components/worker/FileTimeline.tsx` | **新建** | 文件时间轴——版本列表 + 查看/对比/恢复 |
+| `frontend/src/components/worker/LivePreview.tsx` | **新建** | 实时预览面板——MD 渲染 + 代码高亮 + 跟随 Agent 写入更新 |
+| `frontend/src/components/worker/DecisionTrace.tsx` | **新建** | 决策溯源面板——可折叠时间线 + 原因/结果展示 |
+| `frontend/src/pages/WorkerBench.tsx` | 修改 | 集成三个新面板 + 配方选择卡片 |
+| `frontend/src/data/recipes.ts` | **新建** | 配方前端数据——描述/预览/推荐人格 |
+
+#### 验收标准
+
+- [ ] `web_search` 通过 DeepSeek 原生搜索返回结果——国内网络正常可用
+- [ ] 非 DeepSeek LLM → 自动回退 Bing Search API（非 DuckDuckGo）
+- [ ] `write_file("test.md", "中文字符")` → 文件 UTF-8 编码 → `read_file` 正确读取
+- [ ] 连续 3 次 `write_file("test.md", ...)` → `.snapshots/` 目录有 2 个历史版本
+- [ ] `read_file("test.md", snapshot="test.md.20260801_143000")` → 读到正确历史版本
+- [ ] 文件被非 UTF-8 编码污染 → `read_file` 自动 chardet 检测并正确解码
+- [ ] SSE `file_updated` 事件携带 `preview` 字段 → 前端预览面板实时刷新
+- [ ] 决策溯源面板显示每步的 reason + 结果 + 时间戳
+- [ ] `install_package("pandas")` → pip 安装到 workspace/.packages → Agent import 可用
+- [ ] 配方"深度调研"：Agent 强制走完 4 个 phase → 产出 4 个文件
+- [ ] 任一 phase 的 output 条件未满足 → Agent 不能进入下一 phase
+- [ ] 前端配方卡片点击 → 任务描述自动填入输入框
+- [ ] 快照系统不依赖 git——纯 Python 实现
 
 #### 验收标准
 
@@ -762,6 +1022,136 @@ POST /api/bench/duel
 
 ---
 
+### Step 100c — M12 决策分叉
+
+> **目标：** Agent 完成任务后，用户可以在任意决策点"如果选了别的会怎样"——系统从该点的快照恢复，注入替代决策，Agent 走另一条路线。两条路线并排对比。
+> **为什么我们能做而别人做不了：** State 5 的 decision log 记录了每步的决策+原因，State 6 的快照系统每步存了文件状态。分叉 = 从 checkpoint 重播 + 在分叉点注入不同决策。其他 agent 产品没有决策日志和快照——它们只有最终输出文件。
+
+#### 视觉设计
+
+```
+┌─ 决策分叉 · AI Agent 框架调研报告 ───────────────────────────────────────┐
+│                                                                          │
+│  ┌─ 原始路线 (小林, 14:30) ────────────────────┐                        │
+│  │                                              │                        │
+│  │ ● web_search "AI Agent 框架 2025"            │                        │
+│  │   原因: 先了解市场上主流的框架                  │                        │
+│  │   结果: 找到 5 条 (1.2s)                      │                        │
+│  │   │                                          │                        │
+│  │   ├─ [Fork A] 商业角度                        │                        │
+│  │   │  ● web_search "商业 Agent 平台定价"        │                        │
+│  │   │  ● write_file 商业分析报告.md              │                        │
+│  │   │  结果: 侧重 Dify/Coze/Dust 对比            │                        │
+│  │   │                                          │                        │
+│  │   └─ [Fork B] 开源角度                        │                        │
+│  │      ● web_search "开源 Agent 框架对比"        │                        │
+│  │      ● write_file 开源框架报告.md              │                        │
+│  │      结果: 侧重 AutoGen/CrewAI/LangGraph       │                        │
+│  │                                              │                        │
+│  └──────────────────────────────────────────────┘                        │
+│                                                                          │
+│  ┌─ Fork A 产出 ──────────────────┐  ┌─ Fork B 产出 ──────────────────┐  │
+│  │ 📄 商业分析报告.md (4.2KB)     │  │ 📄 开源框架报告.md (5.1KB)     │  │
+│  │ 覆盖: Dify, Coze, Dust, ...   │  │ 覆盖: AutoGen, CrewAI, ...    │  │
+│  │ 结论: 商业平台更适合企业用户    │  │ 结论: 开源框架更灵活            │  │
+│  │                               │  │                               │  │
+│  │ [查看] [下载]                  │  │ [查看] [下载]                  │  │
+│  └───────────────────────────────┘  └───────────────────────────────┘  │
+│                                                                          │
+│  [并排对比 Fork A vs B]  [对比 Fork A vs 原始]  [🔀 新建 Fork]           │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 技术设计
+
+```
+分叉流程:
+
+1. 用户在看 Worker 的决策溯源面板时，每个决策点右侧有 [🔀 Fork]
+2. 点击 Fork → 弹出小窗:
+   "从这个决策点分叉——Agent 当时选择了 {实际决策}。你想让它尝试什么替代方案？"
+   输入框: [搜索开源框架对比___________]  ← 用户填入替代决策
+   或者: [让 Agent 自己重新决定 ▼]  ← Agent 基于同样的状态但被要求"选一个不同的角度"
+
+3. 系统:
+   a. 从该决策点的快照恢复 workspace 文件状态
+   b. 复制 decision log 中该点之前的所有步骤作为上下文
+   c. 在该决策点注入用户的替代决策 + "请基于这个新方向继续"
+   d. 启动新 Worker → 从分叉点继续执行
+   e. 新 Worker 的每一步同样有 SSE 流 → 前端在 Fork 分支上实时显示
+
+4. 两个（或多个）Fork 都完成后:
+   → 决策树展示所有路线
+   → 每条路线的产出文件可下载
+   → 不同路线之间可并排 diff
+```
+
+**快照恢复的关键：**
+
+```python
+# engine.py — fork 入口
+
+async def fork_from_checkpoint(
+    original_run_id: str,
+    fork_point_step: int,
+    alternative_decision: str,
+) -> str:
+    """从指定决策点创建分叉 Worker。"""
+    # 1. 加载原始 run 的 decision log
+    original_log = load_decision_log(original_run_id)
+    
+    # 2. 取分叉点之前的步骤
+    prefix_steps = original_log[:fork_point_step]
+    
+    # 3. 从快照恢复 workspace（复用 Step 100 的快照系统）
+    snapshot = find_snapshot_at_step(original_run_id, fork_point_step)
+    workspace = restore_workspace_from_snapshot(snapshot)
+    
+    # 4. 创建新 Worker——注入分叉前的上下文 + 替代决策
+    worker = AgentWorker(agent, workspace)
+    worker.inject_history(prefix_steps)  # Agent 知道之前发生了什么
+    worker.inject_decision(alternative_decision)  # 在分叉点替换决策
+    
+    # 5. 正常执行
+    return await worker.execute(task)
+```
+
+#### 与快照系统的依赖关系
+
+```
+快照系统 (Step 100) → 决策分叉 (Step 100c)
+─────────────────     ─────────────────────
+write_file 自动存档    分叉时从快照恢复文件状态
+.snapshots/ 目录       选择对应 step 的快照 → 复制到新 workspace
+read_file 支持历史版本  Fork 的 Agent 可以读"分叉前"的快照版本
+```
+
+没有快照系统 → 无法做分叉——因为 restore 需要每个决策点的文件状态。
+
+#### 涉及文件
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `backend/src/engines/worker/engine.py` | 修改 | 新增 `fork_from_checkpoint()`——快照恢复 + 历史注入 + 替代决策注入 |
+| `backend/src/engines/worker/fork.py` | **新建** | Fork 管理——workspace 复制 + 快照定位 + 双路线对比 |
+| `backend/src/api/workers.py` | 修改 | `POST /api/workers/{id}/fork`——创建分叉 |
+| `frontend/src/components/worker/DecisionTree.tsx` | **新建** | 决策树可视化——原始路线 + Fork 分支 + 节点点击展开 |
+| `frontend/src/components/worker/ForkDiff.tsx` | **新建** | 双路线对比面板——文件内容 diff + 决策路径对比 |
+| `frontend/src/pages/WorkerBench.tsx` | 修改 | 成果展示页集成 DecisionTree + ForkDiff |
+
+#### 验收标准
+
+- [ ] 已完成 Worker 的决策溯源面板 → 每个决策点旁有 [🔀 Fork] 按钮
+- [ ] 点击 Fork → 输入替代决策 → 从该决策点的快照恢复 workspace
+- [ ] Fork Worker 启动 → 新的 SSE 流 → 前端决策树显示分叉分支
+- [ ] Fork 完成 → 产出文件独立保存在 fork workspace 中
+- [ ] 两条路线（原始 + Fork）可并排对比文件和决策路径
+- [ ] 支持多次 Fork——同一原始路线可有多个分支
+- [ ] 快照不存在时（如分叉点处没有文件变更）→ Fork 仍可用，只是从 workspace 当前状态开始
+- [ ] 原始 Worker 不被 Fork 影响——数据隔离
+
+---
+
 ## C 线：零成本推广方案
 
 > **目标：** 不需要云服务器、不需要备案、不需要为用户付 API 费。
@@ -977,9 +1367,10 @@ python backend/src/main.py
 | M11 绘文字投掷 | 落地检测/Agent 反应/防连击/友尽冷却/暂停互斥 |
 | M11 涂鸦指令 | 形状识别（线/圈/叉）/容错（短/乱/叠）/Agent 跟随/5s 淡出 |
 | M11 对话选项 | 3 分支模板/情绪后果/选择历史→频率影响/持久化 |
-| M12 工具增强 | pip install 隔离/venv 复用/Git clone 只读/引用 prompt 规范 |
+| M12 工具增强 | DeepSeek搜索/回退Bing + 沙盒全能力(venv/pip/git/sqlite/npm) + 配方phase强制 |
 | M12 展示墙 | 卡片数据完整性/飞入动画/文件预览/MD/JSON/代码渲染 |
 | M10 对战 | 双 Worker 并行/实时评分/比分拉扯/结果六维对比/历史保存 |
+| M12 决策分叉 | 快照恢复/历史注入/替代决策执行/双路线对比/多分支隔离 |
 | Demo 模式 | 回放忠实度/事件时间戳/文件产出/无 API 调用 |
 | 打包 | GitHub Releases 完整性/一键脚本 Win+Mac/首次引导流程 |
 
