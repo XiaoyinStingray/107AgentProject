@@ -245,11 +245,15 @@ async def create_checkpoint(scene_id: str, body: CheckpointCreate, db: AsyncSess
 @router.delete("/{scene_id}/checkpoints/{checkpoint_id}")
 async def delete_checkpoint(scene_id: str, checkpoint_id: str, db: AsyncSession = Depends(get_db)):
     """删除存档"""
+<<<<<<< Updated upstream
     ok = await CheckpointRow.delete_by_scene_and_id(
         db,
         scene_id,
         checkpoint_id,
     )
+=======
+    ok = await CheckpointRow.delete_by_id(db, checkpoint_id, scene_id)
+>>>>>>> Stashed changes
     if not ok:
         raise HTTPException(404, "存档不存在")
     return {"ok": True}

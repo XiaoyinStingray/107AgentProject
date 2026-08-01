@@ -68,6 +68,22 @@ export default function AudioControls() {
     }
   }, [enabled]);
 
+  // visibilitychange 监听器：页面隐藏时暂停，显示时恢复
+  useEffect(() => {
+    if (!enabled) return;
+    const handleVisibility = () => {
+      if (document.hidden) {
+        playbackQueue.pause();
+      } else {
+        playbackQueue.resume();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [enabled]);
+
   const handleMuteToggle = useCallback(() => {
     const next = !muted;
     setMuted(next);

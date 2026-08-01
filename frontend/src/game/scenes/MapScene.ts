@@ -109,8 +109,13 @@ export class MapScene extends Phaser.Scene {
   // 66-S: 多轮对话会话
   private activeSessions: Map<string, ConversationSession> = new Map();
   private busyAgents: Set<string> = new Set();
+<<<<<<< Updated upstream
   private pendingWhispers: Map<string, PendingWhisper> = new Map();
   private movementReservations: Map<string, string> = new Map();
+=======
+  // BUG 修复：追踪所有活跃气泡（暂停/场景切换/连续消息用）
+  private activeBubbles: Set<import("../sprites/ActionBubble").ActionBubble> = new Set();
+>>>>>>> Stashed changes
 
   constructor() {
     super({ key: "MapScene" });
@@ -154,12 +159,53 @@ export class MapScene extends Phaser.Scene {
   create(): void {
     this.input.dragDistanceThreshold = 8;
     this.ready = true;
+<<<<<<< Updated upstream
     this.game.events.on("agent-whisper", this.onAgentWhisper, this);
     this.game.events.on(
       "agent-whisper-feedback",
       this.onAgentWhisperFeedback,
       this,
     );
+=======
+    this.game.events.on("agent-whisper", (agentId: string, message?: string) => {
+      const sprite = this.agentSprites.get(agentId);
+      if (!sprite) return;
+      // BUG-037 修复：耳语文本进入 Agent 行为链路
+      if (message) {
+        // 显示为思维气泡，让其他 Agent 可见
+        import("../sprites/ActionBubble").then(({ ActionBubble }) => {
+          const bubble = new ActionBubble(this, `💭 ${message}`);
+          bubble.show(sprite);
+          this.trackBubble(bubble);
+        });
+        // 注入情绪引擎（耳语影响目标 Agent 情绪）
+        emotionEngine.onDialogue(agentId, message);
+        // 触发耳语接收反馈：闪烁 + 短暂停顿后继续行为
+        this.tweens.add({
+          targets: sprite, alpha: 0.5, duration: 120, yoyo: true, repeat: 2,
+        });
+        // BUG-045 修复：耳语触发 Agent 语言回应（延迟 1-2s 后通过队列播放）
+        const agentName = sprite.getData("name") ?? "?";
+        const responses = [
+          `嗯，${message.length > 10 ? "我明白了" : "好的"}。`,
+          `收到，我会注意的。`,
+          `知道了，谢谢你告诉我。`,
+          `嗯嗯，我记住了。`,
+        ];
+        const reply = responses[Math.floor(Math.random() * responses.length)];
+        this.time.delayedCall(1000 + Math.random() * 1000, () => {
+          if (!this.scene || !this.scene.isActive()) return;
+          this.queueDialogue(agentId, reply, sprite.emotion ?? "neutral");
+        });
+      } else {
+        // 无文本时仅闪烁（兼容旧调用）
+        this.tweens.add({
+          targets: sprite, alpha: 0.5, duration: 120, yoyo: true, repeat: 2,
+        });
+      }
+    });
+    this.startDialogueScanner();
+>>>>>>> Stashed changes
 
     // ── EmotionEngine 66-S ──
     emotionEngine.onEmotionChange((changes: EmotionChange[]) => {
@@ -218,6 +264,7 @@ export class MapScene extends Phaser.Scene {
   }
 
   shutdown(): void {
+<<<<<<< Updated upstream
     this.game.events.off("agent-whisper", this.onAgentWhisper, this);
     this.game.events.off(
       "agent-whisper-feedback",
@@ -229,6 +276,27 @@ export class MapScene extends Phaser.Scene {
     this.game.events.off("sse-emotion", this.onSseEmotion, this);
     this.game.events.off("brain-toggle", this.onBrainToggle, this);
     emotionEngine.stop();
+=======
+    this.game.events.off("agent-whisper");
+    this.game.events.off("sse-move-to");
+    this.game.events.off("sse-dialogue");
+    this.game.events.off("sse-emotion");
+    this.game.events.off("brain-toggle");
+    this.dialogueTimer?.destroy();
+    this.dialogueCooldowns.clear();
+    // 清理活跃会话
+    for (const [key, s] of this.activeSessions) {
+      s.timer?.destroy();
+      this.busyAgents.delete(s.a.agentId);
+      this.busyAgents.delete(s.b.agentId);
+    }
+    this.activeSessions.clear();
+    emotionEngine.stop();
+    // 66-A: 清空音频队列（场景切换/卸载不残留声音）
+    playbackQueue.clear();
+    // BUG-043/044 修复：清理所有活跃气泡
+    this.clearActiveBubbles();
+>>>>>>> Stashed changes
     this.destroyScene();
   }
 
@@ -322,7 +390,11 @@ export class MapScene extends Phaser.Scene {
       });
     }
 
+<<<<<<< Updated upstream
     // destroyScene() 会移除全部 Phaser timer；每次地图重建后必须重启扫描器。
+=======
+    // BUG-036 修复：场景重建后重启对话扫描器
+>>>>>>> Stashed changes
     this.startDialogueScanner();
   }
 
@@ -494,8 +566,10 @@ export class MapScene extends Phaser.Scene {
    * 增量更新 Agent 精灵（不销毁未变化的 sprite）。
    * 与 placeAgents（全量重建）互补——placeAgents 用于初始化/场景切换，
    * 此方法用于 React state 同步时避免重建卡顿。
+   *
+   * @param forcePositions 强制覆盖坐标（用于 Checkpoint 恢复，BUG-038）
    */
-  syncAgentsInPlace(data: AgentSpriteData[]): void {
+  syncAgentsInPlace(data: AgentSpriteData[], forcePositions = false): void {
     const incoming = new Map(data.map((d) => [d.agentId, d]));
     // 移除不在新数据中的 sprite
     for (const [id, sprite] of this.agentSprites) {
@@ -514,7 +588,10 @@ export class MapScene extends Phaser.Scene {
       }
       const existing = this.agentSprites.get(d.agentId);
       if (existing) {
-        // sprite 位置是实时真值，不从 React state 覆写
+        // BUG-038 修复：Checkpoint 恢复时强制覆盖坐标
+        if (forcePositions) {
+          existing.setTile(d.tileX, d.tileY);
+        }
         if (existing.emotion !== d.emotion) existing.setEmotion(d.emotion as any);
         if (existing.action !== d.action) existing.setAction(d.action as any);
       } else {
@@ -577,6 +654,8 @@ export class MapScene extends Phaser.Scene {
     });
     // 66-A: 暂停音频播放
     playbackQueue.pause();
+    // BUG-043 修复：暂停情绪引擎（停止 decay/环境/随机事件定时器）
+    emotionEngine.stop();
   }
 
   resumeSimulation(): void {
@@ -586,6 +665,8 @@ export class MapScene extends Phaser.Scene {
     if (this.dialogueTimer) this.dialogueTimer.paused = false;
     // 66-A: 恢复音频播放
     playbackQueue.resume();
+    // BUG-043 修复：恢复情绪引擎
+    emotionEngine.start();
   }
 
   /* ================================================================
@@ -605,6 +686,7 @@ export class MapScene extends Phaser.Scene {
     }
   }
 
+<<<<<<< Updated upstream
   /** 从 Checkpoint 强制恢复全部 Agent 状态；普通同步仍保留实时坐标。 */
   restoreAgents(data: AgentSpriteData[]): void {
     const wasPaused = this.paused;
@@ -627,6 +709,20 @@ export class MapScene extends Phaser.Scene {
 
     if (!wasPaused) {
       this.movers.forEach((mover) => mover.start());
+=======
+  /**
+   * Checkpoint 恢复：强制覆盖所有 Agent 坐标（BUG-038）。
+   * 由 GameCanvas.restoreCheckpoint() 调用。
+   */
+  restoreAgents(data: AgentSpriteData[]): void {
+    this.pendingAgents = data;
+    if (this.ready && this.groundLayer) {
+      if (this.agentSprites.size > 0) {
+        this.syncAgentsInPlace(data, true);
+      } else {
+        this.placeAgents(data);
+      }
+>>>>>>> Stashed changes
     }
   }
 
@@ -764,15 +860,38 @@ export class MapScene extends Phaser.Scene {
   }
 
   /** 显示 Agent 头顶气泡（直接模式，用于非对话通知） */
-  showAgentBubble(agentId: string, message: string): void {
+  showAgentBubble(agentId: string, message: string, _type?: "talk" | "listen"): void {
     if (!message) return;
     const sprite = this.agentSprites.get(agentId);
     if (!sprite) return;
     import("../sprites/ActionBubble").then(({ ActionBubble }) => {
       const bubble = new ActionBubble(this, message);
       bubble.show(sprite);
+<<<<<<< Updated upstream
       this.activeBubbles.add(bubble);
+=======
+      this.trackBubble(bubble);
+>>>>>>> Stashed changes
     });
+  }
+
+  /** 追踪活跃气泡（用于暂停/场景切换时统一清理） */
+  private trackBubble(bubble: import("../sprites/ActionBubble").ActionBubble): void {
+    this.activeBubbles.add(bubble);
+    // 气泡淡出后自动移除追踪
+    const origHide = bubble.hide.bind(bubble);
+    bubble.hide = () => {
+      this.activeBubbles.delete(bubble);
+      origHide();
+    };
+  }
+
+  /** 清理所有活跃气泡 */
+  private clearActiveBubbles(): void {
+    for (const bubble of this.activeBubbles) {
+      try { bubble.hide(); } catch { /* already destroyed */ }
+    }
+    this.activeBubbles.clear();
   }
 
   /**
@@ -798,16 +917,28 @@ export class MapScene extends Phaser.Scene {
       emotion,
       onBubble: (pageText: string, _agentId: string, isFirst: boolean) => {
         if (isFirst || !activeBubble) {
+<<<<<<< Updated upstream
           // 第一页：新建气泡（先销毁旧气泡）
+=======
+          // BUG-042 修复：新建前先销毁同 Agent 旧气泡，避免重叠/显示过短
+>>>>>>> Stashed changes
           if (activeBubble) {
             this.activeBubbles.delete(activeBubble);
             try { activeBubble.hide(); } catch { /* */ }
           }
+<<<<<<< Updated upstream
+=======
+          // 第一页：新建气泡
+>>>>>>> Stashed changes
           import("../sprites/ActionBubble").then(({ ActionBubble }) => {
             const bubble = new ActionBubble(this, pageText);
             bubble.show(sprite);
             activeBubble = bubble;
+<<<<<<< Updated upstream
             this.activeBubbles.add(bubble);
+=======
+            this.trackBubble(bubble);
+>>>>>>> Stashed changes
           });
         } else {
           // 后续页：更新现有气泡文字
@@ -817,6 +948,10 @@ export class MapScene extends Phaser.Scene {
         }
       },
       onDone: () => {
+<<<<<<< Updated upstream
+=======
+        // BUG-042 修复：消息完成后立即销毁气泡，避免残留
+>>>>>>> Stashed changes
         if (activeBubble) {
           this.activeBubbles.delete(activeBubble);
           try { activeBubble.hide(); } catch { /* */ }

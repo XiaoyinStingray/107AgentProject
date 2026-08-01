@@ -1,4 +1,4 @@
-/**
+ /**
  * DialoguePlaybackQueue — 对话消息串行播放队列（66-A）。
  *
  * 保证：
@@ -27,9 +27,13 @@ type QueueState = "idle" | "playing" | "paused";
 export class DialoguePlaybackQueue {
   private queue: QueuedMessage[] = [];
   private state: QueueState = "idle";
+<<<<<<< Updated upstream
   private processing = false;
   private nextTimer: ReturnType<typeof setTimeout> | null = null;
   private generation = 0;
+=======
+  private currentPlaying = false;  // 当前是否有消息正在播放
+>>>>>>> Stashed changes
   private audioCtx: AudioContext | null = null;
   private engines: Map<string, AgentVoiceEngine> = new Map();
   private volume = 1.0;          // 0-1（用户控制的比例，乘上 MASTER_VOLUME=0.2）
@@ -47,6 +51,11 @@ export class DialoguePlaybackQueue {
   }
 
   isEnabled(): boolean { return this.enabled; }
+
+  /** BUG-044 修复：获取当前有效音量（动态反映 enabled/muted 状态） */
+  getEffectiveVolume(): number {
+    return this.enabled && !this.muted ? this.volume : 0;
+  }
 
   /** 设置音量 (0-1)，持久化到 localStorage */
   setVolume(v: number): void {
@@ -98,10 +107,16 @@ export class DialoguePlaybackQueue {
   resume(): void {
     if (this.state !== "paused") return;
     for (const engine of this.engines.values()) engine.resume();
+<<<<<<< Updated upstream
     if (this.processing) {
       this.state = "playing";
     } else if (this.queue.length > 0) {
       this.state = "playing";
+=======
+    // BUG-044 修复：恢复后检查是否需要启动下一条
+    // （暂停期间 onComplete 的 setTimeout 可能已触发但被 processNext 的 paused 检查拦截）
+    if (!this.currentPlaying) {
+>>>>>>> Stashed changes
       this.processNext();
     } else {
       this.state = "idle";
@@ -117,7 +132,11 @@ export class DialoguePlaybackQueue {
     }
     for (const engine of this.engines.values()) engine.abort();
     this.queue.length = 0;
+<<<<<<< Updated upstream
     this.processing = false;
+=======
+    this.currentPlaying = false;
+>>>>>>> Stashed changes
     this.state = "idle";
   }
 
@@ -130,33 +149,46 @@ export class DialoguePlaybackQueue {
 
   /** 取出并播放下一条 */
   private processNext(): void {
+<<<<<<< Updated upstream
     if (this.state === "paused" || this.processing) return;
+=======
+    if (this.state === "paused") return;
+    if (this.currentPlaying) return; // 上一条仍在播放，等 onComplete 自然推进
+>>>>>>> Stashed changes
     if (this.queue.length === 0) {
       this.state = "idle";
       return;
     }
 
     this.state = "playing";
+<<<<<<< Updated upstream
     this.processing = true;
     const playbackGeneration = this.generation;
+=======
+    this.currentPlaying = true;
+>>>>>>> Stashed changes
     const msg = this.queue.shift()!;
     const engine = this.getEngine(msg.agentId);
-    const effectiveVolume = this.enabled && !this.muted ? this.volume : 0;
-
+    // BUG-044 修复：传递动态音量查询函数，engine 逐页检查当前有效音量
+    // （支持对话中途开启/关闭声音）
     engine.speak(
       msg.text,
       msg.emotion,
-      effectiveVolume,
+      () => this.getEffectiveVolume(),
       {
         onPageText: (text, isFirst) => {
           msg.onBubble(text, msg.agentId, isFirst);
         },
         onComplete: () => {
+<<<<<<< Updated upstream
           if (
             playbackGeneration !== this.generation ||
             !this.processing
           ) return;
           this.processing = false;
+=======
+          this.currentPlaying = false;
+>>>>>>> Stashed changes
           msg.onDone();
           // 消息间短暂停顿
           this.nextTimer = setTimeout(() => {

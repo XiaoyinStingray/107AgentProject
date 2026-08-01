@@ -3,6 +3,7 @@
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +20,9 @@ from engines.world.state import WorldStateMixin, _resolve_agent_id
 from engines.world.streaming import WorldStreamingMixin
 from models.event import SimEvent
 from models.world import WorldResponse
+
+if TYPE_CHECKING:
+    from engines.scene.engine import SceneBridge
 
 __all__ = ["WorldEngine", "_resolve_agent_id"]
 
@@ -58,6 +62,12 @@ class WorldEngine(
         self._pending_speaker_ids: list[str] = []
         self._instruction_preempt_requested = False
         self._goal_check_pending = False
+
+        # === State 4: SceneBridge 注入点（scenes.py start_scene 赋值）===
+        self.scene_bridge: "SceneBridge | None" = None
+
+        # === Team 任务注入点（team engine 赋值）===
+        self.team_task = None
 
         # === State 4 D2: 行为指纹采集器 ===
         from engines.agent_factory.fingerprint import FingerprintCollector

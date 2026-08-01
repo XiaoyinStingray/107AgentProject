@@ -75,8 +75,13 @@ export function useCreateCheckpoint() {
       agents: AgentSpriteData[];
     }) =>
       client.post<CheckpointItem>(`/scenes/${sceneId}/checkpoints`, { name, agents }),
-    onSuccess: (_data, { sceneId }) => {
+    onSuccess: (newCp, { sceneId }) => {
       queryClient.invalidateQueries({ queryKey: sceneKeys.checkpoints(sceneId) });
+      // BUG-039: 乐观更新缓存，确保 count 立即刷新
+      queryClient.setQueryData<CheckpointItem[]>(
+        sceneKeys.checkpoints(sceneId),
+        (old) => (old ?? []).concat(newCp),
+      );
     },
   });
 }
@@ -86,8 +91,13 @@ export function useDeleteCheckpoint() {
   return useMutation({
     mutationFn: ({ sceneId, id }: { sceneId: string; id: string }) =>
       client.delete(`/scenes/${sceneId}/checkpoints/${id}`),
-    onSuccess: (_data, { sceneId }) => {
+    onSuccess: (_data, { sceneId, id }) => {
       queryClient.invalidateQueries({ queryKey: sceneKeys.checkpoints(sceneId) });
+      // BUG-039: 乐观更新缓存，立即移除已删存档
+      queryClient.setQueryData<CheckpointItem[]>(
+        sceneKeys.checkpoints(sceneId),
+        (old) => (old ?? []).filter((c) => c.id !== id),
+      );
     },
   });
 }
