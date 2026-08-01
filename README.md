@@ -13,7 +13,6 @@
 | 赵俊宇 | zhaojunyu0515@mail.ustc.edu.cn |
 | 刘福康 | lfkustc@mail.ustc.edu.cn |
 | 岳雨婷 | yueyuting6@mail.ustc.edu.cn |
-| 吴铮 | wuzheng081@mail.ustc.edu.cn |
 
 此项目由以上成员共同维护，旨在为107杯提供参赛项目。
 
