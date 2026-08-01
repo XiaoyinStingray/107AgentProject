@@ -136,6 +136,8 @@ def build_decision_prompt(
     last_result: str,
     tools: list[ToolSpec] | None = None,
     is_follow_up: bool = False,
+    recipe_context: str = "",
+    fork_context: str = "",
 ) -> str:
     """构建 Agent 决策 prompt。"""
     from engines.worker.tools import WORKER_TOOLS as DEFAULT_TOOLS
@@ -152,6 +154,14 @@ def build_decision_prompt(
         last_result=last_result or "（无）",
         tool_list=tool_list,
     )
+
+    # Step 100c: 注入分叉历史
+    if fork_context:
+        prompt += "\n" + fork_context
+
+    # Step 100: 注入配方上下文
+    if recipe_context:
+        prompt += "\n" + recipe_context
 
     if is_follow_up and step_index == 1:
         prompt += "\n\n⚠️ 这是追加任务！工作区已有的文件是上一轮的产出。请先 read_file 读取已有内容，在此基础上修改，不要从头写。"

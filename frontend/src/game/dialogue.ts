@@ -334,3 +334,109 @@ export async function fetchWhisperDialogue(
   }
   return null;
 }
+
+/* ================================================================
+ * Step 98: 主动搭话话题生成
+ * ================================================================ */
+
+export async function generateProactiveTopic(
+  agentName: string,
+  scene: string,
+): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+
+    const res = await fetch(`/api/scenes/${scene}/proactive-topic`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agent_name: agentName, scene }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.topic && data.topic.length > 2) {
+        return data.topic;
+      }
+    }
+  } catch {
+    // LLM 不可用，返回 null（调用方用预设池兜底）
+  }
+  return null;
+}
+
+/* ================================================================
+ * Step 99d: 对话选项分支
+ * ================================================================ */
+
+export type TopicCategory = "chat" | "help" | "complain" | "curious" | "invite";
+
+export interface ChatOptionDef {
+  id: "A" | "B" | "C";
+  label: string;
+  tone: "友善" | "冷淡" | "挑衅";
+  userText: string;
+  agentReaction: string;
+  agentEmotion: string;
+}
+
+const CHAT_OPTION_POOL: Record<TopicCategory, ChatOptionDef[][]> = {
+  chat: [
+    [
+      { id: "A", label: "\"聊啊！正好我也无聊\"", tone: "友善", userText: "聊啊！正好我也无聊", agentReaction: "太好了！我还怕你觉得我烦呢～所以你今天过得怎么样？", agentEmotion: "happy" },
+      { id: "B", label: "\"嗯…随便聊聊也行\"", tone: "冷淡", userText: "嗯…随便聊聊也行", agentReaction: "哦…好吧。那我就不打扰你了。", agentEmotion: "sad" },
+      { id: "C", label: "\"你是不是太闲了？\"", tone: "挑衅", userText: "你是不是太闲了？", agentReaction: "……算了，当我没说。", agentEmotion: "angry" },
+    ],
+    [
+      { id: "A", label: "\"哈哈，你说话好好玩\"", tone: "友善", userText: "哈哈，你说话好好玩", agentReaction: "真的吗！那我再多说几句——你觉得这里还有什么好玩的？", agentEmotion: "excited" },
+      { id: "B", label: "\"还行，就这样吧\"", tone: "冷淡", userText: "还行，就这样吧", agentReaction: "好吧…那我也不勉强。下次有空再聊。", agentEmotion: "neutral" },
+      { id: "C", label: "\"你能不能安静一会儿？\"", tone: "挑衅", userText: "你能不能安静一会儿？", agentReaction: "好的，我闭嘴。", agentEmotion: "sad" },
+    ],
+  ],
+  curious: [
+    [
+      { id: "A", label: "\"我也想过这个问题！\"", tone: "友善", userText: "我也想过这个问题！", agentReaction: "对吧！！我就知道你会这么想——那你觉得答案是什么？", agentEmotion: "excited" },
+      { id: "B", label: "\"嗯…有意思\"", tone: "冷淡", userText: "嗯…有意思", agentReaction: "你也觉得有意思吗…太好了，我还怕你觉得无聊。", agentEmotion: "happy" },
+      { id: "C", label: "\"你想太多了吧\"", tone: "挑衅", userText: "你想太多了吧", agentReaction: "……可能吧。有时候确实想太多。", agentEmotion: "sad" },
+    ],
+    [
+      { id: "A", label: "\"说来听听！\"", tone: "友善", userText: "说来听听！", agentReaction: "好！我是这么想的——你看，如果换个角度看的话…", agentEmotion: "excited" },
+      { id: "B", label: "\"我对这个没什么兴趣\"", tone: "冷淡", userText: "我对这个没什么兴趣", agentReaction: "没关系，每个人感兴趣的点不一样嘛。", agentEmotion: "neutral" },
+      { id: "C", label: "\"你这个问题好蠢\"", tone: "挑衅", userText: "你这个问题好蠢", agentReaction: "……好的。我记住了。", agentEmotion: "angry" },
+    ],
+  ],
+  invite: [
+    [
+      { id: "A", label: "\"好啊！一起！\"", tone: "友善", userText: "好啊！一起！", agentReaction: "太好了！！我就知道你会答应的——走走走！", agentEmotion: "excited" },
+      { id: "B", label: "\"下次吧，现在有点忙\"", tone: "冷淡", userText: "下次吧，现在有点忙", agentReaction: "好，那你先忙。下次有机会再说。", agentEmotion: "neutral" },
+      { id: "C", label: "\"你谁啊？我为什么要跟你一起？\"", tone: "挑衅", userText: "你谁啊？我为什么要跟你一起？", agentReaction: "……我明白了。对不起打扰了。", agentEmotion: "sad" },
+    ],
+    [
+      { id: "A", label: "\"等我一下，马上来！\"", tone: "友善", userText: "等我一下，马上来！", agentReaction: "不着急！我等你～你知道这个地方怎么去吗？", agentEmotion: "happy" },
+      { id: "B", label: "\"我不太想去\"", tone: "冷淡", userText: "我不太想去", agentReaction: "那我自己去吧。希望下次你能来。", agentEmotion: "sad" },
+      { id: "C", label: "\"烦不烦，别来烦我\"", tone: "挑衅", userText: "烦不烦，别来烦我", agentReaction: "好的。我走了。再见。", agentEmotion: "angry" },
+    ],
+  ],
+  help: [
+    [
+      { id: "A", label: "\"好啊，帮帮我！\"", tone: "友善", userText: "好啊，帮帮我！", agentReaction: "没问题！你说说看需要什么帮助？", agentEmotion: "happy" },
+      { id: "B", label: "\"我自己能搞定\"", tone: "冷淡", userText: "我自己能搞定", agentReaction: "好吧。不过如果需要的话随时找我。", agentEmotion: "neutral" },
+      { id: "C", label: "\"你行吗？别帮倒忙\"", tone: "挑衅", userText: "你行吗？别帮倒忙", agentReaction: "……那你自便吧。我不打扰了。", agentEmotion: "angry" },
+    ],
+  ],
+  complain: [
+    [
+      { id: "A", label: "\"我也是！太理解了\"", tone: "友善", userText: "我也是！太理解了", agentReaction: "对吧！！终于有人懂我了——你也遇到过？", agentEmotion: "happy" },
+      { id: "B", label: "\"这有什么好抱怨的\"", tone: "冷淡", userText: "这有什么好抱怨的", agentReaction: "……嗯，可能是我想太多了。算了。", agentEmotion: "sad" },
+      { id: "C", label: "\"你太负能量了\"", tone: "挑衅", userText: "你太负能量了", agentReaction: "对不起，我不该说这些。以后不会了。", agentEmotion: "sad" },
+    ],
+  ],
+};
+
+/** 根据话题类别取对话选项（随机选一套） */
+export function getChatOptions(category: TopicCategory): ChatOptionDef[] {
+  const pool = CHAT_OPTION_POOL[category] ?? CHAT_OPTION_POOL.chat;
+  return pool[Math.floor(Math.random() * pool.length)];
+}

@@ -23,6 +23,7 @@ import json
 import time
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
+from pathlib import Path
 
 from loguru import logger
 
@@ -55,7 +56,9 @@ from engines.worker.prompts import (
     build_reflection_prompt,
 )
 from engines.worker.tools import make_worker_tools, ToolSpec
-from engines.worker.workspace import LocalWorkspace, WorkspaceProvider
+from engines.worker.workspace import LocalWorkspace, WorkspaceProvider, safe_read
+from engines.worker.recipes import get_recipe, list_recipes as _list_recipes
+from engines.worker.recipes import Recipe
 
 
 # =============================================================================
@@ -184,6 +187,10 @@ class AgentWorker:
         self._run_id = f"run-{uuid.uuid4().hex[:8]}"
         self._agent_name = agent.persona.name if hasattr(agent, 'persona') else "Worker"
 
+        # Step 100: 配方模式
+        self._recipe: Recipe | None = None
+        self._recipe_phase_index = 0
+
         # Workspace
         if workspace is not None:
             self._workspace = workspace
@@ -222,14 +229,26 @@ class AgentWorker:
     # 公共 API
     # ─────────────────────────────────────────────────────────────────
 
-    async def execute(self, task: str, is_follow_up: bool = False) -> AsyncGenerator[str, None]:
+    async def execute(
+        self, task: str, is_follow_up: bool = False, recipe_id: str = "",
+    ) -> AsyncGenerator[str, None]:
         """执行任务——返回 SSE 事件生成器。
 
         Args:
             task: 用户的任务描述
             is_follow_up: 是否为追加任务（复用工作区时设为 True）
+            recipe_id: 配方 ID（可选，如 "deep_research"）
         """
         self._is_follow_up = is_follow_up
+
+        # Step 100: 加载配方
+        if recipe_id:
+            self._recipe = get_recipe(recipe_id)
+            if self._recipe:
+                self._recipe_phase_index = 0
+                logger.info(f"AgentWorker recipe: {self._recipe.name}")
+            else:
+                logger.warning(f"AgentWorker: unknown recipe '{recipe_id}'")
 
         if self._state != WorkerState.IDLE:
             yield _sse_event("worker.error", WorkerErrorData(
@@ -460,6 +479,41 @@ class AgentWorker:
         last_action = last.get("title", "")
         last_result = last.get("result", "")
 
+        # Step 100: 配方上下文
+        recipe_context = ""
+        if self._recipe and self._recipe_phase_index < len(self._recipe.phases):
+            phase = self._recipe.phases[self._recipe_phase_index]
+            recipe_context = (
+                f"\n## 🔬 当前配方: {self._recipe.name}（阶段 {self._recipe_phase_index + 1}/{len(self._recipe.phases)}）\n"
+                f"**当前阶段: {phase.title}**\n"
+                f"指令: {phase.instruction}\n"
+                f"必须使用的工具: {', '.join(phase.required_tools)}\n"
+                f"本阶段产出: {phase.output}\n"
+                f"⚠️ 本阶段完成前不要跳到下一阶段。\n"
+            )
+
+        # Step 100c: Fork 历史注入
+        fork_context = ""
+        if getattr(self, "_is_fork", False):
+            hist = getattr(self, "_fork_history", []) or []
+            alt = getattr(self, "_fork_decision", "")
+            pt = getattr(self, "_fork_point", 0)
+            fork_context = (
+                f"\n## 🔀 分叉模式\n"
+                f"这是从原始运行的 Step {pt} 处分叉的。分叉点之前的决策历史:\n"
+            )
+            for h in hist[-5:]:  # 最近 5 步
+                fork_context += (
+                    f"  - Step {h.get('step_index','?')}: {h.get('action','?')} "
+                    f"({h.get('reason','')[:80]})\n"
+                )
+            if alt:
+                fork_context += (
+                    f"\n⚠️ 在分叉点处，原始 Agent 的决策被替换为:\n"
+                    f"「{alt}」\n"
+                    f"请基于这个新方向继续执行任务。\n"
+                )
+
         prompt = build_decision_prompt(
             step_index=self._step_index,
             task=task,
@@ -470,6 +524,8 @@ class AgentWorker:
             last_result=last_result,
             tools=self._tools,
             is_follow_up=getattr(self, "_is_follow_up", False),
+            recipe_context=recipe_context,
+            fork_context=fork_context,
         )
 
         # 调用 LLM
@@ -489,6 +545,18 @@ class AgentWorker:
         reason = decision.get("reason", "")
 
         logger.info(f"AgentWorker deciding: step={self._step_index}, action={action}, reason={reason[:80]}")
+
+        # Step 100c: 记录决策到日志（供分叉使用）
+        try:
+            from engines.worker.fork import save_decision_step
+            tool_name = decision.get("tool_name", action) if action == "tool_call" else action
+            save_decision_step(
+                self._run_id, self._step_index,
+                action=action, reason=reason,
+                tool_name=tool_name if isinstance(tool_name, str) else "",
+            )
+        except Exception:
+            pass
 
         # 发射决策事件
         yield _sse_event("worker.thought", WorkerThoughtData(
@@ -612,19 +680,80 @@ class AgentWorker:
             success=success,
         ).__dict__)
 
-        # 如果是文件写入工具，发射 file_updated 事件
+        # 如果是文件写入工具，发射 file_updated 事件（含 preview）
         if tool_name in ("write_file",) and success:
             path_arg = tool_args.get("path", "")
+            content_arg = tool_args.get("content", "")
             if path_arg:
                 self._files_created.append(path_arg)
             try:
                 files = await self._workspace.list_files()
+                file_data = []
+                for f in files:
+                    entry = {"path": f.path, "size": f.size}
+                    # Step 100: 附带文件预览（前 5000 字符）
+                    if f.path == path_arg and content_arg:
+                        entry["preview"] = content_arg[:5000]
+                    elif f.path.endswith((".md", ".txt", ".json", ".csv", ".py")):
+                        try:
+                            raw = safe_read(Path(self._workspace.root) / "files" / f.path.replace("\\", "/"))
+                            entry["preview"] = raw[:5000]
+                        except Exception:
+                            pass
+                    file_data.append(entry)
                 yield _sse_event("worker.file_updated", WorkerFileUpdatedData(
                     step_index=self._step_index,
-                    files=[{"path": f.path, "size": f.size} for f in files],
+                    files=file_data,
                 ).__dict__)
             except Exception:
                 pass
+
+        # Step 100: 配方阶段自动推进
+        if self._recipe and self._recipe_phase_index < len(self._recipe.phases):
+            phase = self._recipe.phases[self._recipe_phase_index]
+            should_advance = False
+            output_pattern = phase.output
+
+            if not output_pattern:
+                # 无产出要求（如 setup_env）→ 执行完工具就推进
+                should_advance = True
+            elif output_pattern.endswith("/*"):
+                # glob 模式（如 sources/raw/*.md）→ 检查目录下是否有文件
+                dir_path = output_pattern[:-2]  # strip "/*"
+                try:
+                    files = await self._workspace.list_files(dir_path)
+                    if files:
+                        should_advance = True
+                except Exception:
+                    pass
+            elif output_pattern.endswith("/"):
+                # 目录（如 charts/）→ 检查目录下是否有文件
+                try:
+                    files = await self._workspace.list_files(output_pattern.rstrip("/"))
+                    if files:
+                        should_advance = True
+                except Exception:
+                    pass
+            else:
+                # 具体文件 → exists 检查
+                try:
+                    exists = await self._workspace.exists(output_pattern)
+                    if exists:
+                        should_advance = True
+                except Exception:
+                    pass
+
+            if should_advance:
+                self._recipe_phase_index += 1
+                logger.info(
+                    f"Recipe phase advanced: {phase.title} → "
+                    f"{self._recipe.phases[self._recipe_phase_index].title if self._recipe_phase_index < len(self._recipe.phases) else 'done'}"
+                )
+                if self._recipe.all_done(self._recipe_phase_index):
+                    yield _sse_event("worker.thought", WorkerThoughtData(
+                        step_index=self._step_index,
+                        thought=f"🎉 配方「{self._recipe.name}」所有阶段完成！",
+                    ).__dict__)
 
         # 记录完成的步骤
         self._completed_steps.append({

@@ -5,6 +5,7 @@
  */
 
 import { useState, useRef, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 // =============================================================================
 // 类型定义
@@ -164,4 +165,30 @@ export function useWorkerExecute() {
   }, []);
 
   return { ...state, execute, cancel, reset, hydrate };
+}
+
+// =============================================================================
+// useWorkerHistory — Step 100a: 获取所有 Worker 历史记录
+// =============================================================================
+
+export interface WorkerHistoryEntry {
+  run_id: string;
+  agent_name: string;
+  task: string;
+  state: string;
+  steps: number;
+  files: Array<{ path: string; size: number }>;
+  created_at: string;
+}
+
+export function useWorkerHistory() {
+  return useQuery<WorkerHistoryEntry[]>({
+    queryKey: ["worker-history"],
+    queryFn: async () => {
+      const res = await fetch("/api/workers/history");
+      if (!res.ok) throw new Error("Failed to fetch worker history");
+      return res.json();
+    },
+    refetchInterval: 10000, // 10 秒刷新
+  });
 }

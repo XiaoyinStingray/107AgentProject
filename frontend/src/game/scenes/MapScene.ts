@@ -18,6 +18,8 @@ import {
   type PendingWhisper,
   type WhisperAgent,
 } from "../whisper";
+import { EmojiDrop } from "../effects/EmojiDrop";
+import { GraffitiLayer, type GraffitiResult } from "../effects/GraffitiLayer";
 
 /* ── 多轮对话会话 66-S ── */
 interface ConversationSession {
@@ -111,6 +113,15 @@ export class MapScene extends Phaser.Scene {
   private busyAgents: Set<string> = new Set();
   private pendingWhispers: Map<string, PendingWhisper> = new Map();
   private movementReservations: Map<string, string> = new Map();
+
+  // Step 99b: 绘文字投掷
+  private emojiDrop: EmojiDrop | null = null;
+  // Step 99c: 涂鸦指令（Phaser 原生版）
+  graffitiLayer: GraffitiLayer | null = null;
+  private graffitiEnabled = false;
+  // 交互模式互斥锁：normal | emoji | graffiti
+  private _interactionMode: "normal" | "emoji" | "graffiti" = "normal";
+  private _allFrozen = false; // freezeAgents 标志——阻止对话扫描
 
   constructor() {
     super({ key: "MapScene" });
@@ -210,6 +221,39 @@ export class MapScene extends Phaser.Scene {
     if (agents?.length) this.pendingAgents = agents;
     const mapId = (this.game.registry.get("pendingMapId") as string) || "library";
 
+    // Step 99b: 初始化 EmojiDrop
+    this.emojiDrop = new EmojiDrop(this);
+    this.emojiDrop.setGetAgents(() => this.agentSprites);
+    this.emojiDrop.onRejectMessage((msg) => {
+      this.showEventNotification({ id: "emoji-full", text: msg, target: "all", effect: { emotion: "neutral", intensity: 0 } });
+    });
+
+    // Step 99c: 初始化 GraffitiLayer（Phaser 原生版，不再需要 HTML Canvas）
+    this.graffitiLayer = new GraffitiLayer(this);
+    this.graffitiLayer.onShapeDetected((result: GraffitiResult) => this.onGraffitiShape(result));
+
+    // 背景点击 → 根据交互模式分流
+    this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      const hit = this.input.hitTestPointer(pointer);
+      // 点到了 Agent 或其他可交互对象 → 不处理（让 sprite 的事件处理）
+      if (hit.length > 0) return;
+      if (this.paused) return;
+
+      // 涂鸦模式：GraffitiLayer 自己的 pointerdown 会处理
+      if (this._interactionMode === "graffiti") return; // GraffitiLayer handles it
+
+      // Emoji 模式：点击空地 → 投掷选中的 emoji
+      if (this._interactionMode === "emoji" && this.emojiDrop) {
+        this.emojiDrop.handleClick(pointer.worldX, pointer.worldY);
+        return;
+      }
+
+      // 正常模式：点击空地 → 取消选中（通过 game event 通知 React）
+      if (this._interactionMode === "normal") {
+        this.game.events.emit("canvas-deselect");
+      }
+    });
+
     if (this.mapData) {
       this.buildScene();
     } else {
@@ -229,6 +273,8 @@ export class MapScene extends Phaser.Scene {
     this.game.events.off("sse-emotion", this.onSseEmotion, this);
     this.game.events.off("brain-toggle", this.onBrainToggle, this);
     emotionEngine.stop();
+    this.emojiDrop?.destroy();
+    this.graffitiLayer?.destroy();
     this.destroyScene();
   }
 
@@ -324,6 +370,9 @@ export class MapScene extends Phaser.Scene {
 
     // destroyScene() 会移除全部 Phaser timer；每次地图重建后必须重启扫描器。
     this.startDialogueScanner();
+
+    // Step 99b: 更新 EmojiDrop 地图尺寸
+    this.emojiDrop?.setMapSize(d.width, d.height);
   }
 
   /* ================================================================
@@ -577,6 +626,8 @@ export class MapScene extends Phaser.Scene {
     });
     // 66-A: 暂停音频播放
     playbackQueue.pause();
+    // Step 99c: 暂停时禁用涂鸦
+    if (this.graffitiLayer) this.graffitiLayer.setActive(false);
   }
 
   resumeSimulation(): void {
@@ -586,6 +637,135 @@ export class MapScene extends Phaser.Scene {
     if (this.dialogueTimer) this.dialogueTimer.paused = false;
     // 66-A: 恢复音频播放
     playbackQueue.resume();
+    // Step 99c: 恢复涂鸦（如果之前是开启的）
+    if (this.graffitiLayer && this.graffitiEnabled) {
+      this.graffitiLayer.setActive(true);
+    }
+  }
+
+  /* ================================================================
+   * Step 99: Agent 冻结/解冻（主动搭话期间）
+   * ================================================================ */
+
+  /** 冻结所有 Agent（停止移动 + 设为 idle + 阻止对话扫描） */
+  freezeAgents(): void {
+    this._allFrozen = true;
+    this.movers.forEach((m) => m.stop());
+    this.agentSprites.forEach((sprite) => {
+      this.tweens.killTweensOf(sprite);
+      // 从当前视觉位置反算 tile 坐标，修复 mid-tween kill 导致的漂移
+      const tx = Math.round(sprite.x / 64);
+      const ty = Math.round(sprite.y / 64);
+      sprite.tileX = Math.max(0, Math.min((this.mapData?.width ?? 16) - 1, tx));
+      sprite.tileY = Math.max(0, Math.min((this.mapData?.height ?? 12) - 1, ty));
+      if (sprite.action === "walk") sprite.setAction("idle");
+    });
+  }
+
+  /** 解冻所有 Agent（恢复自主移动 + 允许对话扫描） */
+  unfreezeAgents(): void {
+    this._allFrozen = false;
+    if (this.paused) return;
+    this.movers.forEach((m) => m.start());
+  }
+
+  /** 冻结指定 Agent（对话中锁定） */
+  lockAgent(agentId: string): void {
+    const mover = this.movers.get(agentId);
+    mover?.stop();
+    const sprite = this.agentSprites.get(agentId);
+    if (sprite && sprite.action === "walk") sprite.setAction("idle");
+  }
+
+  /** 解冻指定 Agent */
+  unlockAgent(agentId: string): void {
+    if (this.paused) return;
+    const mover = this.movers.get(agentId);
+    mover?.start();
+  }
+
+  /** 暴露 busy 状态给 ProactiveChatManager */
+  isAgentBusy(agentId: string): boolean {
+    return this.busyAgents.has(agentId);
+  }
+
+  /* ================================================================
+   * Step 99b/99c: Emoji + Graffiti
+   * ================================================================ */
+
+  /** 切换涂鸦模式（与 emoji 模式互斥） */
+  setGraffitiEnabled(enabled: boolean): void {
+    this.graffitiEnabled = enabled;
+    if (enabled) {
+      this._interactionMode = "graffiti";
+    } else if (this._interactionMode === "graffiti") {
+      this._interactionMode = "normal";
+    }
+    this.graffitiLayer?.setActive(enabled && !this.paused);
+  }
+
+  isGraffitiEnabled(): boolean { return this.graffitiEnabled; }
+
+  /** 切换 Emoji 模式（与涂鸦模式互斥） */
+  setEmojiMode(enabled: boolean): void {
+    if (enabled) {
+      // 关闭涂鸦模式
+      if (this.graffitiEnabled) {
+        this.setGraffitiEnabled(false);
+      }
+      this._interactionMode = "emoji";
+    } else if (this._interactionMode === "emoji") {
+      this._interactionMode = "normal";
+    }
+  }
+
+  getInteractionMode(): string { return this._interactionMode; }
+
+  /** 涂鸦形状识别回调 → Agent 行为 */
+  private onGraffitiShape(result: GraffitiResult): void {
+    if (!result.type || this.paused) return;
+
+    if (result.type === "line" && result.lineStart && result.lineEnd) {
+      // 最近的 Agent 沿线走到终点
+      const agents = [...this.agentSprites.values()];
+      if (agents.length === 0) return;
+      let nearest: AgentSprite | null = null;
+      let minDist = Infinity;
+      for (const spr of agents) {
+        const d = Math.abs(spr.tileX - result.lineStart.tx) + Math.abs(spr.tileY - result.lineStart.ty);
+        if (d < minDist) { minDist = d; nearest = spr; }
+      }
+      if (nearest) {
+        const mover = this.movers.get(nearest.agentId);
+        mover?.moveAlongLine(
+          result.lineStart.tx, result.lineStart.ty,
+          result.lineEnd.tx, result.lineEnd.ty,
+        );
+      }
+    } else if (result.type === "circle" && result.center) {
+      // 所有 Agent 朝圆心聚集
+      const radius = result.radius ?? 3;
+      for (const [, spr] of this.agentSprites) {
+        // 在圈内找一个可通行 tile
+        const mover = this.movers.get(spr.agentId);
+        if (!mover) continue;
+        const dx = spr.tileX - result.center.tx;
+        const dy = spr.tileY - result.center.ty;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist <= radius) continue; // 已在圈内
+        const stepX = result.center.tx + Math.round((dx / dist) * (radius - 1));
+        const stepY = result.center.ty + Math.round((dy / dist) * (radius - 1));
+        const tx = Math.max(0, Math.min((this.mapData?.width ?? 16) - 1, stepX));
+        const ty = Math.max(0, Math.min((this.mapData?.height ?? 12) - 1, stepY));
+        mover.moveToPoint(tx, ty);
+      }
+    } else if (result.type === "cross" && result.center) {
+      // 所有 Agent 从叉心散开
+      for (const [, spr] of this.agentSprites) {
+        const mover = this.movers.get(spr.agentId);
+        mover?.scatterFrom(result.center.tx, result.center.ty);
+      }
+    }
   }
 
   /* ================================================================
@@ -974,6 +1154,8 @@ export class MapScene extends Phaser.Scene {
     if (!this.scene.isActive()) return;
     // State 4: Brain 模式下跳过本地对话扫描（对话由 SSE 驱动）
     if ((this as any)._brainEnabled) return;
+    // Step 99: 冻结中跳过（主动搭话期间不触发 Agent 间对话）
+    if (this._allFrozen) return;
     const agents = [...this.agentSprites.values()];
     if (agents.length < 2) return;
     const now = Date.now();

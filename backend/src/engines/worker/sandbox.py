@@ -137,11 +137,17 @@ async def run_python_sandbox(code: str, workspace_dir: str,
     # Step 2: 写入临时文件
     tmp_path = None
     try:
+        # 前置：注入 .packages 到 sys.path（如果存在）
+        packages_dir = Path(workspace_dir).parent / ".packages"
+        preamble = ""
+        if packages_dir.exists():
+            preamble = f"import sys\nsys.path.insert(0, {str(packages_dir)!r})\n"
+
         with tempfile.NamedTemporaryFile(
             mode='w', suffix='.py', dir=workspace_dir,
             delete=False, encoding='utf-8',
         ) as f:
-            f.write(code)
+            f.write(preamble + code)
             tmp_path = f.name
 
         # Step 3: 启动子进程

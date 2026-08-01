@@ -272,6 +272,46 @@ async def get_agent_fingerprint(agent_id: str, db: AsyncSession = Depends(get_db
     }
 
 
+# ── Step 100b: Agent 实时对战 ──
+
+from pydantic import BaseModel, Field
+
+
+class DuelRequest(BaseModel):
+    agent_a_id: str = Field(..., description="Agent A 的 ID")
+    agent_b_id: str = Field(..., description="Agent B 的 ID")
+    task: str = Field(..., min_length=1, max_length=2000)
+    max_steps: int = Field(default=20, ge=5, le=50)
+
+
+@router.post("/duel")
+async def start_duel(req: DuelRequest):
+    """启动 Agent 对战——返回 SSE 流。
+
+    两个 Agent 并行执行同一个任务，实时推送对应事件和比分。
+    前端使用 fetch + ReadableStream 消费 SSE 流。
+    """
+    from fastapi.responses import StreamingResponse
+    from engines.worker.duel import run_duel
+    from api.workers import _get_or_create_agent
+
+    try:
+        agent_a = _get_or_create_agent(req.agent_a_id)
+        agent_b = _get_or_create_agent(req.agent_b_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"无法创建 Agent: {e}")
+
+    return StreamingResponse(
+        run_duel(agent_a, agent_b, req.task, req.max_steps),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 # ── 70: 劣化检测 ──
 
 @router.get("/degradation")

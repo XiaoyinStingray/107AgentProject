@@ -158,6 +158,98 @@ async def scene_interact(scene_id: str, body: InteractRequest):
     )
 
 
+# ── Step 98: 主动搭话话题生成 ──
+
+class ProactiveTopicRequest(BaseModel):
+    agent_name: str
+    scene: str
+
+
+class ProactiveTopicResponse(BaseModel):
+    topic: str
+    source: str = "mock"  # "llm" | "mock"
+
+
+@router.post("/{scene_id}/proactive-topic", response_model=ProactiveTopicResponse)
+async def generate_proactive_topic(scene_id: str, body: ProactiveTopicRequest):
+    """
+    Step 98: 为 Agent 主动搭话生成话题。
+    LLM 优先，mock 兜底（返回 null 由前端用预设池）。
+    """
+    # 预设兜底话题池（按场景）
+    FALLBACK_TOPICS = {
+        "library": [
+            "你在看什么书？封面好有意思",
+            "好安静啊——你是来复习的吗？",
+            "你有没有想过…如果每一本书都是一个世界？",
+            "这个角落的光线刚刚好。",
+            "这里的 WiFi 密码是多少来着？",
+        ],
+        "dorm": [
+            "外卖到了！你点了什么？",
+            "今晚打游戏吗？三缺一！",
+            "好像要下雨了…你有没有闻到雨的味道？",
+            "你昨天晚上说梦话了。",
+            "窗外的鸟好吵——不过也挺好听的。",
+        ],
+        "classroom": [
+            "这课好无聊啊…你觉得呢？",
+            "下课去食堂吗？一起？",
+            "你有没有想过…如果考试突然取消会怎样？",
+            "老师刚才说的那个你听懂了吗？",
+            "笔记借我抄抄呗～",
+        ],
+        "art": [
+            "天哪这里好棒！你经常来吗？",
+            "钢琴声好好听，你知道是什么曲子吗？",
+            "这里的氛围好适合发呆…",
+            "颜色好像在说话——你感觉到了吗？",
+            "你有没有画过画？哪怕是随便涂两笔？",
+        ],
+        "lab": [
+            "数据跑完了吗？我的还在跑…",
+            "你发现了什么有意思的现象？",
+            "你有没有想过…实验失败也是一种成功？",
+            "试剂颜色好漂亮——虽然可能不太对。",
+            "小心那个烧杯——不过它确实很好看。",
+        ],
+        "sakura": [
+            "天哪好美！！快帮我拍照！",
+            "我想在樱花树下野餐——一起吗？",
+            "你有没有想过…花瓣最后会飘到哪里去？",
+            "时间好像慢了。想在这里坐一整天。",
+            "春天真的好短。不过正因如此才珍贵吧。",
+        ],
+    }
+
+    scene_topics = FALLBACK_TOPICS.get(scene_id, FALLBACK_TOPICS["library"])
+    import random
+    topic = random.choice(scene_topics)
+
+    # 尝试 LLM 生成
+    try:
+        from llm.client import create_model_client
+        client = create_model_client()
+        prompt = (
+            f"你是{body.agent_name}，你在「{body.scene}」场景中。"
+            f"用一句话主动跟一个路过的人搭话。"
+            f"要自然、带点好奇、不要像客服、不要超过20个字。"
+        )
+        result = await client.create(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.9,
+            max_tokens=60,
+        )
+        llm_topic = result.content.strip().strip("\"'")
+        if llm_topic and len(llm_topic) > 2:
+            logger.info(f"[proactive-topic] LLM: {llm_topic[:40]}")
+            return ProactiveTopicResponse(topic=llm_topic, source="llm")
+    except Exception as e:
+        logger.warning(f"[proactive-topic] LLM failed, using mock: {e}")
+
+    return ProactiveTopicResponse(topic=topic, source="mock")
+
+
 # ── 66-S: 随机事件端点 ──
 
 class RandomEventResponse(BaseModel):

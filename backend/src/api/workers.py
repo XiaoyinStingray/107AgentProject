@@ -79,6 +79,10 @@ class WorkerExecuteRequest(BaseModel):
         default="",
         description="复用已有工作区——用于追加对话。空字符串则创建新工作区",
     )
+    recipe_id: str = Field(
+        default="",
+        description="配方 ID（可选），如 deep_research / code_review / data_analysis",
+    )
 
 
 class WorkerStatusResponse(BaseModel):
@@ -195,6 +199,15 @@ def _get_or_create_agent(agent_id: str) -> "LifeAgent":
 # =============================================================================
 
 
+# ── Step 100: 配方 API ──
+
+@router.get("/recipes")
+async def list_recipes():
+    """列出所有可用配方（供前端配方卡片使用）。"""
+    from engines.worker.recipes import list_recipes as _list
+    return _list()
+
+
 @router.post("/execute")
 async def execute_worker_task(req: WorkerExecuteRequest):
     """执行 Worker 任务——返回 SSE 流。
@@ -261,6 +274,7 @@ async def execute_worker_task(req: WorkerExecuteRequest):
     # 注册到内存表
     _active_workers[worker.run_id] = {
         "worker": worker,
+        "agent_id": req.agent_id,
         "agent_name": worker._agent_name,
         "task": req.task,
         "running": True,
@@ -272,7 +286,7 @@ async def execute_worker_task(req: WorkerExecuteRequest):
     async def event_generator():
         entry = _active_workers.get(worker.run_id)
         try:
-            async for event in worker.execute(req.task, is_follow_up=is_follow_up):
+            async for event in worker.execute(req.task, is_follow_up=is_follow_up, recipe_id=req.recipe_id):
                 yield event
                 # 保存解析后的事件供重连回放（去掉 "data: " 前缀，解析 JSON）
                 if entry and entry.get("events") is not None:
@@ -288,7 +302,6 @@ async def execute_worker_task(req: WorkerExecuteRequest):
             if entry and entry.get("events") is not None:
                 entry["events"].append(err_data)
             yield err_sse
-            yield err
         finally:
             if entry:
                 entry["running"] = False
@@ -621,6 +634,80 @@ async def list_scheduled_tasks():
         }
         for t in tasks
     ]
+
+
+# ── Step 100c: 决策分叉 ──
+
+class ForkRequest(BaseModel):
+    fork_point_step: int = Field(..., ge=1, description="在哪一步分叉（1-indexed）")
+    alternative_decision: str = Field(..., min_length=1, max_length=500, description="替代决策描述")
+
+
+@router.post("/{run_id}/fork")
+async def fork_worker(run_id: str, req: ForkRequest):
+    """从已完成 Worker 的决策点创建分叉——返回 SSE 流。"""
+    entry = _active_workers.get(run_id)
+    if not entry:
+        raise HTTPException(404, f"Worker {run_id!r} 不存在")
+
+    worker_obj: AgentWorker | None = entry.get("worker")
+    if worker_obj is None:
+        raise HTTPException(400, f"Worker {run_id!r} 已过期，无法分叉")
+
+    try:
+        agent = _get_or_create_agent(entry.get("agent_id", ""))
+    except Exception:
+        # 用原始 worker 的 agent（如果还在内存中）
+        agent = worker_obj._agent
+
+    from engines.worker.fork import fork_from_checkpoint
+
+    fork_run_id, fork_worker = await fork_from_checkpoint(
+        original_run_id=run_id,
+        fork_point_step=req.fork_point_step,
+        alternative_decision=req.alternative_decision,
+        agent=agent,
+        task=entry["task"],
+    )
+
+    # 注册 fork worker
+    _active_workers[fork_run_id] = {
+        "worker": fork_worker,
+        "agent_id": entry.get("agent_id", ""),
+        "agent_name": f"{entry['agent_name']} (Fork @ step {req.fork_point_step})",
+        "task": f"[Fork] {entry['task'][:100]}",
+        "running": True,
+        "events": [],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    async def fork_generator():
+        fork_entry = _active_workers.get(fork_run_id)
+        try:
+            async for event in fork_worker.execute(entry["task"]):
+                yield event
+                if fork_entry and fork_entry.get("events") is not None:
+                    try:
+                        if event.startswith("data: "):
+                            fork_entry["events"].append(json.loads(event[6:]))
+                    except Exception:
+                        pass
+        except Exception as exc:
+            logger.exception(f"Fork SSE error: {exc}")
+            yield f"data: {json.dumps({'type': 'worker.error', 'data': {'message': str(exc)}})}\n\n"
+        finally:
+            if fork_entry:
+                fork_entry["running"] = False
+
+    return StreamingResponse(
+        fork_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.delete("/scheduler/tasks/{task_id}")

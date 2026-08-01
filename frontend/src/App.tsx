@@ -20,6 +20,8 @@ const TeamDashboard = lazy(() => import("./pages/TeamDashboard"));
 const BenchLab = lazy(() => import("./pages/BenchLab"));
 const GameScenePage = lazy(() => import("./pages/GameScene"));
 const WorkerBench = lazy(() => import("./pages/WorkerBench"));
+const ShowcaseWall = lazy(() => import("./pages/ShowcaseWall"));
+const DuelArena = lazy(() => import("./pages/DuelArena"));
 const PipelinePage = lazy(() => import("./pages/PipelinePage"));
 
 /** Suspense 占位——加载中显示 */
@@ -208,6 +210,24 @@ export default function App() {
             element={
               <Suspense fallback={<PageFallback />}>
                 <WorkerBench />
+              </Suspense>
+            }
+          />
+          {/* Step 100a: M12 产出展示墙 */}
+          <Route
+            path="showcase"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <ShowcaseWall />
+              </Suspense>
+            }
+          />
+          {/* Step 100b: Agent 对战 */}
+          <Route
+            path="duel"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <DuelArena />
               </Suspense>
             }
           />

@@ -29,7 +29,7 @@ export interface EmotionChange {
   agentId: string;
   emotion: Emotion;
   intensity: EmotionIntensity;
-  trigger: "dialogue" | "environment" | "social" | "random" | "decay" | "manual";
+  trigger: "dialogue" | "environment" | "social" | "random" | "decay" | "manual" | "proactive_chat_accepted" | "proactive_chat_ignored" | "emoji_impact";
   detail: string;
 }
 

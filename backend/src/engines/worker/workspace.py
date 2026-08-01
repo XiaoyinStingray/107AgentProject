@@ -12,8 +12,10 @@ Phase 24: 实现 CloudWorkspace。
 """
 
 import os
+import shutil
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
@@ -186,6 +188,31 @@ def _resolve_safe(root: str, relative_path: str) -> str:
 
 
 # =============================================================================
+# 编码安全 I/O（Step 100）
+# =============================================================================
+
+
+def safe_write(path: Path, content: str) -> None:
+    """写入文件，强制 UTF-8 + surrogateescape 兜底。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8", errors="surrogateescape")
+
+
+def safe_read(path: Path) -> str:
+    """读取文件。UTF-8 优先，失败回退 chardet 检测。"""
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        raw = path.read_bytes()
+        try:
+            import chardet
+            encoding = chardet.detect(raw)["encoding"] or "utf-8"
+            return raw.decode(encoding, errors="replace")
+        except ImportError:
+            return raw.decode("utf-8", errors="replace")
+
+
+# =============================================================================
 # LocalWorkspace — 本地文件系统实现
 # =============================================================================
 
@@ -233,20 +260,59 @@ class LocalWorkspace(WorkspaceProvider):
     # ── WorkspaceProvider 实现 ──
 
     async def write_file(self, path: str, content: str) -> str:
-        file_path = self._file_path(path)
-        # 确保父目录存在
-        Path(file_path).parent.mkdir(parents=True, exist_ok=True)
-        Path(file_path).write_text(content, encoding='utf-8')
-        logger.info(f"[LocalWorkspace] write: {path} ({len(content)} chars)")
-        return file_path
+        file_path = Path(self._file_path(path))
+        # 自动快照: 文件已存在 → 复制到 .snapshots/ 再覆盖
+        if file_path.exists():
+            snapshot_dir = Path(self._root, ".snapshots")
+            snapshot_dir.mkdir(exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            # 用 __ 编码目录分隔符，用 --- 分隔路径和时间戳
+            safe_path = path.replace("/", "__").replace("\\", "__")
+            snapshot_name = f"{safe_path}---{timestamp}"
+            shutil.copy2(str(file_path), str(snapshot_dir / snapshot_name))
+            logger.debug(f"[LocalWorkspace] snapshot: {path} → {snapshot_name}")
 
-    async def read_file(self, path: str) -> str:
-        file_path = self._file_path(path)
-        if not Path(file_path).exists():
-            raise FileNotFoundError(f"文件不存在: {path}")
-        content = Path(file_path).read_text(encoding='utf-8')
+        # 强制 UTF-8 + surrogateescape
+        safe_write(file_path, content)
+        logger.info(f"[LocalWorkspace] write: {path} ({len(content)} chars)")
+        return str(file_path)
+
+    async def read_file(self, path: str, snapshot: str | None = None) -> str:
+        if snapshot:
+            # 读取历史快照
+            snapshot_dir = Path(self._root, ".snapshots")
+            file_path = snapshot_dir / snapshot
+            if not file_path.exists():
+                raise FileNotFoundError(f"快照不存在: {snapshot}")
+        else:
+            file_path = Path(self._file_path(path))
+            if not file_path.exists():
+                raise FileNotFoundError(f"文件不存在: {path}")
+
+        content = safe_read(file_path)
         logger.debug(f"[LocalWorkspace] read: {path} ({len(content)} chars)")
         return content
+
+    async def list_snapshots(self, path: str) -> list[dict]:
+        """列出指定文件的快照历史。
+
+        Returns:
+            [{name, size, timestamp}, ...] 按时间降序
+        """
+        snapshot_dir = Path(self._root, ".snapshots")
+        if not snapshot_dir.exists():
+            return []
+        prefix = path.replace("/", "_").replace("\\", "_")
+        snapshots = []
+        for f in sorted(snapshot_dir.iterdir(), reverse=True):
+            if f.is_file() and f.name.startswith(prefix):
+                stat = f.stat()
+                snapshots.append({
+                    "name": f.name,
+                    "size": stat.st_size,
+                    "timestamp": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                })
+        return snapshots
 
     async def list_files(self, directory: str = "") -> list[FileInfo]:
         dir_path = self._file_path(directory) if directory else str(Path(self._root, "files"))

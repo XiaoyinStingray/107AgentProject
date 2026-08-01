@@ -15,6 +15,7 @@ Phase 23: 实现 5 个 handler 函数并填入 WORKER_TOOLS。
   3. 引擎自动发现并包含在 Agent 决策 prompt 中——无需修改引擎代码
 """
 
+import asyncio
 from dataclasses import dataclass
 from typing import Callable, Any
 
@@ -77,14 +78,14 @@ def build_tool_list_text(tools: list[ToolSpec]) -> str:
 # 工具注册表
 # =============================================================================
 #
-# 设计冻结: 这 5 个工具是 Worker 引擎的核心工具集。
-# Phase 22 定义结构，Phase 23 实现 handler 函数后填入 handler 字段。
+# Phase 22 定义 5 个核心工具，Step 100 新增 install_package。
 #
 # 工具能力矩阵:
-#   搜索世界  → web_search (DuckDuckGo API)
+#   搜索世界  → web_search (Bing → DuckDuckGo fallback)
 #   执行代码  → run_python  (subprocess 沙盒)
-#   读写文件  → write_file / read_file (WorkspaceProvider)
-#   浏览文件  → list_files  (WorkspaceProvider)
+#   读写文件  → write_file / read_file (WorkspaceProvider + 快照)
+#   浏览文件  → list_files  (WorkspaceProvider + .snapshots)
+#   安装包    → install_package (pip install --target)
 
 WORKER_TOOLS: list[ToolSpec] = [
     ToolSpec(
@@ -145,6 +146,19 @@ WORKER_TOOLS: list[ToolSpec] = [
         },
         handler=None,  # Phase 23: list_files_handler
     ),
+    ToolSpec(
+        name="install_package",
+        description=(
+            "安装 Python 第三方包到工作区。适用于：数据分析需要 pandas、"
+            "图表生成需要 matplotlib、数据处理需要 numpy 等。"
+            "安装后可在 run_python 中 import 使用。"
+            "包安装在工作区 .packages/ 目录中，不影响系统 Python 环境。"
+        ),
+        parameters={
+            "package": {"type": "string", "description": "要安装的包名，如 'pandas' 或 'matplotlib'"},
+        },
+        handler=None,  # Step 100: install_package_handler
+    ),
 ]
 
 # 工具名 → ToolSpec 快速查找表
@@ -195,7 +209,7 @@ def make_worker_tools(workspace) -> list[ToolSpec]:
 
     # ── write_file ──
     async def write_file_handler(path: str, content: str) -> str:
-        """创建或覆盖写入文件。"""
+        """创建或覆盖写入文件（自动快照）。"""
         if not path or not isinstance(path, str):
             return "错误：请提供有效的文件路径。"
         if content is None or not isinstance(content, str):
@@ -204,8 +218,14 @@ def make_worker_tools(workspace) -> list[ToolSpec]:
             return f"错误：路径包含非法字符: {path}"
         try:
             full_path = await workspace.write_file(path, content)
+            # 获取快照数量
+            try:
+                snaps = await workspace.list_snapshots(path) if hasattr(workspace, 'list_snapshots') else []
+                version_hint = f" (版本 #{len(snaps) + 1})" if snaps else ""
+            except Exception:
+                version_hint = ""
             logger.info(f"[worker-tool] write_file: {path} → {full_path} ({len(content)} chars)")
-            return f"文件已写入: {path} ({len(content)} 字符)"
+            return f"✅ 已写入 {path} ({len(content)} 字符{version_hint})"
         except PermissionError as e:
             return f"权限错误: {e}"
         except Exception as e:
@@ -213,13 +233,17 @@ def make_worker_tools(workspace) -> list[ToolSpec]:
             return f"写入失败: {e}"
 
     # ── read_file ──
-    async def read_file_handler(path: str) -> str:
-        """读取文件内容。"""
+    async def read_file_handler(path: str, snapshot: str = "") -> str:
+        """读取文件内容（支持读取历史快照版本）。"""
         if not path or not isinstance(path, str):
             return "错误：请提供有效的文件路径。"
         try:
-            content = await workspace.read_file(path)
-            return f"[文件 {path} 内容如下]\n\n{content}"
+            snap = snapshot if snapshot else None
+            content = await workspace.read_file(path, snap)
+            label = f"[文件 {path} 内容如下]"
+            if snapshot:
+                label = f"[快照 {snapshot} 内容如下]"
+            return f"{label}\n\n{content}"
         except FileNotFoundError:
             return f"文件不存在: {path}。请确认文件名是否正确。工作区中的文件列表可用 list_files 查看。"
         except PermissionError as e:
@@ -229,7 +253,7 @@ def make_worker_tools(workspace) -> list[ToolSpec]:
 
     # ── list_files ──
     async def list_files_handler(directory: str = "") -> str:
-        """列出工作区文件。"""
+        """列出工作区文件（含 .snapshots 可见）。"""
         try:
             files = await workspace.list_files(directory)
             if not files:
@@ -239,9 +263,52 @@ def make_worker_tools(workspace) -> list[ToolSpec]:
                 size_kb = f_info.size / 1024
                 size_str = f"{size_kb:.1f}KB" if size_kb >= 0.1 else f"{f_info.size}B"
                 lines.append(f"  - {f_info.path} ({size_str})")
+            # 提示快照功能
+            if hasattr(workspace, 'list_snapshots'):
+                lines.append("\n💡 提示: 使用 read_file('path', snapshot='name') 可读取历史版本。")
+                lines.append("   使用 list_files('.snapshots') 可查看版本历史。")
             return "\n".join(lines)
         except Exception as e:
             return f"列出文件失败: {e}"
+
+    # ── install_package (Step 100) ──
+    async def install_package_handler(package: str) -> str:
+        """安装 Python 包到工作区 .packages/ 目录。"""
+        import sys
+        import subprocess as _sp
+        from pathlib import Path as _Path
+
+        if not package or not isinstance(package, str) or not package.strip():
+            return "错误：请提供要安装的包名。"
+        # 安全校验：只允许字母数字和 -_. 字符
+        if not all(c.isalnum() or c in "-_." for c in package.strip()):
+            return f"错误：包名包含非法字符: {package}"
+
+        pkg_name = package.strip().lower()
+        packages_dir = _Path(workspace.root if hasattr(workspace, 'root') else ".", ".packages")
+        packages_dir.mkdir(exist_ok=True)
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "pip", "install",
+                "--target", str(packages_dir),
+                "--quiet", "--no-input",
+                pkg_name,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+            if proc.returncode == 0:
+                logger.info(f"[worker-tool] install_package: {pkg_name} ✅")
+                return f"✅ 已安装 {pkg_name} 到工作区。可在 run_python 中 import 使用。"
+            else:
+                err = stderr.decode("utf-8", errors="replace")[:500]
+                logger.warning(f"[worker-tool] install_package failed: {pkg_name} — {err}")
+                return f"❌ 安装 {pkg_name} 失败: {err}"
+        except asyncio.TimeoutError:
+            return f"❌ 安装 {pkg_name} 超时（60秒）。"
+        except Exception as e:
+            return f"❌ 安装 {pkg_name} 失败: {e}"
 
     # 构造闭包 ToolSpec 列表（复制原 ToolSpec 并填入 handler）
     return [
@@ -265,8 +332,15 @@ def make_worker_tools(workspace) -> list[ToolSpec]:
         ),
         ToolSpec(
             name="read_file",
-            description=TOOL_REGISTRY["read_file"].description,
-            parameters=TOOL_REGISTRY["read_file"].parameters,
+            description=(
+                "读取工作区中某个文件的内容。支持读取历史快照版本——"
+                "传入 snapshot 参数（快照文件名）可读历史版本。"
+                "用 list_files('.snapshots') 可查看所有快照。"
+            ),
+            parameters={
+                "path": {"type": "string", "description": "要读取的文件相对路径，如 'report.md'"},
+                "snapshot": {"type": "string", "description": "可选——快照文件名，如 'report.md.20260801_143000'"},
+            },
             handler=read_file_handler,
         ),
         ToolSpec(
@@ -274,5 +348,11 @@ def make_worker_tools(workspace) -> list[ToolSpec]:
             description=TOOL_REGISTRY["list_files"].description,
             parameters=TOOL_REGISTRY["list_files"].parameters,
             handler=list_files_handler,
+        ),
+        ToolSpec(
+            name="install_package",
+            description=TOOL_REGISTRY["install_package"].description,
+            parameters=TOOL_REGISTRY["install_package"].parameters,
+            handler=install_package_handler,
         ),
     ]

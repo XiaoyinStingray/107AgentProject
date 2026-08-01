@@ -437,4 +437,125 @@ export class AutonomousMover {
   destroy(): void {
     this.stop();
   }
+
+  /* ================================================================
+   * Step 99c: 涂鸦指令移动
+   * ================================================================ */
+
+  /** 画线：沿着线的方向走到终点（有 bounds + walkable 校验） */
+  moveAlongLine(fromTileX: number, fromTileY: number, toTileX: number, toTileY: number): void {
+    const { w, h } = this.mapBounds;
+    // clamp 到地图边界
+    const clampedX = Math.max(0, Math.min(w - 1, toTileX));
+    const clampedY = Math.max(0, Math.min(h - 1, toTileY));
+    // 如果终点不可通行，向外搜索最近可走 tile
+    let destX = clampedX;
+    let destY = clampedY;
+    if (!this.isWalkable(destX, destY) || this.isOccupied(destX, destY)) {
+      let found = false;
+      for (let r = 1; r <= 3 && !found; r++) {
+        for (let dx = -r; dx <= r && !found; dx++) {
+          for (const dy of [-r, r]) {
+            const nx = clampedX + dx;
+            const ny = clampedY + dy;
+            if (nx >= 0 && nx < w && ny >= 0 && ny < h && this.isWalkable(nx, ny) && !this.isOccupied(nx, ny)) {
+              destX = nx; destY = ny; found = true; break;
+            }
+          }
+        }
+      }
+      if (!found) { this.start(); return; } // 无处可走
+    }
+
+    const destination = this.reserveDestination(destX, destY);
+    if (!destination) { this.start(); return; }
+
+    this.stop();
+    this.sprite.action = "walk";
+    const px = destination.tx * 64 + 32;
+    const py = destination.ty * 64 + 32;
+    this.scene.tweens.add({
+      targets: this.sprite,
+      x: px, y: py,
+      duration: 400,
+      ease: "Sine.easeInOut",
+      onComplete: () => {
+        if (!this.scene) return;
+        this.reservation?.release(this.sprite.agentId);
+        this.sprite.tileX = destination.tx;
+        this.sprite.tileY = destination.ty;
+        this.sprite.setAction("idle");
+        this.start();
+      },
+    });
+  }
+
+  /** 画圈：走到圈内指定 tile */
+  moveToPoint(tileX: number, tileY: number): void {
+    this.stop();
+    const destination = this.reserveDestination(tileX, tileY);
+    if (!destination) {
+      this.start();
+      return;
+    }
+    this.sprite.action = "walk";
+    const px = destination.tx * 64 + 32;
+    const py = destination.ty * 64 + 32;
+    this.scene.tweens.add({
+      targets: this.sprite,
+      x: px, y: py,
+      duration: 300,
+      ease: "Sine.easeInOut",
+      onComplete: () => {
+        if (!this.scene) return;
+        this.reservation?.release(this.sprite.agentId);
+        this.sprite.tileX = destination.tx;
+        this.sprite.tileY = destination.ty;
+        this.sprite.setAction("idle");
+        this.start();
+      },
+    });
+  }
+
+  /** 画叉：从叉心散开到距离 ≥5 tile 的位置 */
+  scatterFrom(centerTileX: number, centerTileY: number): void {
+    this.stop();
+    const { w, h } = this.mapBounds;
+
+    // 在远离中心的方向随机选一个可通行 tile
+    const dx = this.sprite.tileX - centerTileX || (Math.random() > 0.5 ? 1 : -1);
+    const dy = this.sprite.tileY - centerTileY || (Math.random() > 0.5 ? 1 : -1);
+    const dirX = Math.sign(dx);
+    const dirY = Math.sign(dy);
+
+    for (let dist = 5; dist <= 8; dist++) {
+      const tx = Math.max(0, Math.min(w - 1, centerTileX + dirX * dist));
+      const ty = Math.max(0, Math.min(h - 1, centerTileY + dirY * dist));
+      if (this.isWalkable(tx, ty) && !this.isOccupied(tx, ty)) {
+        const destination = this.reserveDestination(tx, ty);
+        if (destination) {
+          this.sprite.action = "walk";
+          const px = destination.tx * 64 + 32;
+          const py = destination.ty * 64 + 32;
+          this.scene.tweens.add({
+            targets: this.sprite,
+            x: px, y: py,
+            duration: 350,
+            ease: "Sine.easeInOut",
+            onComplete: () => {
+              if (!this.scene) return;
+              this.reservation?.release(this.sprite.agentId);
+              this.sprite.tileX = destination.tx;
+              this.sprite.tileY = destination.ty;
+              this.sprite.setAction("idle");
+              this.start();
+            },
+          });
+          return;
+        }
+      }
+    }
+    // 找不到可通行 tile → 恢复自主移动
+    this.start();
+  }
 }

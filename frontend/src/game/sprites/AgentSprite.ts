@@ -342,4 +342,66 @@ export class AgentSprite extends Phaser.GameObjects.Container {
     this.breathTween?.stop(); this.popupTimer?.destroy();
     super.destroy(fromScene);
   }
+
+  /* ================================================================
+   * Step 99: 主动搭话动画
+   * ================================================================ */
+
+  /** 跳动动画——Agent 主动搭话时触发 */
+  playBounce(): void {
+    if (!this.scene) return;
+    const baseY = this.y;
+    // 停止呼吸动画
+    this.breathTween?.stop();
+    // 弹跳序列
+    this.scene.tweens.chain({
+      targets: this,
+      tweens: [
+        { y: baseY - 12, scaleX: 1.15, scaleY: 1.15, duration: 300, ease: "Back.easeOut" },
+        { y: baseY, scaleX: 1.0, scaleY: 1.0, duration: 300, ease: "Sine.easeIn" },
+        { y: baseY - 6, scaleX: 1.08, scaleY: 1.08, duration: 300, ease: "Back.easeOut" },
+        { y: baseY, scaleX: 1.0, scaleY: 1.0, duration: 300, ease: "Sine.easeIn" },
+      ],
+      onComplete: () => {
+        this.startBreath();
+      },
+    });
+  }
+
+  /** 失落动画——用户忽略搭话后 */
+  playDisappointed(): void {
+    if (!this.scene) return;
+    const baseY = this.y;
+    this.scene.tweens.chain({
+      targets: this,
+      tweens: [
+        { y: baseY + 4, scaleY: 0.92, duration: 200, ease: "Sine.easeIn" },
+        { y: baseY - 2, scaleY: 0.96, duration: 150 },
+        { y: baseY, scaleX: 1.0, scaleY: 1.0, duration: 250, ease: "Sine.easeOut" },
+      ],
+      onComplete: () => {
+        this.startBreath();
+      },
+    });
+  }
+
+  /* ================================================================
+   * Step 99b: 绘文字反应
+   * ================================================================ */
+
+  /** 对投掷 emoji 做出即时反应 */
+  reactToEmoji(emoji: string): void {
+    const reactions: Record<string, Emotion> = {
+      "❤️": "happy",
+      "😡": "angry",
+      "🌸": "happy",
+      "💣": "surprised",
+      "🎵": "excited",
+      "👻": "surprised",
+    };
+    const emotion = reactions[emoji];
+    if (emotion) {
+      this.setEmotion(emotion);
+    }
+  }
 }

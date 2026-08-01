@@ -10,12 +10,18 @@ import type { Personality } from "../components/scene/PersonaTamper";
 import CheckpointPanel from "../components/scene/CheckpointPanel";
 import DirectorPanel from "../components/scene/DirectorPanel";
 import AudioControls from "../components/scene/AudioControls";
+import ProactiveBanner from "../components/scene/ProactiveBanner";
+import ProactiveChat from "../components/scene/ProactiveChat";
+import type { ChatOption } from "../components/scene/ProactiveChat";
 import { useSyncSceneState, useCheckpoints, useCreateCheckpoint, useDeleteCheckpoint, useStartScene } from "../api/scenes";
 import { useAgents } from "../api/agents";
 import { useInjectEvent, usePauseWorld, useStartWorld } from "../api/worlds";
 import type { AgentResponse } from "../types/agent";
 import { pickAccessoryId } from "../game/accessories";
 import { synchronizeScenePause } from "../game/scenePause";
+import { type ProactiveTrigger } from "../game/ProactiveChatManager";
+import { getChatOptions, type TopicCategory } from "../game/dialogue";
+import { useChatHistoryStore } from "../stores/useChatHistoryStore";
 import {
   BrainDisconnectWatchdog,
   BrainWhisperTracker,
@@ -143,6 +149,35 @@ export default function GameScenePage() {
   const [tamperTargetId, setTamperTargetId] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
   const [weather, setWeather] = useState("clear");
+
+  // ── Step 98/99: 主动搭话状态 ──
+  const [proactiveBanner, setProactiveBanner] = useState<{
+    trigger: ProactiveTrigger;
+    remainingSeconds: number;
+  } | null>(null);
+  const [chatActive, setChatActive] = useState<{
+    trigger: ProactiveTrigger;
+    options: ReturnType<typeof getChatOptions>;
+  } | null>(null);
+
+  // ── Step 99a: 空闲自动暂停 ──
+  const [autoPaused, setAutoPaused] = useState(false);
+  const idleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastInteractionRef = useRef(Date.now());
+  const chatActiveRef = useRef(false); // 供 idle timer 闭包读取
+  const IDLE_TIMEOUT = 5 * 60 * 1000; // 5 分钟
+
+  // ── Step 99c: 涂鸦模式 ──
+  const [graffitiEnabled, setGraffitiEnabled] = useState(false);
+
+  // ── Step 99b: Emoji 模式 ──
+  const [emojiMode, setEmojiMode] = useState(false);
+  const [selectedEmoji, setSelectedEmoji] = useState("❤️");
+  const EMOJI_PALETTE = ["❤️", "😡", "🌸", "💣", "🎵", "👻"];
+
+  // ── Step 99d: 对话历史 ──
+  const chatHistory = useChatHistoryStore();
+
   const syncMutation = useSyncSceneState();
   // 71: 对话日志（叙事导出用）
   // hash 跳转到对应面板
@@ -276,13 +311,76 @@ export default function GameScenePage() {
     }
   }, [agents, mapId, pauseWorld, paused, startScene]);
 
-  // 场景切换时断开 SSE
+  // 场景切换时断开 SSE + 清理主动搭话
   useEffect(() => {
     brainWhisperTracker.cancel();
     setSceneWorldId(null);
     setBrainEnabled(false);
     setBrainConnectionError(null);
+    // Step 98: 清理主动搭话状态
+    setProactiveBanner(null);
+    setChatActive(null);
   }, [brainWhisperTracker, mapId]);
+
+  // ── Step 99a: 空闲检测 ──
+  useEffect(() => {
+    const resetIdle = () => {
+      lastInteractionRef.current = Date.now();
+      if (autoPaused) {
+        // 点击恢复
+        setAutoPaused(false);
+        const game = gameRef.current;
+        if (game) {
+          const resumeAll = game.registry.get("resumeAll") as (() => void) | undefined;
+          resumeAll?.();
+        }
+      }
+    };
+
+    document.addEventListener("mousemove", resetIdle, { passive: true });
+    document.addEventListener("click", resetIdle, { passive: true });
+    document.addEventListener("keydown", resetIdle, { passive: true });
+    document.addEventListener("touchstart", resetIdle, { passive: true });
+
+    idleTimerRef.current = setInterval(() => {
+      if (autoPaused || paused) return;
+      // Step 99: 对话弹窗/横幅打开时不触发自动暂停
+      if (chatActiveRef.current) {
+        lastInteractionRef.current = Date.now(); // 刷新计时器
+        return;
+      }
+      if (Date.now() - lastInteractionRef.current > IDLE_TIMEOUT) {
+        setAutoPaused(true);
+        const game = gameRef.current;
+        if (game) {
+          const pauseAll = game.registry.get("pauseAll") as (() => void) | undefined;
+          pauseAll?.();
+        }
+      }
+    }, 10000); // 每 10 秒检查
+
+    return () => {
+      document.removeEventListener("mousemove", resetIdle);
+      document.removeEventListener("click", resetIdle);
+      document.removeEventListener("keydown", resetIdle);
+      document.removeEventListener("touchstart", resetIdle);
+      if (idleTimerRef.current) clearInterval(idleTimerRef.current);
+    };
+  }, [autoPaused, paused]);
+
+  // ── Step 99: 主动搭话横幅倒计时 ──
+  useEffect(() => {
+    if (!proactiveBanner) return;
+    const interval = setInterval(() => {
+      setProactiveBanner((prev) => {
+        if (!prev) return null;
+        const next = prev.remainingSeconds - 1;
+        if (next <= 0) return null;
+        return { ...prev, remainingSeconds: next };
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [proactiveBanner?.trigger.agent.agentId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const brainButton = getBrainButtonState(
     agents.length,
@@ -573,6 +671,137 @@ export default function GameScenePage() {
     [tamperTargetId],
   );
 
+  // ── Step 98/99: 主动搭话处理 ──
+
+  const handleProactiveTrigger = useCallback((trigger: ProactiveTrigger) => {
+    setProactiveBanner({ trigger, remainingSeconds: 60 });
+    // Agent 跳动动画
+    const ms = gameRef.current?.scene.getScene("MapScene") as MapScene | undefined;
+    const sprite = ms?.getAgentSprite(trigger.agent.agentId);
+    (sprite as any)?.playBounce?.();
+  }, []);
+
+  const handleProactiveTimeout = useCallback((_agentId: string) => {
+    setProactiveBanner(null);
+  }, []);
+
+  // 同步 chatActiveRef 供 idle timer 读取
+  useEffect(() => {
+    chatActiveRef.current = !!(chatActive || proactiveBanner);
+  }, [chatActive, proactiveBanner]);
+
+  const handleProactiveAccept = useCallback(() => {
+    if (!proactiveBanner) return;
+    const { trigger } = proactiveBanner;
+    setProactiveBanner(null);
+
+    // 冻结场景 + 锁定 Agent
+    const game = gameRef.current;
+    const freezeAgents = game?.registry.get("freezeAgents") as (() => void) | undefined;
+    const lockAgent = game?.registry.get("lockAgent") as ((id: string) => void) | undefined;
+    freezeAgents?.();
+    lockAgent?.(trigger.agent.agentId);
+
+    // 生成对话选项
+    const options = getChatOptions(trigger.topicCategory as TopicCategory);
+
+    // 通知 ProactiveChatManager
+    const proactive = game?.registry.get("proactiveManager") as any;
+    proactive?.accept(trigger.agent.agentId);
+
+    setChatActive({ trigger, options });
+  }, [proactiveBanner]);
+
+  const handleProactiveIgnore = useCallback(() => {
+    if (!proactiveBanner) return;
+    const { trigger } = proactiveBanner;
+    setProactiveBanner(null);
+
+    const game = gameRef.current;
+    const proactive = game?.registry.get("proactiveManager") as any;
+    proactive?.ignore(trigger.agent.agentId);
+
+    // Agent 失落动画
+    const ms = game?.scene.getScene("MapScene") as MapScene | undefined;
+    const sprite = ms?.getAgentSprite(trigger.agent.agentId);
+    (sprite as any)?.playDisappointed?.();
+  }, [proactiveBanner]);
+
+  const handleChatEnd = useCallback((history: Array<{ speaker: string; text: string; optionUsed?: string }>) => {
+    if (!chatActive) return;
+    const { trigger } = chatActive;
+    setChatActive(null);
+
+    // 记录对话历史
+    const lastUserMsg = history.filter((h) => h.speaker === "user").pop();
+    if (lastUserMsg?.optionUsed) {
+      chatHistory.addEntry({
+        agentId: trigger.agent.agentId,
+        agentName: trigger.agent.name,
+        choice: lastUserMsg.optionUsed as "A" | "B" | "C",
+        topic: trigger.topic,
+        timestamp: Date.now(),
+      });
+    }
+
+    // 恢复场景
+    const game = gameRef.current;
+    const unfreezeAgents = game?.registry.get("unfreezeAgents") as (() => void) | undefined;
+    const unlockAgent = game?.registry.get("unlockAgent") as ((id: string) => void) | undefined;
+    const proactive = game?.registry.get("proactiveManager") as any;
+    unlockAgent?.(trigger.agent.agentId);
+    unfreezeAgents?.();
+    proactive?.endConversation();
+  }, [chatActive, chatHistory]);
+
+  // ── Step 99c: 涂鸦切换（与 emoji 模式互斥）──
+  const handleToggleGraffiti = useCallback(() => {
+    setGraffitiEnabled((prev) => {
+      const next = !prev;
+      const ms = gameRef.current?.scene.getScene("MapScene") as MapScene | undefined;
+      ms?.setGraffitiEnabled(next);
+      if (next) {
+        // 关闭 emoji 模式
+        setEmojiMode(false);
+        ms?.setEmojiMode(false);
+      }
+      return next;
+    });
+  }, []);
+
+  // ── Step 99b: Emoji 模式切换（与涂鸦互斥）──
+  const handleToggleEmojiMode = useCallback(() => {
+    setEmojiMode((prev) => {
+      const next = !prev;
+      const ms = gameRef.current?.scene.getScene("MapScene") as MapScene | undefined;
+      ms?.setEmojiMode(next);
+      if (next) {
+        // 关闭涂鸦模式
+        setGraffitiEnabled(false);
+        ms?.setGraffitiEnabled(false);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleSelectEmoji = useCallback((emoji: string) => {
+    setSelectedEmoji(emoji);
+    // 更新 EmojiDrop 当前选中的 emoji
+    const ms = gameRef.current?.scene.getScene("MapScene") as any;
+    if (ms?.emojiDrop) {
+      (ms.emojiDrop as any).setSelectedEmoji?.(emoji);
+    }
+  }, []);
+
+  // ── 画布空白点击 → 取消选中 Agent ──
+  useEffect(() => {
+    const game = gameRef.current;
+    if (!game) return;
+    const handler = () => setSelectedAgentId(null);
+    game.events.on("canvas-deselect", handler);
+    return () => { game.events.off("canvas-deselect", handler); };
+  }, [gameReady]); // eslint-disable-line react-hooks/exhaustive-deps
+
   /** 部署时初始化人格 */
   const deployAgent = useCallback(
     (def: AgentPoolEntry) => {
@@ -679,7 +908,7 @@ export default function GameScenePage() {
       </div>
 
       {/* ── 右侧画布区 ── */}
-      <div className="flex-1 flex items-center justify-center p-4">
+      <div className="flex-1 flex items-center justify-center p-4 relative">
         <GameCanvas
           mapId={mapId}
           agents={agents}
@@ -688,7 +917,92 @@ export default function GameScenePage() {
           onAgentMove={handleAgentMove}
           onAgentDoubleClick={handleAgentDoubleClick}
           onGameReady={(g) => { gameRef.current = g; setGameReady(true); }}
+          onProactiveTrigger={handleProactiveTrigger}
+          onProactiveTimeout={handleProactiveTimeout}
         />
+
+        {/* ── 交互模式指示器 ── */}
+        <div className="absolute top-2 right-2 z-30 flex items-center gap-1.5">
+          <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border transition-colors ${
+            !emojiMode && !graffitiEnabled
+              ? "border-accent-green/50 bg-accent-green/10 text-accent-green"
+              : "border-border text-text-secondary"
+          }`}>
+            🖐️ 正常
+          </span>
+          {emojiMode && (
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full border border-accent-orange/50 bg-accent-orange/10 text-accent-orange">
+              🎯 Emoji
+            </span>
+          )}
+          {graffitiEnabled && (
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full border border-accent-blue/50 bg-accent-blue/10 text-accent-blue">
+              ✏️ 涂鸦
+            </span>
+          )}
+        </div>
+
+        {/* ── Emoji 调色板（Emoji 模式时显示）── */}
+        {emojiMode && (
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 px-3 py-2 rounded-xl bg-bg-secondary/90 backdrop-blur border border-accent-orange/30 shadow-lg">
+            <span className="text-[10px] font-mono text-text-secondary mr-1">选择:</span>
+            {EMOJI_PALETTE.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                onClick={() => handleSelectEmoji(emoji)}
+                className={`w-9 h-9 flex items-center justify-center text-lg rounded-lg transition-all ${
+                  selectedEmoji === emoji
+                    ? "bg-accent-orange/20 border-2 border-accent-orange scale-110"
+                    : "bg-bg-primary border border-border hover:border-accent-orange/40 hover:scale-105"
+                }`}
+              >
+                {emoji}
+              </button>
+            ))}
+            <span className="text-[10px] font-mono text-text-secondary ml-1">点击画布投掷</span>
+          </div>
+        )}
+
+        {/* Step 99a: 自动暂停遮罩 */}
+        {autoPaused && (
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center cursor-pointer animate-fade-in"
+            onClick={() => {
+              setAutoPaused(false);
+              const resumeAll = gameRef.current?.registry.get("resumeAll") as (() => void) | undefined;
+              resumeAll?.();
+            }}
+          >
+            <div className="text-center space-y-3">
+              <p className="text-2xl">😴</p>
+              <p className="text-lg font-mono text-text-primary">场景已暂停</p>
+              <p className="text-sm font-mono text-text-secondary">（5 分钟无操作）</p>
+              <p className="text-xs font-mono text-accent-orange mt-2">点击任意位置继续</p>
+            </div>
+          </div>
+        )}
+
+        {/* Step 99: 主动搭话横幅 */}
+        {proactiveBanner && (
+          <ProactiveBanner
+            agent={proactiveBanner.trigger.agent}
+            topic={proactiveBanner.trigger.topic}
+            remainingSeconds={proactiveBanner.remainingSeconds}
+            onAccept={handleProactiveAccept}
+            onIgnore={handleProactiveIgnore}
+          />
+        )}
+
+        {/* Step 99/99d: 主动搭话对话弹窗 */}
+        {chatActive && (
+          <ProactiveChat
+            agent={chatActive.trigger.agent}
+            topic={chatActive.trigger.topic}
+            options={chatActive.options as ChatOption[]}
+            onEnd={handleChatEnd}
+          />
+        )}
       </div>
 
       {/* ── 浮动面板（独立于布局）── */}
@@ -752,10 +1066,46 @@ export default function GameScenePage() {
           onWeatherChange={handleWeatherChange}
           onGodVoice={handleGodVoice}
           onMoodAll={handleMoodAll}
-          paused={paused}
+          paused={paused || autoPaused}
         />
 
-        {/* 71: 叙事导出 */}
+        {/* Step 99c: 涂鸦指令开关 */}
+        <div className="mt-2 pt-2 border-t border-border space-y-1.5">
+          <button
+            type="button"
+            onClick={handleToggleGraffiti}
+            className={`w-full px-3 py-1.5 text-xs font-mono rounded border transition-colors ${
+              graffitiEnabled
+                ? "border-accent-blue/60 bg-accent-blue/10 text-accent-blue"
+                : "border-border text-text-secondary hover:border-text-secondary/40"
+            }`}
+          >
+            ✏️ 涂鸦指令 {graffitiEnabled ? "开" : "关"}
+          </button>
+          {graffitiEnabled && (
+            <p className="text-[10px] font-mono text-text-secondary">
+              按住画线→跟随 / 画圈→聚集 / 画叉→散开
+            </p>
+          )}
+
+          {/* Step 99b: Emoji 模式开关 */}
+          <button
+            type="button"
+            onClick={handleToggleEmojiMode}
+            className={`w-full px-3 py-1.5 text-xs font-mono rounded border transition-colors ${
+              emojiMode
+                ? "border-accent-orange/60 bg-accent-orange/10 text-accent-orange"
+                : "border-border text-text-secondary hover:border-text-secondary/40"
+            }`}
+          >
+            🎯 Emoji 投掷 {emojiMode ? "开" : "关"}
+          </button>
+          {emojiMode && (
+            <p className="text-[10px] font-mono text-text-secondary">
+              选 emoji → 点画布投掷 → Agent 反应
+            </p>
+          )}
+        </div>
       </Card>
 
       {/* 存档面板 */}
