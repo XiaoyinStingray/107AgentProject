@@ -93,6 +93,22 @@ class TestArenaRequests:
                 topic="测试",
             )
 
+    def test_battle_rejects_empty_agent_id(self):
+        """空 Agent ID 应被拒绝。"""
+        with pytest.raises(ValidationError, match="Agent ID 不能为空"):
+            BattleRoyaleRequest(
+                agent_ids=["a", "b", "c", "d", "e", ""],
+                topic="测试",
+            )
+
+    def test_battle_rejects_blank_topic(self):
+        """空白主题应被拒绝。"""
+        with pytest.raises(ValidationError, match="竞技主题不能为空"):
+            BattleRoyaleRequest(
+                agent_ids=["a", "b", "c", "d", "e", "f"],
+                topic="   ",
+            )
+
 
 class TestArenaStorageAndResponse:
     def test_response_caps_content_without_mutating_stored_result(self):

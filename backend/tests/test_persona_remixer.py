@@ -129,3 +129,29 @@ def test_spec_rejects_big_five_preserve_and_targets():
             trait_targets=BigFivePatch(extraversion=0.8),
             preserve_fields=["big_five"],
         )
+
+
+def test_spec_rejects_empty_instruction_and_targets():
+    """instruction 和 trait_targets 都为空时应被拒绝。"""
+    with pytest.raises(ValueError, match="至少提供一项"):
+        RemixSpec(
+            instruction="",
+            trait_targets=BigFivePatch(),
+        )
+
+
+def test_remix_request_validates_action_payload():
+    """RemixRequest 验证 action 和 draft 的匹配关系。"""
+    from models.remix import RemixRequest, RemixSpec, RemixDraft
+    from models.agent import Persona, Background
+
+    spec = RemixSpec(instruction="测试")
+
+    # preview 请求不能携带 draft
+    draft = RemixDraft(persona=Persona(), background=Background())
+    with pytest.raises(ValueError, match="preview 请求不能携带 draft"):
+        RemixRequest(action="preview", spec=spec, draft=draft)
+
+    # create 请求必须携带 draft
+    with pytest.raises(ValueError, match="create 请求必须携带"):
+        RemixRequest(action="create", spec=spec, draft=None)
