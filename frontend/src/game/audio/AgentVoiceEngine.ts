@@ -105,15 +105,6 @@ export class AgentVoiceEngine {
     volume: number | (() => number),
     callbacks: PlaybackCallbacks,
   ): Promise<void> {
-<<<<<<< Updated upstream
-    if (!this.audioCtx || volume <= 0) {
-      // 无声模式：仅分页回调
-      await this.playSilent(text, callbacks);
-      return;
-    }
-
-=======
->>>>>>> Stashed changes
     this.aborted = false;
     const mod = getEmotionMod(emotion);
     const pages = this.paginate(text);
