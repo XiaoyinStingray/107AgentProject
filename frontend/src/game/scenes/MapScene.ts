@@ -95,6 +95,10 @@ export class MapScene extends Phaser.Scene {
   private bgImage: Phaser.GameObjects.Image | null = null;
   private fgImages: Phaser.GameObjects.Image[] = [];
   private weatherTweens: Phaser.Tweens.Tween[] = [];
+  private weatherParticles: Phaser.GameObjects.GameObject[] = [];
+  private eventNotifications: Phaser.GameObjects.Text[] = [];
+  private activeBubbles: Set<import("../sprites/ActionBubble").ActionBubble> = new Set();
+  private pendingWeather: string | null = null;
   private agentSprites: Map<string, AgentSprite> = new Map();
   private pendingAgents: AgentSpriteData[] | null = null;
   private wallMap: number[][] = [];  // 墙壁占位 map，0=可通行
@@ -292,9 +296,11 @@ export class MapScene extends Phaser.Scene {
     // 3.5 装饰层（地板花纹 + 墙面挂饰）
     this.placeDecors(d);
 
-    // 4. 天气
-    if (d.weather === "sakura" || d.weather === "rain") {
-      this.startWeather(d.weather, W, H);
+    // 4. 天气（含导演面板预设）
+    const weatherType = this.pendingWeather ?? d.weather;
+    this.pendingWeather = null;
+    if (weatherType === "sakura" || weatherType === "rain") {
+      this.startWeather(weatherType, W, H);
     }
 
     // 5. Agent 精灵 — 始终消费 pending（修复 BUG-023）
@@ -438,7 +444,7 @@ export class MapScene extends Phaser.Scene {
         ? this.add.rectangle(px, py, 1, 6, 0x8899CC, 0.5).setDepth(10)
         : this.add.circle(px, py, 2.5, 0xF8BBD0, 0.65).setDepth(10);
 
-      this.itemObjects.push(particle);
+      this.weatherParticles.push(particle);
 
       const tw = this.tweens.add({
         targets: particle,
@@ -458,12 +464,19 @@ export class MapScene extends Phaser.Scene {
    * ================================================================ */
 
   setWeather(type: string): void {
-    if (!this.mapData) return;
-    this.mapData.weather = type as any;
+    // 停止旧 tween 并销毁粒子对象（防止残留）
     this.weatherTweens.forEach((t) => t.stop());
     this.weatherTweens = [];
-    if (type === "sakura" || type === "rain") {
-      this.startWeather(type, this.mapData.width, this.mapData.height);
+    this.weatherParticles.forEach((p) => { try { p.destroy(); } catch { /* */ } });
+    this.weatherParticles = [];
+    if (this.mapData) {
+      this.mapData.weather = type as any;
+      if (type === "sakura" || type === "rain") {
+        this.startWeather(type, this.mapData.width, this.mapData.height);
+      }
+    } else {
+      // mapData 尚未加载（场景切换中），存入待建天气
+      this.pendingWeather = type;
     }
   }
 
@@ -758,6 +771,7 @@ export class MapScene extends Phaser.Scene {
     import("../sprites/ActionBubble").then(({ ActionBubble }) => {
       const bubble = new ActionBubble(this, message);
       bubble.show(sprite);
+      this.activeBubbles.add(bubble);
     });
   }
 
@@ -784,11 +798,16 @@ export class MapScene extends Phaser.Scene {
       emotion,
       onBubble: (pageText: string, _agentId: string, isFirst: boolean) => {
         if (isFirst || !activeBubble) {
-          // 第一页：新建气泡
+          // 第一页：新建气泡（先销毁旧气泡）
+          if (activeBubble) {
+            this.activeBubbles.delete(activeBubble);
+            try { activeBubble.hide(); } catch { /* */ }
+          }
           import("../sprites/ActionBubble").then(({ ActionBubble }) => {
             const bubble = new ActionBubble(this, pageText);
             bubble.show(sprite);
             activeBubble = bubble;
+            this.activeBubbles.add(bubble);
           });
         } else {
           // 后续页：更新现有气泡文字
@@ -798,7 +817,11 @@ export class MapScene extends Phaser.Scene {
         }
       },
       onDone: () => {
-        activeBubble = null;
+        if (activeBubble) {
+          this.activeBubbles.delete(activeBubble);
+          try { activeBubble.hide(); } catch { /* */ }
+          activeBubble = null;
+        }
         onDone?.();
       },
     });
@@ -902,6 +925,11 @@ export class MapScene extends Phaser.Scene {
       sprite.y = Math.max(TILE_S / 2, Math.min(dragY, MH - TILE_S / 2));
     });
 
+    // 拖拽开始 → 停止自主移动
+    sprite.on("dragstart", () => {
+      this.movers.get(d.agentId)?.stop();
+    });
+
     // 拖拽结束 → 吸附到最近可通行 tile + 重叠检查 + 通知 React
     sprite.on("dragend", () => {
       const W = this.mapData?.width ?? 16;
@@ -917,6 +945,10 @@ export class MapScene extends Phaser.Scene {
       }
       sprite.setTile(tx, ty);
       this.game.events.emit("agent-moved", d.agentId, tx, ty);
+      // 恢复自主移动
+      if (!this.paused) {
+        this.movers.get(d.agentId)?.start();
+      }
     });
   }
 
@@ -1244,6 +1276,8 @@ export class MapScene extends Phaser.Scene {
       align: "center",
     }).setOrigin(0.5).setDepth(50).setAlpha(0);
 
+    this.eventNotifications.push(text);
+
     this.tweens.add({
       targets: text,
       alpha: 1,
@@ -1258,7 +1292,10 @@ export class MapScene extends Phaser.Scene {
           duration: 800,
           delay: 2500,
           ease: "Sine.easeIn",
-          onComplete: () => text.destroy(),
+          onComplete: () => {
+            this.eventNotifications = this.eventNotifications.filter((t) => t !== text);
+            text.destroy();
+          },
         });
       },
     });
@@ -1388,12 +1425,30 @@ export class MapScene extends Phaser.Scene {
     return tileX >= 0 && tileX < width && tileY >= 0 && tileY < height;
   }
 
-  /** 某 tile 是否可放置 Agent（非墙壁/非门） */
+  /** 某 tile 是否可放置 Agent（非墙壁/非物品） */
   private isWalkable(tx: number, ty: number): boolean {
-    if (!this.wallMap.length) return true; // 无墙壁数据（室外场景）
-    const row = this.wallMap[ty];
-    if (!row) return true;
-    return row[tx] < 0; // -1 = 无墙壁
+    if (!this.wallMap.length) {
+      // 室外场景 — 仅检查边界
+      const W = this.mapData?.width ?? 16;
+      const H = this.mapData?.height ?? 12;
+      if (tx < 0 || tx >= W || ty < 0 || ty >= H) return false;
+    } else {
+      const row = this.wallMap[ty];
+      if (!row) return true;
+      if (row[tx] >= 0) return false; // 墙壁
+    }
+    // 检查是否有物品占据该 tile
+    return !this.isItemTile(tx, ty);
+  }
+
+  /** 某 tile 是否有物品（物品阻挡 Agent 移动） */
+  private isItemTile(tx: number, ty: number): boolean {
+    const items = this.mapData?.items;
+    if (!items) return false;
+    for (const item of items) {
+      if (item.tileX === tx && item.tileY === ty) return true;
+    }
+    return false;
   }
 
   /** 从不可通行的 (tx,ty) 向外搜索最近的可通行 tile */
@@ -1450,6 +1505,12 @@ export class MapScene extends Phaser.Scene {
     this.time.removeAllEvents();
 
     this.weatherTweens = [];
+    this.weatherParticles.forEach((p) => { try { p.destroy(); } catch { /* */ } });
+    this.weatherParticles = [];
+    this.eventNotifications.forEach((t) => { try { t.destroy(); } catch { /* */ } });
+    this.eventNotifications = [];
+    this.activeBubbles.forEach((b) => { try { b.hide(); } catch { /* */ } });
+    this.activeBubbles.clear();
     this.movers.forEach((m) => m.destroy());
     this.movers.clear();
     this.agentSprites.forEach((s) => { try { s.destroy(); } catch { /* already gone */ } });

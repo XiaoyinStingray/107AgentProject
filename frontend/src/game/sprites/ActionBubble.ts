@@ -47,7 +47,7 @@ export class ActionBubble extends Phaser.GameObjects.Container {
 
     this.add(this.bg);
     this.add(this.text);
-    this.setDepth(25);
+    this.setDepth(30); // 高于 Agent(depth=25)
     this.setAlpha(0);
   }
 

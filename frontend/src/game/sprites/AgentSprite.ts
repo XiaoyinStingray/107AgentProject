@@ -215,7 +215,7 @@ export class AgentSprite extends Phaser.GameObjects.Container {
 
     // 情绪 emoji 弹窗
     this.emotionPopup = scene.add.text(CIRCLE_R - 8, -CIRCLE_R + 6, "", {
-      fontSize: "20px", fontFamily: "sans-serif",
+      fontSize: "22px", fontFamily: "\"Segoe UI Emoji\", \"Apple Color Emoji\", \"Noto Color Emoji\", sans-serif",
     }).setOrigin(0.5).setAlpha(0).setScale(0);
     this.add(this.emotionPopup);
 
@@ -232,7 +232,7 @@ export class AgentSprite extends Phaser.GameObjects.Container {
     this.startEmotionPopup();
 
     scene.add.existing(this);
-    this.setDepth(15);
+    this.setDepth(25); // 高于前景层(foreground depth=20)，防止被树冠等遮挡
   }
 
   /* ================================================================
@@ -305,6 +305,7 @@ export class AgentSprite extends Phaser.GameObjects.Container {
    * 情绪 emoji 弹窗
    * ================================================================ */
   private _popupEmotion = "";
+  private _popupTweens: Phaser.Tweens.Tween[] = [];
   private startEmotionPopup(): void {
     if (this.emotion === this._popupEmotion) return;
     this._popupEmotion = this.emotion;
@@ -315,11 +316,23 @@ export class AgentSprite extends Phaser.GameObjects.Container {
     this.emotionPopup.setText(emoji);
     const show = () => {
       if (!this.emotionPopup || !this.scene) return;
+      // 清除旧 tween 防止重影
+      for (const t of this._popupTweens) t.stop();
+      this._popupTweens.length = 0;
       this.emotionPopup.setAlpha(1).setScale(0.3);
-      this.scene.tweens.add({
-        targets: this.emotionPopup, scaleX: 1.2, scaleY: 1.2, duration: 300, ease: "Back.easeOut",
-        onComplete: () => { this.scene.tweens.add({ targets: this.emotionPopup, alpha: 0, duration: 800, delay: 600 }); },
-      });
+      this._popupTweens.push(
+        this.scene.tweens.add({
+          targets: this.emotionPopup, scaleX: 1.2, scaleY: 1.2, duration: 300, ease: "Back.easeOut",
+          onComplete: () => {
+            if (!this.emotionPopup || !this.scene) return;
+            this._popupTweens.push(
+              this.scene.tweens.add({
+                targets: this.emotionPopup, alpha: 0, scaleX: 0, scaleY: 0, duration: 800, delay: 600,
+              }),
+            );
+          },
+        }),
+      );
     };
     show();
     this.popupTimer = this.scene.time.addEvent({ delay: 5000 + Math.random() * 3000, loop: true, callback: show });

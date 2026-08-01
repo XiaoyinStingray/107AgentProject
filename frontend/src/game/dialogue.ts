@@ -286,3 +286,51 @@ export async function fetchDialogue(
   console.log(`[dialogue] 🔶 local mock: ${mockLine.slice(0, 40)}`);
   return { message: mockLine, emotion: null, source: "mock" };
 }
+
+/**
+ * 耳语专用对话获取 — 仅调用真实 API，不使用 mock 兜底。
+ * 返回 null 表示 API 不可用。
+ */
+export async function fetchWhisperDialogue(
+  fromName: string,
+  toName: string,
+  sceneId: string,
+  whisperMessage: string,
+  context: string[] = [],
+): Promise<DialogueResult | null> {
+  console.log(`[whisper] → ${fromName}→${toName} @${sceneId} msg=${whisperMessage.slice(0, 40)}`);
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+
+    const res = await fetch(`/api/scenes/${sceneId}/interact`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from: fromName,
+        to: toName,
+        scene: sceneId,
+        message: [whisperMessage, ...context.slice(-2)].join(" | "),
+        emotion: "neutral",
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.message && data.message.length > 2) {
+        const src = data.source === "llm" ? "llm" : "mock";
+        console.log(`[whisper] ${src === "llm" ? "✅ LLM" : "⚠️ backend mock"}: ${data.message.slice(0, 40)}`);
+        // 仅接受 LLM 真实响应，拒绝后端 mock 兜底
+        if (src === "llm") {
+          return { message: data.message, emotion: data.emotion ?? null, source: "llm" };
+        }
+      }
+    }
+    console.log(`[whisper] ⚠️ HTTP ${res.status}, API 不可用`);
+  } catch (e: any) {
+    console.log(`[whisper] ❌ fetch error: ${e?.message ?? e}`);
+  }
+  return null;
+}

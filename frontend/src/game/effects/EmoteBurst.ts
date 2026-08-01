@@ -69,7 +69,7 @@ export function emoteBurst(
 
   // ═══ 2. 坠落大 emoji ═══
   const ex = x + (Math.random() - 0.5) * 50;
-  const bigEmoji = scene.add.text(ex, -50, profile.emoji, { fontSize:"40px" }).setOrigin(0.5).setDepth(25).setAlpha(0);
+  const bigEmoji = scene.add.text(ex, -50, profile.emoji, { fontSize:"40px" }).setOrigin(0.5).setDepth(28).setAlpha(0);
   scene.tweens.add({
     targets: bigEmoji, y: y + 5, alpha: 1,
     duration: 500, ease: "Bounce.easeOut",
@@ -86,7 +86,7 @@ export function emoteBurst(
     const ty = 40 + i * 80 + Math.random() * 30;
     const landingX = side < 0 ? 30 + i * 25 : W - 30 - i * 25;
 
-    const t = scene.add.text(sx, ty, sem, { fontSize:"34px" }).setOrigin(0.5).setDepth(25).setAlpha(0);
+    const t = scene.add.text(sx, ty, sem, { fontSize:"34px" }).setOrigin(0.5).setDepth(28).setAlpha(0);
     scene.tweens.add({
       targets: t, x: landingX, alpha: 1,
       duration: 400 + i * 80, delay: i * 100, ease: "Back.easeOut",
