@@ -424,3 +424,100 @@ class TestActionBoundaries:
         from engines.world.engine import WorldEngine
 
         assert WorldEngine(make_world(), [], db_session)._update_relationships([]) == []
+
+
+# =============================================================================
+# State 4: Tool 副作用基础设施测试
+# =============================================================================
+
+
+class TestState4ToolInfrastructure:
+    """WorldEngine State 4 新增方法和属性的单元测试。"""
+
+    def test_find_agent_by_persona_name(self, db_session):
+        """_find_agent_by_name 按 persona.name 查找。"""
+        from engines.world.engine import WorldEngine
+
+        chen = make_agent("a1", "陈默")
+        su = make_agent("a2", "苏瑶")
+        engine = WorldEngine(make_world(), [chen, su], db_session)
+
+        found = engine._find_agent_by_name("陈默")
+        assert found is not None
+        assert found.id == "a1"
+
+    def test_find_agent_by_autogen_name(self, db_session):
+        """_find_agent_by_name 回退到 AutoGen name。"""
+        from engines.world.engine import WorldEngine
+
+        chen = make_agent("a1", "陈默")
+        engine = WorldEngine(make_world(), [chen], db_session)
+
+        found = engine._find_agent_by_name(chen.autogen_agent.name)
+        assert found is not None
+        assert found.id == "a1"
+
+    def test_find_agent_returns_none_when_missing(self, db_session):
+        """_find_agent_by_name 找不到时返回 None。"""
+        from engines.world.engine import WorldEngine
+
+        engine = WorldEngine(make_world(), [make_agent("a1", "陈默")], db_session)
+        assert engine._find_agent_by_name("不存在的人") is None
+
+    def test_get_agent_public_state_returns_string(self, db_session):
+        """_get_agent_public_state 返回情绪和能量信息。"""
+        from engines.world.engine import WorldEngine
+
+        chen = make_agent("a1", "陈默")
+        engine = WorldEngine(make_world(), [chen], db_session)
+
+        state = engine._get_agent_public_state("a1")
+        assert "情绪" in state
+        assert "能量" in state
+
+    def test_get_agent_public_state_missing_returns_unknown(self, db_session):
+        """_get_agent_public_state 找不到 agent 返回 '未知'。"""
+        from engines.world.engine import WorldEngine
+
+        engine = WorldEngine(make_world(), [], db_session)
+        assert engine._get_agent_public_state("nonexistent") == "未知"
+
+    def test_pending_messages_initialized(self, db_session):
+        """WorldEngine 初始化时 _pending_messages 为空列表。"""
+        from engines.world.engine import WorldEngine
+
+        engine = WorldEngine(make_world(), [], db_session)
+        assert engine._pending_messages == []
+
+    def test_thought_log_initialized(self, db_session):
+        """WorldEngine 初始化时 _thought_log 为空 dict。"""
+        from engines.world.engine import WorldEngine
+
+        engine = WorldEngine(make_world(), [], db_session)
+        assert engine._thought_log == {}
+
+    def test_closure_tools_injected_into_agents(self, db_session):
+        """WorldEngine 初始化后每个 agent 的 tools 被替换为闭包版本。"""
+        from engines.world.engine import WorldEngine
+
+        chen = make_agent("a1", "陈默")
+        su = make_agent("a2", "苏瑶")
+        engine = WorldEngine(make_world(), [chen, su], db_session)
+
+        # 闭包 tools 应该有 9 个（make_agent_tools 返回 9 个）
+        assert len(chen.autogen_agent._tools) == 9
+        assert len(su.autogen_agent._tools) == 9
+
+    def test_goal_check_pending_flag(self, db_session):
+        """_goal_check_pending 初始为 False。"""
+        from engines.world.engine import WorldEngine
+
+        engine = WorldEngine(make_world(), [], db_session)
+        assert engine._goal_check_pending is False
+
+    def test_scene_bridge_initially_none(self, db_session):
+        """scene_bridge 初始为 None。"""
+        from engines.world.engine import WorldEngine
+
+        engine = WorldEngine(make_world(), [], db_session)
+        assert engine.scene_bridge is None

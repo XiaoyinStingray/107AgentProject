@@ -52,3 +52,35 @@ def factory(mock_client):
     from engines.agent_factory.factory import AgentFactory
 
     return AgentFactory(mock_client)
+
+
+# =============================================================================
+# State 4: MockEngine — 闭包 tool 测试的最小 WorldEngine 替身
+# =============================================================================
+
+
+class MockEngine:
+    """模拟 WorldEngine——提供 tool 闭包所需的最小接口。
+
+    用于 test_agent_tools / test_e2e_tool_effects 等测试文件。
+    """
+
+    def __init__(self, agents_dict: dict):
+        self.agents = agents_dict
+        self.world = object()  # _engine_alive() 检查此属性
+        self.current_tick = 0
+        self._pending_messages: list[dict] = []
+        self._thought_log: dict[str, list] = {}
+        self._goal_check_pending = False
+
+    def _find_agent_by_name(self, name: str):
+        for agent in self.agents.values():
+            if getattr(agent, "persona", None) and agent.persona.name == name:
+                return agent
+        return None
+
+
+@pytest.fixture
+def mock_engine():
+    """返回 MockEngine 类（非实例），测试中自行传 agents_dict 构造。"""
+    return MockEngine

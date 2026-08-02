@@ -655,9 +655,14 @@ export class MapScene extends Phaser.Scene {
    * @param forcePositions 强制覆盖坐标（用于 Checkpoint 恢复，BUG-038）
    *
    * @param forcePositions 强制覆盖坐标（用于 Checkpoint 恢复，BUG-038）
+   *
+   * @param forcePositions 强制覆盖坐标（用于 Checkpoint 恢复，BUG-038）
    */
   syncAgentsInPlace(data: AgentSpriteData[], forcePositions = false): void {
   syncAgentsInPlace(data: AgentSpriteData[], forcePositions = false): void {
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
     const incoming = new Map(data.map((d) => [d.agentId, d]));
     // 移除不在新数据中的 sprite
@@ -688,6 +693,9 @@ export class MapScene extends Phaser.Scene {
         if (forcePositions) {
           existing.setTile(d.tileX, d.tileY);
         }
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
         if (existing.emotion !== d.emotion) existing.setEmotion(d.emotion as any);
         if (existing.action !== d.action) existing.setAction(d.action as any);
@@ -759,6 +767,9 @@ export class MapScene extends Phaser.Scene {
     emotionEngine.stop();
     // BUG-043 修复：暂停情绪引擎（停止 decay/环境/随机事件定时器）
     emotionEngine.stop();
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
   }
 
@@ -904,6 +915,9 @@ export class MapScene extends Phaser.Scene {
     emotionEngine.start();
     // BUG-043 修复：恢复情绪引擎
     emotionEngine.start();
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
   }
 
@@ -921,6 +935,61 @@ export class MapScene extends Phaser.Scene {
       } else {
         this.placeAgents(data);
       }
+    }
+  }
+
+  /**
+   * Checkpoint 恢复：强制覆盖所有 Agent 坐标（BUG-038）。
+   * 由 GameCanvas.restoreCheckpoint() 调用。
+   */
+  restoreAgents(data: AgentSpriteData[]): void {
+    this.pendingAgents = data;
+    if (this.ready && this.groundLayer) {
+      if (this.agentSprites.size > 0) {
+        this.syncAgentsInPlace(data, true);
+      } else {
+        this.placeAgents(data);
+      }
+    }
+  }
+
+<<<<<<< Updated upstream
+  /** 从 Checkpoint 强制恢复全部 Agent 状态；普通同步仍保留实时坐标。 */
+  restoreAgents(data: AgentSpriteData[]): void {
+    const wasPaused = this.paused;
+    this.movers.forEach((mover) => mover.stop());
+    this.agentSprites.forEach((sprite) => {
+      this.tweens.killTweensOf(sprite);
+    });
+    this.clearConversationState();
+    const placements = this.normalizeAgentPlacements(data);
+    this.setAgents(placements);
+
+    for (const snapshot of placements) {
+      const sprite = this.agentSprites.get(snapshot.agentId);
+      if (!sprite) continue;
+      sprite.setTile(snapshot.tileX, snapshot.tileY);
+      sprite.setData("startTileX", snapshot.tileX);
+      sprite.setData("startTileY", snapshot.tileY);
+      sprite.setAction(snapshot.action);
+    }
+
+    if (!wasPaused) {
+      this.movers.forEach((mover) => mover.start());
+=======
+  /**
+   * Checkpoint 恢复：强制覆盖所有 Agent 坐标（BUG-038）。
+   * 由 GameCanvas.restoreCheckpoint() 调用。
+   */
+  restoreAgents(data: AgentSpriteData[]): void {
+    this.pendingAgents = data;
+    if (this.ready && this.groundLayer) {
+      if (this.agentSprites.size > 0) {
+        this.syncAgentsInPlace(data, true);
+      } else {
+        this.placeAgents(data);
+      }
+>>>>>>> Stashed changes
     }
   }
 
@@ -1147,6 +1216,9 @@ export class MapScene extends Phaser.Scene {
 =======
   showAgentBubble(agentId: string, message: string, _type?: "talk" | "listen"): void {
   showAgentBubble(agentId: string, message: string, _type?: "talk" | "listen"): void {
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
     if (!message) return;
     const sprite = this.agentSprites.get(agentId);

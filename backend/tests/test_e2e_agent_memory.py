@@ -50,3 +50,81 @@ async def test_replace_mode_clears_context(factory):
     assert "当前处境" in new_sys
     assert "大学宿舍" in new_sys
     assert new_sys != original_sys
+
+
+# =============================================================================
+# 笔记跨 tick 测试
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_notes_persist_in_context_across_ticks(factory):
+    """笔记在连续 inject_context 后自动出现在上下文中。"""
+    agent = await factory.create_from_description("测试角色")
+    agent._notes = [
+        {"tick": 1, "content": "小红今天没来图书馆"},
+        {"tick": 2, "content": "她可能在准备比赛"},
+    ]
+
+    agent.inject_context("⏰ Tick 3\n📍 图书馆", mode="continuous")
+
+    msgs = agent._get_autogen_model_messages()
+    last_msg = msgs[-1]
+    content = getattr(last_msg, "content", str(last_msg))
+    assert "小红今天没来" in content
+    assert "准备比赛" in content
+
+
+@pytest.mark.asyncio
+async def test_notes_only_recent_5_in_context(factory):
+    """上下文中只包含最近 5 条笔记。"""
+    agent = await factory.create_from_description("测试角色")
+    agent._notes = [{"tick": i, "content": f"笔记{i}"} for i in range(10)]
+
+    agent.inject_context("⏰ Tick 10\n📍 图书馆", mode="continuous")
+
+    msgs = agent._get_autogen_model_messages()
+    last_msg = msgs[-1]
+    content = getattr(last_msg, "content", str(last_msg))
+    # 最近 5 条应是笔记5-9
+    assert "笔记9" in content
+    assert "笔记5" in content
+    # 笔记0-4 不应出现
+    assert "笔记0" not in content
+    assert "笔记1" not in content
+
+
+@pytest.mark.asyncio
+async def test_compression_preses_system_message(factory):
+    """压缩后 system message 仍然保持不变。"""
+    agent = await factory.create_from_description("测试角色")
+    original_sys = agent._get_autogen_system_messages()[0].content
+    agent._COMPRESS_THRESHOLD = 4  # 降低阈值方便测试
+
+    # 注入足够多消息触发压缩
+    for i in range(10):
+        agent._add_autogen_model_message(
+            type("FakeMsg", (), {"content": f"消息{i}", "source": f"agent_{i}"})()
+        )
+        agent._context_count += 1
+
+    agent._compress_history()
+
+    current_sys = agent._get_autogen_system_messages()[0].content
+    assert current_sys == original_sys
+
+
+@pytest.mark.asyncio
+async def test_notes_empty_does_not_break_context(factory):
+    """空笔记列表不影响上下文注入。"""
+    agent = await factory.create_from_description("测试角色")
+    agent._notes = []
+
+    agent.inject_context("⏰ Tick 1\n📍 图书馆", mode="continuous")
+
+    msgs = agent._get_autogen_model_messages()
+    last_msg = msgs[-1]
+    content = getattr(last_msg, "content", str(last_msg))
+    assert "图书馆" in content
+    # 不应包含笔记段
+    assert "笔记" not in content
