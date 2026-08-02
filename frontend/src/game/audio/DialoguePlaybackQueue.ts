@@ -1,4 +1,5 @@
  /**
+ /**
  * DialoguePlaybackQueue — 对话消息串行播放队列（66-A）。
  *
  * 保证：
@@ -47,6 +48,11 @@ export class DialoguePlaybackQueue {
   }
 
   isEnabled(): boolean { return this.enabled; }
+
+  /** BUG-044 修复：获取当前有效音量（动态反映 enabled/muted 状态） */
+  getEffectiveVolume(): number {
+    return this.enabled && !this.muted ? this.volume : 0;
+  }
 
   /** BUG-044 修复：获取当前有效音量（动态反映 enabled/muted 状态） */
   getEffectiveVolume(): number {
@@ -148,9 +154,12 @@ export class DialoguePlaybackQueue {
     const engine = this.getEngine(msg.agentId);
     // BUG-044 修复：传递动态音量查询函数，engine 逐页检查当前有效音量
     // （支持对话中途开启/关闭声音）
+    // BUG-044 修复：传递动态音量查询函数，engine 逐页检查当前有效音量
+    // （支持对话中途开启/关闭声音）
     engine.speak(
       msg.text,
       msg.emotion,
+      () => this.getEffectiveVolume(),
       () => this.getEffectiveVolume(),
       {
         onPageText: (text, isFirst) => {

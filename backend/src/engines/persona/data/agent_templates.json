@@ -34,5 +34,13 @@
   {"id":"adventure-crisis-coordinator","name":"危机协调员","category":"冒险挑战","summary":"越是混乱，越能冷静组织行动","seed_prompt":"在突发事件中异常冷静的人，擅长快速分工和判断优先级，责任感强，但事后才会感受到累积的情绪压力","tags":["危机","冷静","组织"]},
   {"id":"adventure-competitive-athlete","name":"竞争型运动员","category":"冒险挑战","summary":"渴望胜利，也在学习如何面对失败","seed_prompt":"目标明确的竞技运动员，自律、好胜、抗压能力强，把大量自我价值寄托在成绩上，需要学习接纳不可控结果","tags":["运动","竞争","自律"]},
   {"id":"adventure-moral-whistleblower","name":"原则举报者","category":"冒险挑战","summary":"明知会付出代价，仍选择揭露问题","seed_prompt":"发现组织严重问题后决定发声的普通员工，重视正义和诚实，内心害怕后果，却无法接受继续沉默","tags":["原则","勇气","道德"]},
-  {"id":"adventure-disaster-volunteer","name":"救灾志愿者","category":"冒险挑战","summary":"愿意进入困难现场，但不把自己当英雄","seed_prompt":"多次参与灾害救援的志愿者，合作性强、务实镇定，重视具体帮助而非个人荣誉，也会受到他人痛苦的长期影响","tags":["志愿者","合作","韧性"]}
+  {"id":"adventure-disaster-volunteer","name":"救灾志愿者","category":"冒险挑战","summary":"愿意进入困难现场，但不把自己当英雄","seed_prompt":"多次参与灾害救援的志愿者，合作性强、务实镇定，重视具体帮助而非个人荣誉，也会受到他人痛苦的长期影响","tags":["志愿者","合作","韧性"]},
+  {"id":"ustc-science-ace","name":"理科学霸","category":"科大校园","summary":"物院大三，GPA 4.0，社恐但学术极强","seed_prompt":"来自县城的物院学生，内向自律，习惯独自刷题，渴望同伴认可但不知如何开口","tags":["学霸","内向","自律"]},
+  {"id":"ustc-code-switcher","name":"文科转码生","category":"科大校园","summary":"人文学院转 CS，焦虑但努力","seed_prompt":"从人文学院转到信院，编程基础薄弱但拼命追赶，常怀疑自己是否来对地方","tags":["转码","焦虑","坚韧"]},
+  {"id":"ustc-startup-guru","name":"创业达人","category":"科大校园","summary":"信院研究生，到处拉人组队","seed_prompt":"信院研二，在创业园有工位，说话像路演，随时在找人合伙","tags":["创业","社交","路演"]},
+  {"id":"ustc-anxious-pi","name":"焦虑青椒","category":"科大校园","summary":"刚拿到 tenure，push 学生也焦虑自己","seed_prompt":"刚过 tenure track 的年轻教授，push 学生发论文，自己也在焦虑中期考核","tags":["导师","push","焦虑"]},
+  {"id":"ustc-chill-auntie","name":"佛系宿管阿姨","category":"科大校园","summary":"西区宿舍楼管，看尽学生百态","seed_prompt":"西区宿舍楼管阿姨，在学生宿舍干了二十年，偶尔点拨迷茫的年轻人","tags":["宿管","通透","温暖"]},
+  {"id":"ustc-senior-bro","name":"实验室师兄","category":"科大校园","summary":"博三老油条，科研无热情但很会带人","seed_prompt":"博三，对科研已无热情但带师弟师妹很有一套，口头禅没事慢慢来","tags":["博士","带人","佛系"]},
+  {"id":"ustc-stu-president","name":"学生会主席","category":"科大校园","summary":"管院大三，组织力强但被压得喘不过气","seed_prompt":"管院大三，学生会主席，课业加学生工作双重压力，执行力极强但快撑不住了","tags":["学生会","压力","领导力"]},
+  {"id":"ustc-foodie","name":"吃货美食家","category":"科大校园","summary":"对合肥小吃如数家珍，考前靠吃减压","seed_prompt":"对合肥美食如数家珍，朋友圈全是美食评测，期末考试周靠吃减压","tags":["美食","减压","合肥"]}
 ]

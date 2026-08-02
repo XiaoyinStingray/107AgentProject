@@ -18,7 +18,7 @@ export default function Home() {
         人生实验室 · Life Lab
       </h1>
       <p className="text-sm text-text-secondary font-mono mb-8">
-        Agent 社会实验平台 v0.1.0
+        USTC × Life Lab · Agent 社会实验平台 v0.1.0
       </p>
 
       {/* 快捷入口 */}
@@ -89,6 +89,11 @@ export default function Home() {
           ))}
         </div>
       )}
+
+      {/* 彩蛋 */}
+      <p className="mt-12 text-xs text-text-secondary/30 font-mono text-center">
+        🌸 科大校园，人生如戏
+      </p>
     </div>
   );
 }
@@ -104,5 +109,5 @@ const QUICK_ENTRIES = [
   { emoji: "📦", label: "M8 档案馆", desc: "市场·回放·导出", route: "/archive", tier: "P2" as const },
   { emoji: "👥", label: "M9 Agent Team", desc: "团队协作", route: "/team", tier: "P1" as const },
   { emoji: "🔬", label: "M10 LLM Bench", desc: "大模型评测", route: "/bench", tier: "P1" as const },
-  { emoji: "🎮", label: "M11 游戏化场景", desc: "RPG场景", route: "/scene", tier: "P1" as const },
+  { emoji: "🎮", label: "M11 游戏化场景", desc: "科大校园 RPG", route: "/scene", tier: "P1" as const },
 ];

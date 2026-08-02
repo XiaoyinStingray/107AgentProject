@@ -35,12 +35,12 @@ import {
 
 /* —— 场景列表 —— */
 const SCENES = [
-  { id: "library", name: "📚 科大图书馆" },
-  { id: "dorm", name: "🏠 宿舍" },
-  { id: "classroom", name: "🏫 空教室" },
-  { id: "art", name: "🎨 艺术中心" },
-  { id: "lab", name: "🔬 实验室" },
-  { id: "sakura", name: "🌸 樱花大道" },
+  { id: "library", name: "📚 科大图书馆 · 西区" },
+  { id: "dorm", name: "🏠 宿舍 · 西区六栋" },
+  { id: "classroom", name: "🏫 空教室 · 三教" },
+  { id: "art", name: "🎨 艺术中心 · 中区" },
+  { id: "lab", name: "🔬 实验室 · 科研楼" },
+  { id: "sakura", name: "🌸 樱花大道 · 老北门" },
 ];
 
 /* —— Agent 池条目（部署用）—— */

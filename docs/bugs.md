@@ -494,6 +494,7 @@
 - **回归测试**：`frontend/src/components/scene/scene-components.test.tsx`。
 
 ### BUG-035：Checkpoint 可以通过错误场景路径删除
+### BUG-035：Checkpoint 可以通过错误场景路径删除
 
 - **状态**：✅ 已修复（2026-07-31，T6）
 - **优先级**：P2

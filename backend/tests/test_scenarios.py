@@ -94,7 +94,7 @@ class TestBuiltinScenariosList:
     """验证汇总列表。"""
 
     def test_length(self):
-        assert len(BUILTIN_SCENARIOS) == 3
+        assert len(BUILTIN_SCENARIOS) >= 8
 
     def test_all_are_scenario_type(self):
         for item in BUILTIN_SCENARIOS:

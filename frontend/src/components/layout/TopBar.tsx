@@ -39,6 +39,9 @@ export default function TopBar() {
       >
         Life Lab v0.1.0
       </Link>
+      <span className="ml-2 text-[10px] font-mono text-accent-green/50 border border-accent-green/20 rounded px-1 py-0.5">
+        USTC
+      </span>
 
       {/* 面包屑 */}
       <span className="ml-6 text-sm text-text-secondary font-mono">
