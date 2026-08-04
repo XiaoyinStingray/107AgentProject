@@ -171,82 +171,6 @@ export class MapScene extends Phaser.Scene {
       this.onAgentWhisperFeedback,
       this,
     );
-<<<<<<< Updated upstream
-=======
-=======
-    this.game.events.on("agent-whisper", (agentId: string, message?: string) => {
-      const sprite = this.agentSprites.get(agentId);
-      if (!sprite) return;
-      // BUG-037 修复：耳语文本进入 Agent 行为链路
-      if (message) {
-        // 显示为思维气泡，让其他 Agent 可见
-        import("../sprites/ActionBubble").then(({ ActionBubble }) => {
-          const bubble = new ActionBubble(this, `💭 ${message}`);
-          bubble.show(sprite);
-          this.trackBubble(bubble);
-        });
-        // 注入情绪引擎（耳语影响目标 Agent 情绪）
-        emotionEngine.onDialogue(agentId, message);
-        // 触发耳语接收反馈：闪烁 + 短暂停顿后继续行为
-        this.tweens.add({
-          targets: sprite, alpha: 0.5, duration: 120, yoyo: true, repeat: 2,
-        });
-        // BUG-045 修复：耳语触发 Agent 语言回应（延迟 1-2s 后通过队列播放）
-        const agentName = sprite.getData("name") ?? "?";
-        const responses = [
-          `嗯，${message.length > 10 ? "我明白了" : "好的"}。`,
-          `收到，我会注意的。`,
-          `知道了，谢谢你告诉我。`,
-          `嗯嗯，我记住了。`,
-        ];
-        const reply = responses[Math.floor(Math.random() * responses.length)];
-        this.time.delayedCall(1000 + Math.random() * 1000, () => {
-          if (!this.scene || !this.scene.isActive()) return;
-          this.queueDialogue(agentId, reply, sprite.emotion ?? "neutral");
-        });
-      } else {
-        // 无文本时仅闪烁（兼容旧调用）
-        this.tweens.add({
-          targets: sprite, alpha: 0.5, duration: 120, yoyo: true, repeat: 2,
-        });
-      }
-      // BUG-037 修复：耳语文本进入 Agent 行为链路
-      if (message) {
-        // 显示为思维气泡，让其他 Agent 可见
-        import("../sprites/ActionBubble").then(({ ActionBubble }) => {
-          const bubble = new ActionBubble(this, `💭 ${message}`);
-          bubble.show(sprite);
-          this.trackBubble(bubble);
-        });
-        // 注入情绪引擎（耳语影响目标 Agent 情绪）
-        emotionEngine.onDialogue(agentId, message);
-        // 触发耳语接收反馈：闪烁 + 短暂停顿后继续行为
-        this.tweens.add({
-          targets: sprite, alpha: 0.5, duration: 120, yoyo: true, repeat: 2,
-        });
-        // BUG-045 修复：耳语触发 Agent 语言回应（延迟 1-2s 后通过队列播放）
-        const agentName = sprite.getData("name") ?? "?";
-        const responses = [
-          `嗯，${message.length > 10 ? "我明白了" : "好的"}。`,
-          `收到，我会注意的。`,
-          `知道了，谢谢你告诉我。`,
-          `嗯嗯，我记住了。`,
-        ];
-        const reply = responses[Math.floor(Math.random() * responses.length)];
-        this.time.delayedCall(1000 + Math.random() * 1000, () => {
-          if (!this.scene || !this.scene.isActive()) return;
-          this.queueDialogue(agentId, reply, sprite.emotion ?? "neutral");
-        });
-      } else {
-        // 无文本时仅闪烁（兼容旧调用）
-        this.tweens.add({
-          targets: sprite, alpha: 0.5, duration: 120, yoyo: true, repeat: 2,
-        });
-      }
-    });
-    this.startDialogueScanner();
->>>>>>> Stashed changes
->>>>>>> Stashed changes
 
     // ── EmotionEngine 66-S ──
     emotionEngine.onEmotionChange((changes: EmotionChange[]) => {
@@ -349,36 +273,8 @@ export class MapScene extends Phaser.Scene {
     this.game.events.off("sse-emotion", this.onSseEmotion, this);
     this.game.events.off("brain-toggle", this.onBrainToggle, this);
     emotionEngine.stop();
-<<<<<<< Updated upstream
     this.emojiDrop?.destroy();
     this.graffitiLayer?.destroy();
-=======
-=======
-    this.game.events.off("agent-whisper");
-    this.game.events.off("sse-move-to");
-    this.game.events.off("sse-dialogue");
-    this.game.events.off("sse-emotion");
-    this.game.events.off("brain-toggle");
-    this.game.events.off("sse-move-to");
-    this.game.events.off("sse-dialogue");
-    this.game.events.off("sse-emotion");
-    this.game.events.off("brain-toggle");
-    this.dialogueTimer?.destroy();
-    this.dialogueCooldowns.clear();
-    // 清理活跃会话
-    for (const [key, s] of this.activeSessions) {
-      s.timer?.destroy();
-      this.busyAgents.delete(s.a.agentId);
-      this.busyAgents.delete(s.b.agentId);
-    }
-    this.activeSessions.clear();
-    emotionEngine.stop();
-    // 66-A: 清空音频队列（场景切换/卸载不残留声音）
-    playbackQueue.clear();
-    // BUG-043/044 修复：清理所有活跃气泡
-    this.clearActiveBubbles();
->>>>>>> Stashed changes
->>>>>>> Stashed changes
     this.destroyScene();
   }
 
@@ -647,33 +543,8 @@ export class MapScene extends Phaser.Scene {
    * 增量更新 Agent 精灵（不销毁未变化的 sprite）。
    * 与 placeAgents（全量重建）互补——placeAgents 用于初始化/场景切换，
    * 此方法用于 React state 同步时避免重建卡顿。
-<<<<<<< Updated upstream
    */
   syncAgentsInPlace(data: AgentSpriteData[]): void {
-=======
-   *
-   * @param forcePositions 强制覆盖坐标（用于 Checkpoint 恢复，BUG-038）
-   *
-   * @param forcePositions 强制覆盖坐标（用于 Checkpoint 恢复，BUG-038）
-   *
-   * @param forcePositions 强制覆盖坐标（用于 Checkpoint 恢复，BUG-038）
-   *
-   * @param forcePositions 强制覆盖坐标（用于 Checkpoint 恢复，BUG-038）
-   *
-   * @param forcePositions 强制覆盖坐标（用于 Checkpoint 恢复，BUG-038）
-   */
-  syncAgentsInPlace(data: AgentSpriteData[], forcePositions = false): void {
-  syncAgentsInPlace(data: AgentSpriteData[], forcePositions = false): void {
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
     const incoming = new Map(data.map((d) => [d.agentId, d]));
     // 移除不在新数据中的 sprite
     for (const [id, sprite] of this.agentSprites) {
@@ -692,27 +563,7 @@ export class MapScene extends Phaser.Scene {
       }
       const existing = this.agentSprites.get(d.agentId);
       if (existing) {
-<<<<<<< Updated upstream
         // sprite 位置是实时真值，不从 React state 覆写
-=======
-        // BUG-038 修复：Checkpoint 恢复时强制覆盖坐标
-        if (forcePositions) {
-          existing.setTile(d.tileX, d.tileY);
-        }
-        // BUG-038 修复：Checkpoint 恢复时强制覆盖坐标
-        if (forcePositions) {
-          existing.setTile(d.tileX, d.tileY);
-        }
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
         if (existing.emotion !== d.emotion) existing.setEmotion(d.emotion as any);
         if (existing.action !== d.action) existing.setAction(d.action as any);
       } else {
@@ -775,24 +626,10 @@ export class MapScene extends Phaser.Scene {
     });
     // 66-A: 暂停音频播放
     playbackQueue.pause();
-<<<<<<< Updated upstream
     // Step 99c: 暂停时禁用涂鸦
     if (this.graffitiLayer) this.graffitiLayer.setActive(false);
-=======
     // BUG-043 修复：暂停情绪引擎（停止 decay/环境/随机事件定时器）
     emotionEngine.stop();
-    // BUG-043 修复：暂停情绪引擎（停止 decay/环境/随机事件定时器）
-    emotionEngine.stop();
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
   }
 
   resumeSimulation(): void {
@@ -802,11 +639,12 @@ export class MapScene extends Phaser.Scene {
     if (this.dialogueTimer) this.dialogueTimer.paused = false;
     // 66-A: 恢复音频播放
     playbackQueue.resume();
-<<<<<<< Updated upstream
     // Step 99c: 恢复涂鸦（如果之前是开启的）
     if (this.graffitiLayer && this.graffitiEnabled) {
       this.graffitiLayer.setActive(true);
     }
+    // BUG-043 修复：恢复情绪引擎
+    emotionEngine.start();
   }
 
   /* ================================================================
@@ -932,21 +770,6 @@ export class MapScene extends Phaser.Scene {
         mover?.scatterFrom(result.center.tx, result.center.ty);
       }
     }
-=======
-    // BUG-043 修复：恢复情绪引擎
-    emotionEngine.start();
-    // BUG-043 修复：恢复情绪引擎
-    emotionEngine.start();
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
   }
 
   /* ================================================================
@@ -970,166 +793,6 @@ export class MapScene extends Phaser.Scene {
    * Checkpoint 恢复：强制覆盖所有 Agent 坐标（BUG-038）。
    * 由 GameCanvas.restoreCheckpoint() 调用。
    */
-  restoreAgents(data: AgentSpriteData[]): void {
-    this.pendingAgents = data;
-    if (this.ready && this.groundLayer) {
-      if (this.agentSprites.size > 0) {
-        this.syncAgentsInPlace(data, true);
-      } else {
-        this.placeAgents(data);
-      }
-    }
-  }
-
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-=======
-<<<<<<< Updated upstream
-=======
->>>>>>> Stashed changes
-  /** 从 Checkpoint 强制恢复全部 Agent 状态；普通同步仍保留实时坐标。 */
-  restoreAgents(data: AgentSpriteData[]): void {
-    const wasPaused = this.paused;
-    this.movers.forEach((mover) => mover.stop());
-    this.agentSprites.forEach((sprite) => {
-      this.tweens.killTweensOf(sprite);
-    });
-    this.clearConversationState();
-    const placements = this.normalizeAgentPlacements(data);
-    this.setAgents(placements);
-
-    for (const snapshot of placements) {
-      const sprite = this.agentSprites.get(snapshot.agentId);
-      if (!sprite) continue;
-      sprite.setTile(snapshot.tileX, snapshot.tileY);
-      sprite.setData("startTileX", snapshot.tileX);
-      sprite.setData("startTileY", snapshot.tileY);
-      sprite.setAction(snapshot.action);
-    }
-
-    if (!wasPaused) {
-      this.movers.forEach((mover) => mover.start());
-=======
-  /**
-   * Checkpoint 恢复：强制覆盖所有 Agent 坐标（BUG-038）。
-   * 由 GameCanvas.restoreCheckpoint() 调用。
-   */
-  restoreAgents(data: AgentSpriteData[]): void {
-    this.pendingAgents = data;
-    if (this.ready && this.groundLayer) {
-      if (this.agentSprites.size > 0) {
-        this.syncAgentsInPlace(data, true);
-      } else {
-        this.placeAgents(data);
-      }
->>>>>>> Stashed changes
-    }
-  }
-
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-<<<<<<< Updated upstream
-  /** 从 Checkpoint 强制恢复全部 Agent 状态；普通同步仍保留实时坐标。 */
-  restoreAgents(data: AgentSpriteData[]): void {
-    const wasPaused = this.paused;
-    this.movers.forEach((mover) => mover.stop());
-    this.agentSprites.forEach((sprite) => {
-      this.tweens.killTweensOf(sprite);
-    });
-    this.clearConversationState();
-    const placements = this.normalizeAgentPlacements(data);
-    this.setAgents(placements);
-
-    for (const snapshot of placements) {
-      const sprite = this.agentSprites.get(snapshot.agentId);
-      if (!sprite) continue;
-      sprite.setTile(snapshot.tileX, snapshot.tileY);
-      sprite.setData("startTileX", snapshot.tileX);
-      sprite.setData("startTileY", snapshot.tileY);
-      sprite.setAction(snapshot.action);
-    }
-
-    if (!wasPaused) {
-      this.movers.forEach((mover) => mover.start());
-=======
-  /**
-   * Checkpoint 恢复：强制覆盖所有 Agent 坐标（BUG-038）。
-   * 由 GameCanvas.restoreCheckpoint() 调用。
-   */
-  restoreAgents(data: AgentSpriteData[]): void {
-    this.pendingAgents = data;
-    if (this.ready && this.groundLayer) {
-      if (this.agentSprites.size > 0) {
-        this.syncAgentsInPlace(data, true);
-      } else {
-        this.placeAgents(data);
-      }
->>>>>>> Stashed changes
-    }
-  }
-
-<<<<<<< Updated upstream
-=======
-  /**
-   * Checkpoint 恢复：强制覆盖所有 Agent 坐标（BUG-038）。
-   * 由 GameCanvas.restoreCheckpoint() 调用。
-   */
-  restoreAgents(data: AgentSpriteData[]): void {
-    this.pendingAgents = data;
-    if (this.ready && this.groundLayer) {
-      if (this.agentSprites.size > 0) {
-        this.syncAgentsInPlace(data, true);
-      } else {
-        this.placeAgents(data);
-      }
-    }
-  }
-
-=======
->>>>>>> Stashed changes
-<<<<<<< Updated upstream
-  /** 从 Checkpoint 强制恢复全部 Agent 状态；普通同步仍保留实时坐标。 */
-  restoreAgents(data: AgentSpriteData[]): void {
-    const wasPaused = this.paused;
-    this.movers.forEach((mover) => mover.stop());
-    this.agentSprites.forEach((sprite) => {
-      this.tweens.killTweensOf(sprite);
-    });
-    this.clearConversationState();
-    const placements = this.normalizeAgentPlacements(data);
-    this.setAgents(placements);
-
-    for (const snapshot of placements) {
-      const sprite = this.agentSprites.get(snapshot.agentId);
-      if (!sprite) continue;
-      sprite.setTile(snapshot.tileX, snapshot.tileY);
-      sprite.setData("startTileX", snapshot.tileX);
-      sprite.setData("startTileY", snapshot.tileY);
-      sprite.setAction(snapshot.action);
-    }
-
-    if (!wasPaused) {
-      this.movers.forEach((mover) => mover.start());
-=======
-  /**
-   * Checkpoint 恢复：强制覆盖所有 Agent 坐标（BUG-038）。
-   * 由 GameCanvas.restoreCheckpoint() 调用。
-   */
-  restoreAgents(data: AgentSpriteData[]): void {
-    this.pendingAgents = data;
-    if (this.ready && this.groundLayer) {
-      if (this.agentSprites.size > 0) {
-        this.syncAgentsInPlace(data, true);
-      } else {
-        this.placeAgents(data);
-      }
->>>>>>> Stashed changes
-    }
-  }
-
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-  /** 从 Checkpoint 强制恢复全部 Agent 状态；普通同步仍保留实时坐标。 */
   restoreAgents(data: AgentSpriteData[]): void {
     const wasPaused = this.paused;
     this.movers.forEach((mover) => mover.stop());
@@ -1288,21 +951,7 @@ export class MapScene extends Phaser.Scene {
   }
 
   /** 显示 Agent 头顶气泡（直接模式，用于非对话通知） */
-<<<<<<< Updated upstream
   showAgentBubble(agentId: string, message: string): void {
-=======
-  showAgentBubble(agentId: string, message: string, _type?: "talk" | "listen"): void {
-  showAgentBubble(agentId: string, message: string, _type?: "talk" | "listen"): void {
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
     if (!message) return;
     const sprite = this.agentSprites.get(agentId);
     if (!sprite) return;

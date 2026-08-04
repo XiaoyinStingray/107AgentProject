@@ -98,20 +98,16 @@ export class AgentVoiceEngine {
    * 异步播放一段文字的情绪拟声。
    * 返回 Promise，resolve 时表示全部分页播放完毕。
    * BUG-044 修复：volume 支持传 number 或 () => number 回调，逐页动态检查。
-   * BUG-044 修复：volume 支持传 number 或 () => number 回调，逐页动态检查。
    */
   async speak(
     text: string,
     emotion: Emotion,
-    volume: number | (() => number),
     volume: number | (() => number),
     callbacks: PlaybackCallbacks,
   ): Promise<void> {
     this.aborted = false;
     const mod = getEmotionMod(emotion);
     const pages = this.paginate(text);
-    // 支持动态音量查询（用于中途开启声音）
-    const getVol = typeof volume === "function" ? volume : () => volume;
     // 支持动态音量查询（用于中途开启声音）
     const getVol = typeof volume === "function" ? volume : () => volume;
 

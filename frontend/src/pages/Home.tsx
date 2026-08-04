@@ -110,4 +110,5 @@ const QUICK_ENTRIES = [
   { emoji: "👥", label: "M9 Agent Team", desc: "团队协作", route: "/team", tier: "P1" as const },
   { emoji: "🔬", label: "M10 LLM Bench", desc: "大模型评测", route: "/bench", tier: "P1" as const },
   { emoji: "🎮", label: "M11 游戏化场景", desc: "科大校园 RPG", route: "/scene", tier: "P1" as const },
+  { emoji: "💻", label: "M12 Worker 工作台", desc: "终端 · 产出墙", route: "/worker", tier: "P0" as const },
 ];
