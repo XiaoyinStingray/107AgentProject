@@ -317,3 +317,82 @@ class TestTickStream:
         event_types = [event.type for event in events]
         assert "relationship_change" in event_types
         assert event_types[-1] == "tick_boundary"
+
+
+# =============================================================================
+# Step 80/81: plan_revised 事件格式 + 场景 tool description
+# =============================================================================
+
+
+class TestPlanRevisedEventFormat:
+    """Step 80: plan_revised SSE 事件格式验证。"""
+
+    def test_plan_revised_sse_event_serialization(self):
+        """plan_revised 事件通过 _sse_event 序列化后包含必要字段。"""
+        from api.sse import _sse_event
+
+        payload = {
+            "type": "plan_revised",
+            "world_id": "w1",
+            "tick": 5,
+            "data": {
+                "step_index": 1,
+                "old_title": "竞品分析",
+                "new_title": "快速竞品扫描",
+                "reason": "原方案太耗时",
+                "steps": [],
+            },
+        }
+        result = _sse_event(payload)
+
+        assert "data:" in result
+        assert "plan_revised" in result
+        assert "快速竞品扫描" in result
+        assert result.endswith("\n\n")
+
+    def test_plan_revised_event_to_dict(self):
+        """plan_revised SimEvent 通过 _event_to_dict 序列化后保留 data 字段。"""
+        from api.sse import _event_to_dict
+        from models.event import SimEvent
+
+        evt = SimEvent(
+            id="e-pr", world_id="w1", tick=3, type="plan_revised",
+            source_agent_id="a1", target_agent_ids=[],
+            description="计划修订",
+            data={"old_title": "旧步骤", "new_title": "新步骤", "reason": "原因"},
+            created_at="2026-01-01",
+        )
+        d = _event_to_dict(evt)
+        assert d["type"] == "plan_revised"
+        assert d["data"]["old_title"] == "旧步骤"
+        assert d["data"]["new_title"] == "新步骤"
+
+
+class TestSceneToolDescriptions:
+    """Step 81: 场景 tool 的 action description 生成。"""
+
+    def test_move_to_description(self):
+        """move_to tool call 生成通用 description。"""
+        from engines.world.messages import _build_action_description
+
+        desc = _build_action_description("move_to", {"tile_x": 4, "tile_y": 3})
+        assert "move_to" in desc
+
+    def test_interact_with_description(self):
+        """interact_with tool call 生成通用 description。"""
+        from engines.world.messages import _build_action_description
+
+        desc = _build_action_description(
+            "interact_with", {"target_name": "小红", "action": "talk"},
+        )
+        assert "interact_with" in desc
+
+    def test_revise_plan_description(self):
+        """revise_plan tool call 生成通用 description。"""
+        from engines.world.messages import _build_action_description
+
+        desc = _build_action_description(
+            "revise_plan",
+            {"step_title": "竞品分析", "new_title": "快速扫描", "reason": "太耗时"},
+        )
+        assert "revise_plan" in desc

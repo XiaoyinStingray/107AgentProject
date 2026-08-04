@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from engines.team.decomposer import decompose_task
+from engines.team.decomposer import decompose_task, re_decompose
 
 pytestmark = pytest.mark.asyncio
 
@@ -112,3 +112,67 @@ class TestDecomposeTask:
         client = MockModelClient(llm_response)
         steps = await decompose_task("任务", AGENTS, client)
         assert len(steps[0]["title"]) <= 30
+
+
+# =============================================================================
+# Step 80: re_decompose 测试
+# =============================================================================
+
+
+class TestReDecompose:
+
+    async def test_empty_remaining_returns_empty(self):
+        """空 remaining_steps → 返回空列表。"""
+        result = await re_decompose([], "原方案不可行")
+        assert result == []
+
+    async def test_no_model_client_keeps_original_steps(self):
+        """无 LLM → 保留原步骤，状态重置为 pending。"""
+        remaining = [
+            {"title": "步骤A", "status": "active", "progress": 0.3},
+            {"title": "步骤B", "status": "pending", "progress": 0.0},
+        ]
+        result = await re_decompose(remaining, "需要重新规划")
+
+        assert len(result) == 2
+        assert all(s["status"] == "pending" for s in result)
+        assert all(s["progress"] == 0.0 for s in result)
+        assert result[0]["title"] == "步骤A"
+
+    async def test_llm_success_returns_new_steps(self):
+        """LLM 成功 → 返回重新分解的新步骤。"""
+        llm_response = [
+            {"title": "简化版调研", "description": "快速扫描", "assignee": "a1"},
+            {"title": "简化版方案", "description": "概要设计", "assignee": "a2"},
+        ]
+        client = MockModelClient(llm_response)
+        remaining = [
+            {"title": "详细调研", "status": "active", "progress": 0.5},
+        ]
+
+        result = await re_decompose(
+            remaining, "原方案太耗时", task="设计校园 App",
+            model_client=client,
+        )
+
+        assert len(result) == 2
+        assert result[0]["title"] == "简化版调研"
+        assert result[1]["title"] == "简化版方案"
+        assert all(s["status"] == "pending" for s in result)
+
+    async def test_llm_failure_falls_back_to_original(self):
+        """LLM 失败 → fallback 保留原步骤。"""
+        client = FailingModelClient()
+        remaining = [
+            {"title": "步骤X", "status": "active", "progress": 0.2},
+            {"title": "步骤Y", "status": "pending", "progress": 0.0},
+        ]
+
+        result = await re_decompose(
+            remaining, "LLM 不可用", model_client=client,
+        )
+
+        assert len(result) == 2
+        assert result[0]["title"] == "步骤X"
+        assert result[0]["status"] == "pending"
+        assert result[1]["title"] == "步骤Y"

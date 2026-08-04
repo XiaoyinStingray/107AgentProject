@@ -17,7 +17,7 @@ export default function LiveChat({ events, connected, isPaused }: Props) {
 
   const chatEvents = events.filter(
     (e) => e.type !== "tick_boundary" && e.type !== "connected" && e.type !== "paused" && e.type !== "session_end"
-      && e.type !== "plan_updated" && e.type !== "coordinator_nudge"
+      && e.type !== "plan_updated" && e.type !== "plan_revised" && e.type !== "coordinator_nudge"
   );
 
   return (

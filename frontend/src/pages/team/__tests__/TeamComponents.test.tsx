@@ -113,6 +113,16 @@ describe("LiveChat", () => {
     render(<LiveChat events={events} connected={true} isPaused={false} />);
     expect(screen.getByText("0 条消息")).toBeInTheDocument();
   });
+
+  it("filters out plan_revised events from the chat display", () => {
+    const events: SSEEvent[] = [
+      { type: "plan_revised", tick: 2, content: "", id: "3", data: { old_title: "竞品分析", new_title: "快速竞品扫描" } } as unknown as SSEEvent,
+      { type: "plan_updated", tick: 1, content: "", id: "4" } as unknown as SSEEvent,
+      { type: "connected", tick: 0, content: "", id: "5" } as unknown as SSEEvent,
+    ];
+    render(<LiveChat events={events} connected={true} isPaused={false} />);
+    expect(screen.getByText("0 条消息")).toBeInTheDocument();
+  });
 });
 
 // =====================================================================

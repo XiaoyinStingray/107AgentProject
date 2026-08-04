@@ -325,3 +325,130 @@ async def test_random_event_engine():
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])
+
+
+# =============================================================================
+# Step 81: SceneBridge 集成测试
+# =============================================================================
+
+from types import SimpleNamespace
+
+from engines.scene.engine import SceneBridge, SceneEngine, AgentSpriteData
+
+
+def _make_mock_agent(agent_id, name="小明", tile_x=2, tile_y=3,
+                     emotion_label="neutral"):
+    return SimpleNamespace(
+        id=agent_id,
+        persona=SimpleNamespace(name=name, emoji="🧑", color="#8888cc"),
+        position={"tile_x": tile_x, "tile_y": tile_y},
+        emotional_state=SimpleNamespace(label=emotion_label),
+    )
+
+
+class TestSceneBridgeIntegration:
+    """SceneBridge 双向同步 + move_agent 集成测试。"""
+
+    def test_roundtrip_world_to_scene_and_back(self):
+        """WorldEngine → SceneEngine → WorldEngine 位置往返一致性。"""
+        scene_eng = SceneEngine()
+        agent = _make_mock_agent("a1", tile_x=3, tile_y=4)
+        we = SimpleNamespace(agents={"a1": agent})
+
+        bridge = SceneBridge("library", we)
+
+        # 替换全局 scene_engine
+        import engines.scene.engine as mod
+        original = mod.scene_engine
+        mod.scene_engine = scene_eng
+        try:
+            # WorldEngine → SceneEngine
+            sprites = bridge.sync_to_scene()
+            assert len(sprites) == 1
+            assert sprites[0].tileX == 3
+
+            # 修改 SceneEngine 中的位置
+            scene_eng.update_state("library", [
+                AgentSpriteData(
+                    agentId="a1", name="小明", emoji="🧑", color="#888",
+                    tileX=9, tileY=8, action="walk", emotion="happy",
+                ),
+            ])
+
+            # SceneEngine → WorldEngine
+            bridge.sync_to_world()
+            assert we.agents["a1"].position["tile_x"] == 9
+            assert we.agents["a1"].position["tile_y"] == 8
+        finally:
+            mod.scene_engine = original
+
+    def test_move_agent_updates_both_world_and_scene(self):
+        """move_agent 同时更新 WorldEngine 和 SceneEngine。"""
+        scene_eng = SceneEngine()
+        agent = _make_mock_agent("a1", tile_x=1, tile_y=1)
+        we = SimpleNamespace(agents={"a1": agent})
+
+        bridge = SceneBridge("dorm", we)
+
+        import engines.scene.engine as mod
+        original = mod.scene_engine
+        mod.scene_engine = scene_eng
+        try:
+            ok = bridge.move_agent("a1", 7, 6)
+            assert ok is True
+            # WorldEngine 已更新
+            assert we.agents["a1"].position["tile_x"] == 7
+            # SceneEngine 也已更新
+            scene_sprites = scene_eng.get_state("dorm")
+            assert len(scene_sprites) == 1
+            assert scene_sprites[0].tileX == 7
+            assert scene_sprites[0].tileY == 6
+        finally:
+            mod.scene_engine = original
+
+    def test_multi_agent_sync_preserves_all_positions(self):
+        """多 Agent 同步时所有位置都正确保留。"""
+        scene_eng = SceneEngine()
+        agents = {
+            "a1": _make_mock_agent("a1", "小明", 1, 2),
+            "a2": _make_mock_agent("a2", "小红", 5, 6, "happy"),
+            "a3": _make_mock_agent("a3", "小刚", 9, 10, "anxious"),
+        }
+        we = SimpleNamespace(agents=agents)
+        bridge = SceneBridge("classroom", we)
+
+        import engines.scene.engine as mod
+        original = mod.scene_engine
+        mod.scene_engine = scene_eng
+        try:
+            sprites = bridge.sync_to_scene()
+            assert len(sprites) == 3
+            pos_map = {s.agentId: (s.tileX, s.tileY) for s in sprites}
+            assert pos_map["a1"] == (1, 2)
+            assert pos_map["a2"] == (5, 6)
+            assert pos_map["a3"] == (9, 10)
+            emo_map = {s.agentId: s.emotion for s in sprites}
+            assert emo_map["a2"] == "happy"
+            assert emo_map["a3"] == "anxious"
+        finally:
+            mod.scene_engine = original
+
+    def test_random_event_integration(self):
+        """SceneBridge.try_random_event 与 SceneEngine 集成。"""
+        scene_eng = SceneEngine()
+        we = SimpleNamespace(agents={"a1": _make_mock_agent("a1")})
+        bridge = SceneBridge("library", we)
+
+        import engines.scene.engine as mod
+        original = mod.scene_engine
+        mod.scene_engine = scene_eng
+        try:
+            # 多次调用，验证不报错且返回类型正确
+            for _ in range(10):
+                result = bridge.try_random_event()
+                if result is not None:
+                    assert "id" in result
+                    assert "text" in result
+                    assert "emotion" in result
+        finally:
+            mod.scene_engine = original

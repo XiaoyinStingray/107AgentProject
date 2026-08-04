@@ -15,6 +15,7 @@ export type SSEEventType =
   | "error"
   | "session_end"
   | "plan_updated"
+  | "plan_revised"
   | "coordinator_nudge"
   | "report_ready"
   | "debate_update"
