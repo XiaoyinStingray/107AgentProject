@@ -843,8 +843,24 @@ export class MapScene extends Phaser.Scene {
     }
     const target = resolveWhisperTarget(normalized, agentId, agents);
     if (!target) {
-      this.showAgentBubble(agentId, "没有找到可互动的目标");
-      return false;
+      // BUG-037 修复：自指/场景指令不丢弃——注入情绪引擎让 Agent 做出反应
+      // （如"去弹钢琴""安静点""你好"等没有明确对话目标的耳语）
+      emotionEngine.onDialogue(agentId, message);
+      import("../sprites/ActionBubble").then(({ ActionBubble }) => {
+        const bubble = new ActionBubble(this, `💬 ${message.slice(0, 40)}`);
+        bubble.show(sprite);
+        this.activeBubbles.add(bubble);
+      });
+      this.tweens.add({
+        targets: sprite, alpha: 0.5, duration: 120, yoyo: true, repeat: 2,
+      });
+      const replies = ["好的，我知道了。", "嗯，明白了。", "收到。", "好。"];
+      const reply = replies[Math.floor(Math.random() * replies.length)];
+      this.time.delayedCall(800, () => {
+        if (!this.scene || !this.scene.isActive()) return;
+        this.queueDialogue(agentId, reply, sprite.emotion ?? "neutral");
+      });
+      return true;
     }
 
     this.pendingWhispers.set(agentId, {

@@ -446,3 +446,93 @@ export function getChatOptions(category: TopicCategory): ChatOptionDef[] {
   const pool = CHAT_OPTION_POOL[category] ?? CHAT_OPTION_POOL.chat;
   return pool[Math.floor(Math.random() * pool.length)];
 }
+
+// ── LLM 生成对话选项 ──
+
+/**
+ * 通过 LLM 生成 3 个对话选项（友善/冷淡/挑衅）。
+ * 调用 POST /api/scenes/{scene}/chat-options。
+ * 失败或超时返回 null，调用方应回退到硬编码选项。
+ */
+export async function generateChatOptionsLLM(
+  topic: string,
+  agentName: string,
+  agentEmotion: string,
+  scene: string,
+): Promise<ChatOptionDef[] | null> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+
+    const res = await fetch(`/api/scenes/${scene}/chat-options`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        agent_name: agentName,
+        agent_emotion: agentEmotion,
+        topic,
+        scene,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) return null;
+    const data = await res.json();
+    const options = data.options as Array<{
+      id: string; label: string; tone: string;
+      userText: string; agentReaction: string; agentEmotion: string;
+    }> | null;
+    if (!Array.isArray(options) || options.length < 3) return null;
+
+    return options.map((opt, i) => ({
+      id: (["A", "B", "C"] as const)[i],
+      label: opt.label ?? `"${opt.userText}"`,
+      tone: opt.tone as ChatOptionDef["tone"],
+      userText: opt.userText.slice(0, 15),
+      agentReaction: opt.agentReaction.slice(0, 25),
+      agentEmotion: opt.agentEmotion,
+    }));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 通过 LLM 生成 Agent 对用户自定义输入的反应。
+ * 复用 POST /api/scenes/{scene}/interact 端点。
+ */
+export async function generateCustomReplyLLM(
+  userText: string,
+  agentName: string,
+  agentEmotion: string,
+  scene: string,
+): Promise<{ agentReaction: string; agentEmotion: string } | null> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+
+    const res = await fetch(`/api/scenes/${scene}/interact`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from: "user",
+        to: agentName,
+        scene,
+        message: userText,
+        emotion: agentEmotion,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) return null;
+    const data = await res.json();
+    return {
+      agentReaction: String(data.message ?? "嗯…").slice(0, 25),
+      agentEmotion: String(data.emotion ?? agentEmotion),
+    };
+  } catch {
+    return null;
+  }
+}

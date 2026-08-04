@@ -20,7 +20,7 @@ import type { AgentResponse } from "../types/agent";
 import { pickAccessoryId } from "../game/accessories";
 import { synchronizeScenePause } from "../game/scenePause";
 import { type ProactiveTrigger } from "../game/ProactiveChatManager";
-import { getChatOptions, type TopicCategory } from "../game/dialogue";
+import { getChatOptions, generateChatOptionsLLM, generateCustomReplyLLM, type TopicCategory } from "../game/dialogue";
 import { useChatHistoryStore } from "../stores/useChatHistoryStore";
 import {
   BrainDisconnectWatchdog,
@@ -705,15 +705,28 @@ export default function GameScenePage() {
     freezeAgents?.();
     lockAgent?.(trigger.agent.agentId);
 
-    // 生成对话选项
-    const options = getChatOptions(trigger.topicCategory as TopicCategory);
+    // 先用硬编码选项（立即显示），再异步获取 LLM 选项
+    const fallbackOptions = getChatOptions(trigger.topicCategory as TopicCategory);
+    setChatActive({ trigger, options: fallbackOptions });
 
     // 通知 ProactiveChatManager
     const proactive = game?.registry.get("proactiveManager") as any;
     proactive?.accept(trigger.agent.agentId);
 
-    setChatActive({ trigger, options });
-  }, [proactiveBanner]);
+    // 异步获取 LLM 选项（静默替换，不阻塞 UI）
+    generateChatOptionsLLM(
+      trigger.topic,
+      trigger.agent.name,
+      trigger.agent.emotion,
+      mapId,
+    ).then((llmOptions) => {
+      if (llmOptions) {
+        setChatActive((prev) => prev && prev.trigger === trigger
+          ? { ...prev, options: llmOptions }
+          : prev);
+      }
+    });
+  }, [proactiveBanner, mapId]);
 
   const handleProactiveIgnore = useCallback(() => {
     if (!proactiveBanner) return;
@@ -729,6 +742,16 @@ export default function GameScenePage() {
     const sprite = ms?.getAgentSprite(trigger.agent.agentId);
     (sprite as any)?.playDisappointed?.();
   }, [proactiveBanner]);
+
+  /** 手动触发主动搭话 */
+  const handleForceProactive = useCallback(() => {
+    const proactive = gameRef.current?.registry.get("proactiveManager") as any;
+    const ok = proactive?.forceTrigger?.();
+    if (!ok) {
+      // 触发失败（无可用 Agent / 已暂停 / 冷却中）
+      console.log("[ProactiveChat] 手动触发失败：无可用 Agent 或场景暂停中");
+    }
+  }, []);
 
   const handleChatEnd = useCallback((history: Array<{ speaker: string; text: string; optionUsed?: string }>) => {
     if (!chatActive) return;
@@ -908,6 +931,25 @@ export default function GameScenePage() {
           )}
         </Card>
 
+        {/* 手动触发主动搭话 */}
+        <Card className="p-3">
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs font-mono text-text-secondary">
+              💬 Agent 主动搭话
+            </span>
+            <button
+              type="button"
+              onClick={handleForceProactive}
+              className="px-3 py-1.5 text-xs font-mono rounded border border-border text-text-secondary hover:border-accent-green/60 hover:text-accent-green hover:bg-accent-green/5 transition-colors"
+            >
+              立即触发搭话
+            </button>
+            <span className="text-[10px] font-mono text-text-secondary/60">
+              随机选一个空闲的 Agent 来找你聊天
+            </span>
+          </div>
+        </Card>
+
       </div>
 
       {/* ── 右侧画布区 ── */}
@@ -1004,6 +1046,15 @@ export default function GameScenePage() {
             topic={chatActive.trigger.topic}
             options={chatActive.options as ChatOption[]}
             onEnd={handleChatEnd}
+            onCustomReply={async (userText: string) => {
+              const llm = await generateCustomReplyLLM(
+                userText,
+                chatActive.trigger.agent.name,
+                chatActive.trigger.agent.emotion,
+                mapId,
+              );
+              return llm ?? { agentReaction: "嗯…好的。", agentEmotion: "neutral" };
+            }}
           />
         )}
       </div>

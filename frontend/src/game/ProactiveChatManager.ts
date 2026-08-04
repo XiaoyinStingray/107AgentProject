@@ -285,6 +285,45 @@ export class ProactiveChatManager {
     this.isActive = false;
   }
 
+  /** 手动触发一次主动搭话（跳过所有门控：用户空闲、全局冷却、Agent 冷却） */
+  forceTrigger(): boolean {
+    if (this.isActive) {
+      // 如果有活跃搭话但用户想重新触发，先清理当前
+      this.clearTimeout();
+      this.isActive = false;
+    }
+
+    try {
+      const ms = this.game.scene.getScene("MapScene") as any;
+      if (ms?.isPaused?.()) return false;
+    } catch { return false; }
+
+    const agents = this.getAgents();
+    if (agents.length === 0) return false;
+
+    // 手动触发：只过滤正在对话中的 Agent，不检查冷却
+    const eligible = agents.filter((a) => !this.isAgentBusy(a.agentId));
+    if (eligible.length === 0) return false;
+
+    const selected = this.selectBest(eligible);
+    if (!selected) return false;
+
+    const { topic, category } = pickTopic(this.scene);
+    this.isActive = true;
+    const trigger: ProactiveTrigger = {
+      agent: selected,
+      topic,
+      topicCategory: category,
+    };
+    this.onTrigger?.(trigger);
+
+    this.timeoutTimer = setTimeout(() => {
+      if (this.isActive) this.ignore(selected.agentId);
+    }, CHAT_TIMEOUT);
+
+    return true;
+  }
+
   // ── 用户响应 ──
 
   /** 用户接受了搭话 */

@@ -250,6 +250,103 @@ async def generate_proactive_topic(scene_id: str, body: ProactiveTopicRequest):
     return ProactiveTopicResponse(topic=topic, source="mock")
 
 
+# ── Step 99f: 对话选项生成 ──
+
+class ChatOptionItem(BaseModel):
+    id: str  # "A" | "B" | "C"
+    label: str
+    tone: str  # "友善" | "冷淡" | "挑衅"
+    userText: str
+    agentReaction: str
+    agentEmotion: str
+
+
+class ChatOptionsRequest(BaseModel):
+    agent_name: str
+    agent_emotion: str = "neutral"
+    topic: str
+    scene: str
+
+
+class ChatOptionsResponse(BaseModel):
+    options: list[ChatOptionItem]
+    source: str = "mock"  # "llm" | "mock"
+
+
+@router.post("/{scene_id}/chat-options", response_model=ChatOptionsResponse)
+async def generate_chat_options(scene_id: str, body: ChatOptionsRequest):
+    """
+    Step 99f: LLM 生成 3 个对话回复选项（友善/冷淡/挑衅）。
+    每个选项包含用户说的话 + Agent 的回应 + 情绪变化。
+    失败时返回预设选项。
+    """
+    # 预设兜底（按话题类别）
+    FALLBACK_OPTIONS = [
+        ChatOptionItem(
+            id="A", label="\"聊啊！我也正无聊\"", tone="友善",
+            userText="聊啊！我也正无聊", agentReaction="太好了！我就知道你会理我～",
+            agentEmotion="happy",
+        ),
+        ChatOptionItem(
+            id="B", label="\"嗯…随便聊聊也行\"", tone="冷淡",
+            userText="嗯…随便聊聊也行", agentReaction="好吧…那我就不啰嗦了。",
+            agentEmotion="neutral",
+        ),
+        ChatOptionItem(
+            id="C", label="\"你是不是太闲了\"", tone="挑衅",
+            userText="你是不是太闲了", agentReaction="…算了当我没说。",
+            agentEmotion="sad",
+        ),
+    ]
+
+    try:
+        from llm.client import create_model_client
+        client = create_model_client("act")
+
+        prompt = (
+            f"你是一个对话选项生成器。\n"
+            f"Agent「{body.agent_name}」({body.agent_emotion})主动搭话说：「{body.topic}」\n"
+            f"请生成3个用户可选的回复，分别对应友善、冷淡、挑衅三种语气。\n"
+            f"\n要求：\n"
+            f"- userText（用户说的话）：最多15字\n"
+            f"- agentReaction（Agent看到后的回应）：最多25字，符合Agent性格\n"
+            f"- agentEmotion 用英文：happy/sad/angry/excited/neutral\n"
+            f"- 输出严格JSON数组，不要任何多余文字\n"
+            f"\n格式：\n"
+            f'[{{"label":"选项简短标题","tone":"友善","userText":"...","agentReaction":"...","agentEmotion":"happy"}},'
+            f'{{"tone":"冷淡","userText":"...","agentReaction":"...","agentEmotion":"neutral"}},'
+            f'{{"tone":"挑衅","userText":"...","agentReaction":"...","agentEmotion":"angry"}}]'
+        )
+        result = await client.create(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.9,
+            max_tokens=200,
+        )
+        text = result.content.strip()
+        # 提取 JSON 数组
+        import re, json
+        match = re.search(r"\[[\s\S]*\]", text)
+        if match:
+            parsed = json.loads(match.group(0))
+            if isinstance(parsed, list) and len(parsed) >= 3:
+                options = []
+                for i, item in enumerate(parsed[:3]):
+                    options.append(ChatOptionItem(
+                        id=["A", "B", "C"][i],
+                        label=f"\"{item.get('userText', '')[:15]}\"",
+                        tone=item.get("tone", "友善"),
+                        userText=item.get("userText", "")[:15],
+                        agentReaction=item.get("agentReaction", "")[:25],
+                        agentEmotion=item.get("agentEmotion", "neutral"),
+                    ))
+                logger.info(f"[chat-options] LLM generated {len(options)} options")
+                return ChatOptionsResponse(options=options, source="llm")
+    except Exception as e:
+        logger.warning(f"[chat-options] LLM failed, using mock: {e}")
+
+    return ChatOptionsResponse(options=FALLBACK_OPTIONS, source="mock")
+
+
 # ── 66-S: 随机事件端点 ──
 
 class RandomEventResponse(BaseModel):

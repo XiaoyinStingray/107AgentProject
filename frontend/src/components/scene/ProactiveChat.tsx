@@ -2,7 +2,7 @@
  * ProactiveChat — Step 99/99d: 主动搭话对话弹窗。
  *
  * Agent 发起→用户选择回复→Agent 回应→2-3 轮收尾。
- * 支持 Step 99d 的三选项分支。
+ * 支持 LLM 生成的情绪化选项 + 自定义输入。
  */
 
 import { useState, useCallback, useRef } from "react";
@@ -22,7 +22,7 @@ export interface ChatOption {
 interface ChatRound {
   speaker: "agent" | "user";
   text: string;
-  optionUsed?: ChatOption["id"];
+  optionUsed?: ChatOption["id"] | "custom";
 }
 
 interface Props {
@@ -30,11 +30,15 @@ interface Props {
   topic: string;
   options: ChatOption[];
   onEnd: (history: ChatRound[]) => void;
+  /** LLM 生成 Agent 对自定义输入的反应 */
+  onCustomReply?: (userText: string) => Promise<{ agentReaction: string; agentEmotion: string }>;
 }
 
 // ── 组件 ──
 
-export default function ProactiveChat({ agent, topic, options, onEnd }: Props) {
+export default function ProactiveChat({
+  agent, topic, options, onEnd, onCustomReply,
+}: Props) {
   const [rounds, setRounds] = useState<ChatRound[]>([
     { speaker: "agent", text: topic },
   ]);
@@ -42,12 +46,17 @@ export default function ProactiveChat({ agent, topic, options, onEnd }: Props) {
   const [selectedOption, setSelectedOption] = useState<ChatOption | null>(null);
   const [agentResponding, setAgentResponding] = useState(false);
   const roundsRef = useRef<ChatRound[]>([{ speaker: "agent", text: topic }]);
+
+  // 自定义输入
+  const [customMode, setCustomMode] = useState(false);
+  const [customText, setCustomText] = useState("");
+  const customInputRef = useRef<HTMLInputElement>(null);
+
   const maxRounds = 3;
 
   // 用户选择了一个选项
   const handleSelect = useCallback((option: ChatOption) => {
     setSelectedOption(option);
-    // 用 ref 追踪最新 rounds，避免 setTimeout 闭包过期
     const withUser: ChatRound[] = [
       ...roundsRef.current,
       { speaker: "user" as const, text: option.userText, optionUsed: option.id },
@@ -55,7 +64,6 @@ export default function ProactiveChat({ agent, topic, options, onEnd }: Props) {
     roundsRef.current = withUser;
     setRounds(withUser);
 
-    // 模拟 Agent 打字延迟后回复
     setAgentResponding(true);
     setTimeout(() => {
       const withAgent: ChatRound[] = [
@@ -70,14 +78,55 @@ export default function ProactiveChat({ agent, topic, options, onEnd }: Props) {
       const nextRound = currentRound + 1;
       setCurrentRound(nextRound);
 
-      // 达到最大轮数 → 结束，用 ref 中的最新数据
-      if (nextRound >= maxRounds) {
-        setTimeout(() => onEnd([...roundsRef.current]), 1500);
-      }
+      // 达到最大轮数——不自动关闭，等用户手动退出
     }, 800 + Math.random() * 700);
-  }, [currentRound, onEnd]);
+  }, [currentRound]);
 
-  // 主动结束（用户不选了）
+  // 自定义输入提交
+  const handleCustomSubmit = useCallback(async () => {
+    const text = customText.trim();
+    if (!text || text.length > 80) return;
+
+    const withUser: ChatRound[] = [
+      ...roundsRef.current,
+      { speaker: "user" as const, text, optionUsed: "custom" as const },
+    ];
+    roundsRef.current = withUser;
+    setRounds(withUser);
+    setCustomMode(false);
+    setCustomText("");
+
+    setAgentResponding(true);
+    let reaction = "嗯…好的。";
+    let emotion = "neutral";
+
+    if (onCustomReply) {
+      try {
+        const res = await onCustomReply(text);
+        reaction = res.agentReaction;
+        emotion = res.agentEmotion;
+      } catch {
+        // LLM 失败，用默认回复
+      }
+    }
+
+    setTimeout(() => {
+      const withAgent: ChatRound[] = [
+        ...roundsRef.current,
+        { speaker: "agent" as const, text: reaction },
+      ];
+      roundsRef.current = withAgent;
+      setRounds(withAgent);
+      setAgentResponding(false);
+
+      const nextRound = currentRound + 1;
+      setCurrentRound(nextRound);
+
+      // 达到最大轮数——不自动关闭，等用户手动退出
+    }, 800 + Math.random() * 700);
+  }, [currentRound, customText, onCustomReply]);
+
+  // 主动结束
   const handleEnd = useCallback(() => {
     onEnd(rounds);
   }, [rounds, onEnd]);
@@ -136,7 +185,9 @@ export default function ProactiveChat({ agent, topic, options, onEnd }: Props) {
                 <p className="text-xs leading-relaxed">{round.text}</p>
                 {round.speaker === "user" && round.optionUsed && (
                   <p className="text-[10px] text-text-secondary mt-1">
-                    {round.optionUsed === "A" ? "友善" : round.optionUsed === "B" ? "冷淡" : "挑衅"}
+                    {round.optionUsed === "A" ? "😊 友善" :
+                     round.optionUsed === "B" ? "😐 冷淡" :
+                     round.optionUsed === "C" ? "😤 挑衅" : "✏️ 自定义"}
                   </p>
                 )}
               </div>
@@ -148,7 +199,6 @@ export default function ProactiveChat({ agent, topic, options, onEnd }: Props) {
             </div>
           ))}
 
-          {/* Agent 正在输入 */}
           {agentResponding && (
             <div className="flex gap-2 justify-start">
               <div
@@ -166,8 +216,8 @@ export default function ProactiveChat({ agent, topic, options, onEnd }: Props) {
           )}
         </div>
 
-        {/* 选项区（Step 99d: 三选项分支） */}
-        {currentRound < maxRounds && !selectedOption && !agentResponding && (
+        {/* 选项区 */}
+        {currentRound < maxRounds && !selectedOption && !agentResponding && !customMode && (
           <div className="px-5 py-3 border-t border-border space-y-1.5">
             <p className="text-[10px] font-mono text-text-secondary mb-1">选择你的回复：</p>
             {options.map((opt) => (
@@ -179,7 +229,7 @@ export default function ProactiveChat({ agent, topic, options, onEnd }: Props) {
               >
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-bg-primary text-text-secondary group-hover:text-accent-orange transition-colors">
-                    {opt.tone}
+                    {opt.id === "A" ? "😊" : opt.id === "B" ? "😐" : "😤"} {opt.tone}
                   </span>
                   <span className="text-xs font-mono text-text-primary">
                     {opt.label}
@@ -187,15 +237,72 @@ export default function ProactiveChat({ agent, topic, options, onEnd }: Props) {
                 </div>
               </button>
             ))}
+            <button
+              type="button"
+              onClick={() => { setCustomMode(true); setTimeout(() => customInputRef.current?.focus(), 50); }}
+              className="w-full text-left px-3 py-2 rounded-lg border border-dashed border-border/60 bg-bg-secondary/30 hover:border-accent-green/40 hover:bg-accent-green/5 transition-colors group"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-bg-primary text-text-secondary group-hover:text-accent-green transition-colors">
+                  ✏️ 自定义
+                </span>
+                <span className="text-xs font-mono text-text-secondary group-hover:text-text-primary">
+                  输入你想说的话…
+                </span>
+              </div>
+            </button>
           </div>
         )}
 
-        {/* 对话结束提示 */}
+        {/* 自定义输入框 */}
+        {customMode && !agentResponding && (
+          <div className="px-5 py-3 border-t border-border space-y-2">
+            <p className="text-[10px] font-mono text-text-secondary">
+              ✏️ 输入你想对 {agent.name} 说的话（最多 80 字）：
+            </p>
+            <div className="flex gap-2">
+              <input
+                ref={customInputRef}
+                type="text"
+                value={customText}
+                onChange={(e) => setCustomText(e.target.value.slice(0, 80))}
+                onKeyDown={(e) => { if (e.key === "Enter") handleCustomSubmit(); }}
+                placeholder="输入你的回复…"
+                className="flex-1 px-3 py-2 rounded-lg border border-border bg-bg-secondary text-sm font-mono text-text-primary placeholder:text-text-secondary/40 outline-none focus:border-accent-green/40"
+                maxLength={80}
+              />
+              <button
+                type="button"
+                onClick={handleCustomSubmit}
+                disabled={!customText.trim()}
+                className="px-4 py-2 rounded-lg border border-accent-green/30 bg-accent-green/10 text-accent-green text-xs font-mono hover:bg-accent-green/20 transition-colors disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
+              >
+                发送
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => { setCustomMode(false); setCustomText(""); }}
+              className="text-[10px] font-mono text-text-secondary hover:text-text-primary transition-colors"
+            >
+              返回选项
+            </button>
+          </div>
+        )}
+
+        {/* 对话结束 */}
         {currentRound >= maxRounds && !agentResponding && (
-          <div className="px-5 py-3 border-t border-border text-center">
-            <p className="text-xs text-text-secondary font-mono">
+          <div className="px-5 py-3 border-t border-border space-y-2">
+            <p className="text-xs text-text-secondary font-mono text-center">
               {agent.name} 结束了对话
             </p>
+            <button
+              type="button"
+              onClick={handleEnd}
+              className="w-full py-2 rounded-lg border border-accent-orange/40 bg-accent-orange/10 text-accent-orange text-sm font-mono hover:bg-accent-orange/20 transition-colors"
+            >
+              关闭对话
+            </button>
           </div>
         )}
       </div>
