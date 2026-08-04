@@ -140,8 +140,8 @@ class TestSSEConnectionIsolation:
             "world-a": "new-a",
             "world-b": "conn-b",
         })
-        old_a = _world_event_generator("world-a", paused_engine(), "old-a")
-        active_b = _world_event_generator("world-b", paused_engine(), "conn-b")
+        old_a = _world_event_generator("world-a", paused_engine(), "old-a")  # type: ignore[arg-type]
+        active_b = _world_event_generator("world-b", paused_engine(), "conn-b")  # type: ignore[arg-type]
 
         connected_a = json.loads(
             (await anext(old_a)).removeprefix("data: ").strip()
@@ -293,7 +293,7 @@ class TestTickStream:
             agent_ids=["a1", "a2"],
             created_at="2026-01-01",
         )
-        engine = WorldEngine(world, agents, db_session)
+        engine = WorldEngine(world, agents, db_session)  # type: ignore[arg-type]
 
         async def skip_context():
             return None
