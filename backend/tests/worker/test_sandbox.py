@@ -5,6 +5,11 @@ import pytest
 from engines.worker.sandbox import check_code_safety, run_python_sandbox
 
 
+def _run(coro):
+    """Python 3.14 兼容的异步运行辅助。"""
+    return asyncio.run(coro)
+
+
 class TestCodeSafety:
     """静态检查——危险代码拦截。"""
 
@@ -69,7 +74,7 @@ class TestSandboxExecution:
 
     def test_simple_execution(self):
         """简单 Python 代码正确执行。"""
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             run_python_sandbox("print('hello world')", ".")
         )
         assert result.exit_code == 0
@@ -78,7 +83,7 @@ class TestSandboxExecution:
 
     def test_arithmetic(self):
         """数学运算。"""
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             run_python_sandbox("print(1 + 2 * 3)", ".")
         )
         assert result.exit_code == 0
@@ -86,14 +91,14 @@ class TestSandboxExecution:
 
     def test_multiline(self):
         """多行代码。"""
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             run_python_sandbox("x = 10\nfor i in range(3): print(i * x)", ".")
         )
         assert result.exit_code == 0
 
     def test_stderr_capture(self):
         """stderr 被捕获。"""
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             run_python_sandbox("import sys\nprint('ok', file=sys.stderr)", ".")
         )
         assert result.exit_code == 0
@@ -101,14 +106,14 @@ class TestSandboxExecution:
 
     def test_dangerous_code_rejected(self):
         """危险代码在运行时被拒绝。"""
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             run_python_sandbox("import os\nprint(os.getcwd())", ".")
         )
         assert result.exit_code != 0 or "禁止" in result.stderr
 
     def test_empty_code(self):
         """空代码。"""
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             run_python_sandbox("", ".")
         )
         # 空代码不会触发危险检查，但安全执行

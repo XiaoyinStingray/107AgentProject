@@ -8,6 +8,11 @@ import pytest
 from engines.worker.workspace import LocalWorkspace, FileInfo, _resolve_safe
 
 
+def _run(coro):
+    """Python 3.14 兼容的异步运行辅助。"""
+    return asyncio.run(coro)
+
+
 @pytest.fixture
 def temp_workspace():
     """创建临时工作区。"""
@@ -45,20 +50,20 @@ class TestLocalWorkspace:
 
     def test_write_and_read(self, temp_workspace):
         """写入和读取。"""
-        asyncio.get_event_loop().run_until_complete(
+        _run(
             temp_workspace.write_file("test.txt", "hello")
         )
-        content = asyncio.get_event_loop().run_until_complete(
+        content = _run(
             temp_workspace.read_file("test.txt")
         )
         assert content == "hello"
 
     def test_write_nested_path(self, temp_workspace):
         """嵌套路径写入自动创建父目录。"""
-        asyncio.get_event_loop().run_until_complete(
+        _run(
             temp_workspace.write_file("sub/dir/deep.txt", "deep content")
         )
-        content = asyncio.get_event_loop().run_until_complete(
+        content = _run(
             temp_workspace.read_file("sub/dir/deep.txt")
         )
         assert content == "deep content"
@@ -66,19 +71,19 @@ class TestLocalWorkspace:
     def test_read_nonexistent(self, temp_workspace):
         """读取不存在的文件。"""
         with pytest.raises(FileNotFoundError):
-            asyncio.get_event_loop().run_until_complete(
+            _run(
                 temp_workspace.read_file("nonexistent.txt")
             )
 
     def test_list_files(self, temp_workspace):
         """列出文件。"""
-        asyncio.get_event_loop().run_until_complete(
+        _run(
             temp_workspace.write_file("a.txt", "a")
         )
-        asyncio.get_event_loop().run_until_complete(
+        _run(
             temp_workspace.write_file("b.txt", "bb")
         )
-        files = asyncio.get_event_loop().run_until_complete(
+        files = _run(
             temp_workspace.list_files()
         )
         assert len(files) == 2
@@ -88,49 +93,49 @@ class TestLocalWorkspace:
 
     def test_list_files_empty(self, temp_workspace):
         """空工作区返回空列表。"""
-        files = asyncio.get_event_loop().run_until_complete(
+        files = _run(
             temp_workspace.list_files()
         )
         assert files == []
 
     def test_delete_file(self, temp_workspace):
         """删除文件。"""
-        asyncio.get_event_loop().run_until_complete(
+        _run(
             temp_workspace.write_file("to_delete.txt", "bye")
         )
-        deleted = asyncio.get_event_loop().run_until_complete(
+        deleted = _run(
             temp_workspace.delete_file("to_delete.txt")
         )
         assert deleted is True
 
-        exists = asyncio.get_event_loop().run_until_complete(
+        exists = _run(
             temp_workspace.exists("to_delete.txt")
         )
         assert exists is False
 
     def test_delete_nonexistent(self, temp_workspace):
         """删除不存在的文件返回 False。"""
-        deleted = asyncio.get_event_loop().run_until_complete(
+        deleted = _run(
             temp_workspace.delete_file("nope.txt")
         )
         assert deleted is False
 
     def test_exists(self, temp_workspace):
         """存在检查。"""
-        assert asyncio.get_event_loop().run_until_complete(
+        assert _run(
             temp_workspace.exists("anything.txt")
         ) is False
 
-        asyncio.get_event_loop().run_until_complete(
+        _run(
             temp_workspace.write_file("anything.txt", "x")
         )
-        assert asyncio.get_event_loop().run_until_complete(
+        assert _run(
             temp_workspace.exists("anything.txt")
         ) is True
 
     def test_run_python(self, temp_workspace):
         """在工作区中执行 Python。"""
-        result = asyncio.get_event_loop().run_until_complete(
+        result = _run(
             temp_workspace.run_python("print(42)")
         )
         assert result.exit_code == 0
@@ -143,13 +148,13 @@ class TestLocalWorkspace:
 
     def test_write_overwrite(self, temp_workspace):
         """覆盖写入。"""
-        asyncio.get_event_loop().run_until_complete(
+        _run(
             temp_workspace.write_file("same.txt", "v1")
         )
-        asyncio.get_event_loop().run_until_complete(
+        _run(
             temp_workspace.write_file("same.txt", "v2")
         )
-        content = asyncio.get_event_loop().run_until_complete(
+        content = _run(
             temp_workspace.read_file("same.txt")
         )
         assert content == "v2"

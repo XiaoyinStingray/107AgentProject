@@ -14,6 +14,7 @@ from engines.worker.state_machine import (
     MAX_PARSE_RETRIES,
     MAX_LLM_RETRIES,
 )
+from engines.worker.engine import _safe_json_parse
 from engines.worker.pipeline import (
     PipelineSpec,
     PipelineNodeSpec,
@@ -134,34 +135,6 @@ class TestErrorStrategies:
 # =============================================================================
 # JSON Parsing (from engine.py)
 # =============================================================================
-
-
-# Copy the parser from engine.py to test independently
-def _safe_json_parse(text: str) -> dict | None:
-    """Replicated from engine.py for testing."""
-    text = text.strip()
-    if not text:
-        return None
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    if "```json" in text:
-        start = text.find("```json") + 7
-        end = text.find("```", start)
-        if end > start:
-            try:
-                return json.loads(text[start:end].strip())
-            except json.JSONDecodeError:
-                pass
-    brace_start = text.find("{")
-    brace_end = text.rfind("}")
-    if brace_start >= 0 and brace_end > brace_start:
-        try:
-            return json.loads(text[brace_start:brace_end + 1])
-        except json.JSONDecodeError:
-            pass
-    return None
 
 
 class TestJSONParsing:
