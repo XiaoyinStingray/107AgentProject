@@ -374,3 +374,71 @@ class TestClosureToolsCount:
         assert len(tools) == 9
         for t in tools:
             assert callable(t)
+
+
+# =============================================================================
+# Part 3: web_search 闭包 tool 测试
+# =============================================================================
+
+
+class TestClosureToolsWebSearch:
+    """闭包 web_search tool 测试。"""
+
+    @pytest.mark.asyncio
+    async def test_web_search_returns_formatted_results(self, factory, mock_engine):
+        """web_search 调用 llm.search 并返回格式化结果。"""
+        from unittest.mock import patch
+        from engines.agent_factory.tools import make_agent_tools
+
+        a = await factory.create_from_description("A")
+        engine = mock_engine({a.id: a})
+        tools = make_agent_tools(engine, a.id)
+        search = tools[8]  # web_search 是第 9 个 tool
+
+        mock_results = [
+            {"title": "科大图书馆", "snippet": "开放时间 8:00-22:00", "url": "https://example.com"},
+        ]
+        with patch("llm.search.web_search", return_value=mock_results):
+            result = await search(query="科大图书馆开放时间")
+
+        assert "搜索结果" in result
+        assert "科大图书馆" in result
+
+    @pytest.mark.asyncio
+    async def test_web_search_empty_results(self, factory, mock_engine):
+        """web_search 无结果时返回提示。"""
+        from unittest.mock import patch
+        from engines.agent_factory.tools import make_agent_tools
+
+        a = await factory.create_from_description("A")
+        engine = mock_engine({a.id: a})
+        tools = make_agent_tools(engine, a.id)
+        search = tools[8]
+
+        with patch("llm.search.web_search", return_value=[]):
+            result = await search(query="不存在的内容")
+
+        assert "无结果" in result or "搜索" in result
+
+    @pytest.mark.asyncio
+    async def test_web_search_multiple_results(self, factory, mock_engine):
+        """web_search 返回多条结果。"""
+        from unittest.mock import patch
+        from engines.agent_factory.tools import make_agent_tools
+
+        a = await factory.create_from_description("A")
+        engine = mock_engine({a.id: a})
+        tools = make_agent_tools(engine, a.id)
+        search = tools[8]
+
+        mock_results = [
+            {"title": "结果1", "snippet": "摘要1", "url": "https://a.com"},
+            {"title": "结果2", "snippet": "摘要2", "url": "https://b.com"},
+            {"title": "结果3", "snippet": "摘要3", "url": "https://c.com"},
+        ]
+        with patch("llm.search.web_search", return_value=mock_results):
+            result = await search(query="测试搜索")
+
+        assert "结果1" in result
+        assert "结果2" in result
+        assert "结果3" in result

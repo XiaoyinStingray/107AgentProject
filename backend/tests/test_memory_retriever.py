@@ -216,3 +216,80 @@ async def test_delete_by_agent_removes_all(retriever):
     # a2 的记忆不受影响
     results = await retriever.get_recent("a2", limit=10)
     assert len(results) == 1
+
+
+# =============================================================================
+# Step 82: types 过滤 + lesson 优先排序
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_retrieve_filters_by_type(retriever):
+    """types 参数过滤只返回指定类型的记忆。"""
+    await retriever.add_memory("a1", "图书馆事件记录", type_="episodic", importance=0.5)
+    await retriever.add_memory("a1", "图书馆教训总结", type_="lesson", importance=0.8)
+    await retriever.add_memory("a1", "图书馆知识库内容", type_="semantic", importance=0.6)
+
+    # 只检索 lesson 类型
+    results = await retriever.retrieve("a1", "图书馆", top_k=5, types=["lesson"])
+    assert len(results) == 1
+    assert results[0].memory_type == "lesson"
+
+
+@pytest.mark.asyncio
+async def test_retrieve_filters_by_multiple_types(retriever):
+    """types 参数支持多类型过滤。"""
+    await retriever.add_memory("a1", "食堂事件记录", type_="episodic", importance=0.5)
+    await retriever.add_memory("a1", "食堂教训总结", type_="lesson", importance=0.8)
+    await retriever.add_memory("a1", "食堂知识库内容", type_="semantic", importance=0.6)
+
+    results = await retriever.retrieve("a1", "食堂", top_k=5, types=["lesson", "semantic"])
+    assert len(results) == 2
+    types_found = {r.memory_type for r in results}
+    assert types_found == {"lesson", "semantic"}
+
+
+@pytest.mark.asyncio
+async def test_lesson_priority_in_retrieve(retriever):
+    """lesson 类型记忆在检索结果中优先展示（即使 importance 较低）。"""
+    await retriever.add_memory("a1", "高重要性普通事件", type_="episodic", importance=0.9)
+    await retriever.add_memory("a1", "低重要性教训内容", type_="lesson", importance=0.7)
+
+    results = await retriever.retrieve("a1", "事件 教训 内容 重要性", top_k=5)
+    # lesson 类型应排在前面（按 _lesson_priority DESC 排序）
+    lesson_indices = [i for i, r in enumerate(results) if r.memory_type == "lesson"]
+    episodic_indices = [i for i, r in enumerate(results) if r.memory_type == "episodic"]
+    if lesson_indices and episodic_indices:
+        assert lesson_indices[0] < episodic_indices[0]
+
+
+@pytest.mark.asyncio
+async def test_retrieve_types_none_returns_all(retriever):
+    """types=None（默认）返回所有类型。"""
+    await retriever.add_memory("a1", "普通事件内容", type_="episodic", importance=0.5)
+    await retriever.add_memory("a1", "教训总结内容", type_="lesson", importance=0.8)
+
+    results = await retriever.retrieve("a1", "内容", top_k=5)
+    assert len(results) == 2
+    types_found = {r.memory_type for r in results}
+    assert "episodic" in types_found or "lesson" in types_found
+
+
+@pytest.mark.asyncio
+async def test_get_recent_types_filter(retriever):
+    """get_recent 的 types 参数正确过滤。"""
+    await retriever.add_memory("a1", "普通事件A", type_="episodic")
+    await retriever.add_memory("a1", "教训内容B", type_="lesson")
+    await retriever.add_memory("a1", "普通事件C", type_="episodic")
+
+    results = await retriever.get_recent("a1", limit=10, types=["lesson"])
+    assert len(results) == 1
+    assert results[0].memory_type == "lesson"
+
+
+@pytest.mark.asyncio
+async def test_add_memory_sets_memory_type(retriever):
+    """add_memory 同步设置 memory_type 列。"""
+    mem = await retriever.add_memory("a1", "同步测试内容", type_="lesson", importance=0.8)
+    assert mem.memory_type == "lesson"
+    assert mem.type == "lesson"
