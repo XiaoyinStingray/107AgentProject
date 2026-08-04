@@ -1,4 +1,4 @@
-"""
+﻿"""
 管道编排引擎 — DAG 拓扑排序 + 层级并行执行。
 
 设计原则:
@@ -21,10 +21,15 @@ from loguru import logger
 from engines.worker.pipeline import (
     PipelineSpec,
     PipelineNodeSpec,
+    PipelineEdge,
     PipelineStatus,
     NodeStatus,
+    EdgeType,
     validate_pipeline,
     _topological_sort,
+    get_flow_deps,
+    get_loop_edges,
+    get_branch_edges,
 )
 from engines.worker.workspace import WorkspaceProvider, LocalWorkspace
 from engines.worker.coordinator import WorkspaceCoordinator, QueuedTask
@@ -123,15 +128,22 @@ class PipelineEngine:
             "total_nodes": len(pipeline.nodes),
         })
 
-        # Step 3: 拓扑排序 → 分级执行
+        # Step 3: 拓扑排序 → 分级执行 (Step 104: 使用 FLOW deps)
+        flow_deps = get_flow_deps(pipeline.nodes, pipeline.edges)
         try:
-            levels = _topological_sort(pipeline.nodes)
+            levels = _topological_sort(pipeline.nodes, flow_deps)
         except ValueError as e:
             yield _pipeline_event("pipeline.error", {"message": str(e)})
             return
 
-        # 执行每一层
-        for level_idx, level in enumerate(levels):
+        # Step 104: 迭代计数器（边 ID → 已循环次数）
+        iteration_counts: dict[str, int] = {}
+        branch_taken: set[str] = set()  # 已触发的 branch 边 ID
+
+        # 执行每一层（支持回边动态重新入队）
+        level_idx = 0
+        while level_idx < len(levels):
+            level = levels[level_idx]
             if run._cancel_requested:
                 break
 
@@ -179,8 +191,10 @@ class PipelineEngine:
                         worker = AgentWorker(agent=agent, workspace=workspace)
                         run.node_workers[node.id] = worker
 
-                        # 执行任务
-                        async for sse_event in worker.execute(node.task):
+                        # 执行任务 (Step 105: 传递节点专属工具)
+                        async for sse_event in worker.execute(
+                            node.task, extra_tools=node.extra_tools,
+                        ):
                             # 转发节点事件（加上 node_id 前缀）
                             yield _pipeline_event("pipeline.node_event", {
                                 "node_id": node.id,
@@ -235,6 +249,60 @@ class PipelineEngine:
                 "errors": len([n for n in level if run.node_statuses[n.id] == NodeStatus.ERROR]),
             })
 
+            # ── Step 104: Loop/Branch 检查 ──
+            nodes_to_replay: list[PipelineNodeSpec] = []
+
+            for node in level:
+                if run.node_statuses[node.id] not in (NodeStatus.COMPLETE, NodeStatus.ERROR):
+                    continue
+
+                # 检查 LOOP 边
+                for loop_edge in get_loop_edges(pipeline.edges, node.id):
+                    loop_id = loop_edge.id
+                    current_iter = iteration_counts.get(loop_id, 0)
+                    if current_iter >= loop_edge.max_iterations:
+                        logger.warning(f"[Pipeline] Loop {loop_id}: max_iter={loop_edge.max_iterations} reached, skipping")
+                        continue
+
+                    if _eval_condition(loop_edge, run):
+                        iteration_counts[loop_id] = current_iter + 1
+                        logger.info(f"[Pipeline] Loop {loop_id}: condition met, iteration {iteration_counts[loop_id]}/{loop_edge.max_iterations}")
+                        nodes_to_replay.extend(
+                            _path_between(pipeline.nodes, flow_deps,
+                                         loop_edge.to_node, loop_edge.from_node))
+                        yield _pipeline_event("pipeline.loop_triggered", {
+                            "edge_id": loop_id,
+                            "iteration": iteration_counts[loop_id],
+                            "max_iterations": loop_edge.max_iterations,
+                        })
+
+                # 检查 BRANCH 边
+                for branch_edge in get_branch_edges(pipeline.edges, node.id):
+                    if branch_edge.id in branch_taken:
+                        continue
+                    if _eval_condition(branch_edge, run):
+                        branch_taken.add(branch_edge.id)
+                        logger.info(f"[Pipeline] Branch {branch_edge.id}: condition met → {branch_edge.to_node}")
+                        # 标记被 branch 绕过的节点为 SKIPPED
+                        _skip_bypassed(pipeline.nodes, flow_deps, branch_edge, run)
+                        yield _pipeline_event("pipeline.branch_taken", {
+                            "edge_id": branch_edge.id,
+                            "label": branch_edge.label,
+                        })
+
+            # 将回边触发的节点重新插入执行队列
+            if nodes_to_replay:
+                # 重置这些节点的状态
+                for n in nodes_to_replay:
+                    run.node_statuses[n.id] = NodeStatus.PENDING
+                # 插入到当前位置之后
+                levels.insert(level_idx + 1, nodes_to_replay)
+                yield _pipeline_event("pipeline.loop_replay", {
+                    "nodes": [n.id for n in nodes_to_replay],
+                })
+
+            level_idx += 1
+
         # Step 4: 完成
         total_ms = int((time.monotonic() - run.start_time) * 1000)
         node_summary = {
@@ -284,8 +352,165 @@ def _collect_node_summaries(run) -> dict:
 
 def _pipeline_event(event_type: str, data: dict) -> str:
     """构建管道 SSE 事件。"""
-    return json.dumps({
+    import json as _j
+    return _j.dumps({
         "type": event_type,
         "data": data,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }, ensure_ascii=False)
+
+
+# ── Step 104: Loop/Branch 辅助函数 ──
+
+
+def _eval_condition(edge: PipelineEdge, run, workspace=None) -> bool:
+    """评估边的触发条件。
+
+    从已完成节点的输出 + workspace 文件中检查条件:
+    - 简单模式: "FAILED" → 检查 from_node 输出/文件是否包含 FAILED
+    - 数值模式: "score < 0.7" → 从 workspace 文件提取 score 值
+    - 正则模式: "/error|失败/" → 匹配输出内容
+    无条件 → 默认 True
+    """
+    if not edge.condition:
+        return True
+
+    cond = edge.condition.strip()
+
+    # 正则模式: /pattern/
+    if cond.startswith("/") and cond.endswith("/"):
+        import re
+        pattern = cond[1:-1]
+        output = _get_node_output(run, edge.from_node, workspace)
+        return bool(re.search(pattern, output))
+
+    # 数值模式: field op value
+    import re as _re
+    num_match = _re.match(r'(\w+)\s*([<>=!]+)\s*([\d.]+)', cond)
+    if num_match:
+        field = num_match.group(1)
+        op = num_match.group(2)
+        target = float(num_match.group(3))
+        actual = _extract_field_value(run, edge.from_node, field, workspace)
+        if actual is None:
+            return False
+        if op == '<': return actual < target
+        if op == '>': return actual > target
+        if op == '<=': return actual <= target
+        if op == '>=': return actual >= target
+        if op in ('==', '='): return actual == target
+        if op == '!=': return actual != target
+
+    # 简单模式: 检查输出 + workspace 文件是否包含关键词
+    output = _get_node_output(run, edge.from_node, workspace)
+    return cond.lower() in output.lower()
+
+
+def _get_node_output(run, node_id: str, workspace=None) -> str:
+    """收集节点的文本输出（从 events/errors + workspace 文件拼合）。"""
+    parts = []
+    for err in run._errors:
+        if err.get("node_id") == node_id:
+            parts.append(err.get("error", ""))
+    summaries = _collect_node_summaries(run)
+    s = summaries.get(node_id, {})
+    parts.append(s.get("task", ""))
+    # Fix: 读取节点产出的 workspace 文件内容（用于条件评估）
+    if workspace:
+        try:
+            node = next((n for n in run.pipeline.nodes if n.id == node_id), None)
+            if node and node.produces:
+                for filename in node.produces[:3]:  # 最多读 3 个文件
+                    try:
+                        content = workspace.read_file_sync(filename) if hasattr(workspace, 'read_file_sync') else None
+                        if content:
+                            parts.append(str(content)[:2000])
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+    return " ".join(parts)
+
+
+def _extract_field_value(run, node_id: str, field: str, workspace=None) -> float | None:
+    """从节点输出 + workspace 文件中提取数值字段（如 score、count）。"""
+    output = _get_node_output(run, node_id, workspace)
+    import re
+    for pat in [rf'{field}["\s:=]+([\d.]+)', rf'{field}\s*=\s*([\d.]+)']:
+        m = re.search(pat, output, re.IGNORECASE)
+        if m:
+            try:
+                return float(m.group(1))
+            except ValueError:
+                pass
+    return None
+
+
+def _path_between(
+    nodes: list[PipelineNodeSpec],
+    flow_deps: dict[str, set[str]],
+    from_id: str,
+    to_id: str,
+) -> list[PipelineNodeSpec]:
+    """找出 from_id → to_id 路径上的所有节点（含两端）。"""
+    node_map = {n.id: n for n in nodes}
+    result = []
+    current = to_id
+    visited = set()
+    while current != from_id and current not in visited:
+        visited.add(current)
+        node = node_map.get(current)
+        if node:
+            result.append(node)
+        # Fix: flow_deps[current] = current 依赖的上游节点；从 to_id 向 from_id 回溯
+        upstream = list(flow_deps.get(current, set()))
+        current = upstream[0] if upstream else current
+    # 加上 from 节点
+    if from_node := node_map.get(from_id):
+        result.append(from_node)
+    result.reverse()
+    return result
+
+
+def _skip_bypassed(
+    nodes: list[PipelineNodeSpec],
+    flow_deps: dict[str, set[str]],
+    branch_edge: PipelineEdge,
+    run,
+):
+    """标记从 branch 起点到目标之间被绕过的节点为 SKIPPED。
+
+    被绕过的节点 = from_node 的下游中、不在 to_node 路径上的节点。
+    """
+    from_id = branch_edge.from_node
+    to_id = branch_edge.to_node
+
+    # 找出 to_node 的所有上游（反向 BFS）
+    reachable_from_to = {to_id}
+    queue = [to_id]
+    while queue:
+        nid = queue.pop(0)
+        for dep_id, deps in flow_deps.items():
+            if nid in deps and dep_id not in reachable_from_to:
+                reachable_from_to.add(dep_id)
+                queue.append(dep_id)
+
+    # Fix: 递归标记 from_node 的所有下游中、不在 to_node 路径上的节点（包括孙子节点）
+    bypassed = set()
+    # 从 from_node 出发 BFS 找所有下游
+    downstream_queue = [
+        nid for nid, deps in flow_deps.items() if from_id in deps
+    ]
+    while downstream_queue:
+        nid = downstream_queue.pop(0)
+        if nid in reachable_from_to or nid in bypassed or nid == from_id:
+            continue
+        bypassed.add(nid)
+        # 添加此节点的下游
+        for child_id, child_deps in flow_deps.items():
+            if nid in child_deps and child_id not in bypassed:
+                downstream_queue.append(child_id)
+
+    for nid in bypassed:
+        if run.node_statuses.get(nid) == NodeStatus.PENDING:
+            run.node_statuses[nid] = NodeStatus.SKIPPED

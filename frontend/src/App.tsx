@@ -23,6 +23,8 @@ const WorkerBench = lazy(() => import("./pages/WorkerBench"));
 const ShowcaseWall = lazy(() => import("./pages/ShowcaseWall"));
 const DuelArena = lazy(() => import("./pages/DuelArena"));
 const PipelinePage = lazy(() => import("./pages/PipelinePage"));
+const SettingsPage = lazy(() => import("./pages/SettingsPage"));
+const PipelineEditor = lazy(() => import("./pages/PipelineEditor"));
 
 /** Suspense 占位——加载中显示 */
 function PageFallback() {
@@ -238,6 +240,26 @@ export default function App() {
             element={
               <Suspense fallback={<PageFallback />}>
                 <PipelinePage />
+              </Suspense>
+            }
+          />
+
+          {/* Step 103: 参数设置 */}
+          <Route
+            path="settings"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <SettingsPage />
+              </Suspense>
+            }
+          />
+
+          {/* Step 106: 图形化管线编辑器 */}
+          <Route
+            path="pipeline-editor"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <PipelineEditor />
               </Suspense>
             }
           />

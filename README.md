@@ -18,7 +18,7 @@
 
 ## 项目简介
 
-本项目构建一个基于 **FastAPI + AutoGen + React** 的 AI Agent 社会模拟平台。系统经历 6 个阶段持续迭代：
+本项目构建一个基于 **FastAPI + AutoGen + React** 的 AI Agent 社会模拟平台。系统经历 7 个阶段持续迭代：
 
 | 阶段 | 名称 | 核心产出 | 状态 |
 |------|------|----------|------|
@@ -27,7 +27,8 @@
 | State 3 | 三大新模块 | Agent Team + LLM Bench + M11 游戏化场景（Step 51–76） | ✅ 完成 |
 | State 4 | Agent 内核强化 | 工具真实化 + 上下文连续 + Scratchpad + 场景-Brain 联动（Step 77–85） | ✅ 完成 |
 | State 5 | Worker 工作台 | Agent 干活——双轨工作区 + 多 Agent 协作 + 管道编排 + 自主调度（Step 86–97） | ✅ 完成 |
-| State 6 | 三线并行 | M11 主动社交 + M12 Worker 进阶 + 零成本推广（Step 98–T14） | 🚧 进行中 |
+| State 6 | 三线并行 | M11 主动社交 + M12 Worker 进阶 + 零成本推广（Step 98–T14） | ✅ 完成 |
+| State 7 | 平台柔化 + Pipeline 深度化 | 用户参数面板 + 图形化管线编辑器 + 8 特殊工具 + Loop/Branch 控制流（Step 103–106） | ✅ 完成 |
 
 ### 测试线
 
@@ -59,7 +60,7 @@
 | M9 | Agent Team | 多 Agent 协作——任务分解 + 分工执行 + 复盘报告 |
 | M10 | LLM Bench | Agent 评测——批量对战 + 六维雷达 + 排行榜 + 行为指纹 |
 | M11 | 游戏化场景 | Phaser 2D 场景——精灵渲染 + 自主移动 + 对话 + 导演模式 |
-| M12 | Worker 工作台 | Agent 生产力——搜索 + 代码执行 + 文件产出 + 管道编排 |
+| M12 | Worker 工作台 | Agent 生产力——搜索 + 代码执行 + 文件产出 + 图形化管线编辑器 + 8 特殊工具 |
 
 ## 技术栈
 
@@ -144,6 +145,10 @@ npm run dev
 │   │   ├── api/                 # REST API 路由
 │   │   │   ├── agents.py        # /api/agents CRUD
 │   │   │   ├── worlds.py        # /api/worlds 管理 + SSE
+│   │   │   ├── scenes.py        # /api/scenes 场景 + 搭话话题 + 对话选项
+│   │   │   ├── settings.py      # /api/settings 用户可调参数 (State 7)
+│   │   │   ├── pipelines.py     # /api/pipelines 管道 CRUD + 执行
+│   │   │   ├── workers.py       # /api/workers Agent 任务执行
 │   │   │   ├── sse.py           # SSE 事件推送
 │   │   │   └── export.py        # 研究报告导出
 │   │   ├── engines/             # 核心引擎
@@ -160,8 +165,28 @@ npm run dev
 │       ├── main.tsx             # 应用入口 + QueryClientProvider
 │       ├── App.tsx              # 路由 + 布局
 │       ├── api/                 # API 调用层（React Query hooks）
-│       ├── pages/               # 8 个模块页面
+│       │   ├── agents.ts        # useAgents / useCreateAgent / ...
+│       │   ├── scenes.ts        # useSceneState / ...
+│       │   ├── settings.ts      # useSettings / useUpdateSettings (State 7)
+│       │   └── client.ts        # 统一 fetch 封装
+│       ├── pages/               # 12 个模块页面
+│       │   ├── Home.tsx         # 首页仪表盘
+│       │   ├── SettingsPage.tsx # 用户可调参数面板 (State 7)
+│       │   ├── PipelinePage.tsx # 管线列表 + 运行监控
+│       │   ├── PipelineEditor.tsx # 图形化管线编辑器 (State 7)
+│       │   ├── GameScene.tsx    # M11 游戏场景
+│       │   └── ...
+│       ├── game/                # Phaser 游戏引擎
+│       │   ├── scenes/          # MapScene 等
+│       │   ├── audio/           # 语音合成引擎
+│       │   ├── sprites/         # Agent 精灵
+│       │   ├── emotion/         # 情绪引擎
+│       │   └── ProactiveChatManager.ts # 主动搭话
 │       ├── components/          # 共享 UI 组件
+│       │   ├── pipeline/        # PipelineNodeComponent + (State 7)
+│       │   ├── scene/           # AgentPanel / ProactiveBanner / ProactiveChat
+│       │   ├── worker/          # WorkerTerminal / WorkspacePanel / FileDropZone
+│       │   └── layout/          # Sidebar + 布局
 │       ├── hooks/               # 共享 hooks（useSSE, useApi）
 │       ├── stores/              # Zustand stores
 │       ├── types/               # TypeScript 类型定义
@@ -170,6 +195,8 @@ npm run dev
 │   ├── agent-lab-blueprint.md   # 工程蓝图
 │   ├── development-plan.md      # State 1 计划
 │   ├── plan-state2.md           # State 2 计划
+│   ├── plan-state7.md           # State 7 计划（扩充版）
+│   ├── state7-done.md           # State 7 实施报告
 │   ├── STEP.md                  # 开发流程规范
 │   └── done/                    # 步骤完成记录
 ├── run.py                       # 后端一键启动脚本

@@ -14,7 +14,9 @@ from pydantic import BaseModel, Field
 from engines.worker.pipeline import (
     PipelineSpec,
     PipelineNodeSpec,
+    PipelineEdge,
     PipelineStatus,
+    EdgeType,
     validate_pipeline,
 )
 
@@ -26,14 +28,33 @@ class NodeCreateRequest(BaseModel):
     title: str = Field(default="", description="Node title")
     agent_id: str = Field(default="worker-default", description="Agent ID")
     task: str = Field(default="", description="Task description")
+    role: str = Field(default="worker", description="Node role")
+    produces: list[str] = Field(default_factory=list)
+    expects: list[str] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
     depends_on_files: list[str] = Field(default_factory=list)
+    extra_tools: list[str] = Field(default_factory=list)
+    enabled_tools: list[str] = Field(default_factory=list)
+
+
+class EdgeCreateRequest(BaseModel):
+    id: str = Field(..., description="Edge ID")
+    from_node: str = Field(..., description="Source node ID")
+    to_node: str = Field(..., description="Target node ID")
+    edge_type: str = Field(default="flow", description="flow | loop | branch")
+    condition: str | None = None
+    condition_field: str | None = None
+    max_iterations: int = 3
+    iteration_label: str = ""
+    priority: int = 0
+    label: str = ""
 
 
 class PipelineCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: str = ""
     nodes: list[NodeCreateRequest] = Field(..., min_length=1)
+    edges: list[EdgeCreateRequest] = Field(default_factory=list)
 
 
 class PipelineExecuteRequest(BaseModel):
@@ -67,8 +88,18 @@ def _save_pipelines():
         for p in _pipelines.values():
             data.append({
                 "id": p.id, "name": p.name, "description": p.description,
-                "nodes": [{"id": n.id, "title": n.title, "agent_id": n.agent_id,
-                           "task": n.task, "depends_on": n.depends_on} for n in p.nodes],
+                "nodes": [{ "id": n.id, "title": n.title, "agent_id": n.agent_id,
+                           "task": n.task, "role": n.role,
+                           "produces": n.produces, "expects": n.expects,
+                           "depends_on": n.depends_on, "depends_on_files": n.depends_on_files,
+                           "extra_tools": n.extra_tools, "enabled_tools": n.enabled_tools,
+                           } for n in p.nodes],
+                "edges": [{ "id": e.id, "from_node": e.from_node, "to_node": e.to_node,
+                           "edge_type": e.edge_type.value,
+                           "condition": e.condition, "condition_field": e.condition_field,
+                           "max_iterations": e.max_iterations, "iteration_label": e.iteration_label,
+                           "priority": e.priority, "label": e.label,
+                           } for e in p.edges],
             })
         _get_pipelines_path().write_text(_json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
     except Exception:
@@ -86,8 +117,21 @@ def _load_pipelines():
                     id=d["id"], name=d["name"], description=d.get("description", ""),
                     nodes=[PipelineNodeSpec(
                         id=n["id"], title=n["title"], agent_id=n.get("agent_id", "worker-default"),
-                        task=n["task"], depends_on=n.get("depends_on", []),
+                        task=n["task"], role=n.get("role", "worker"),
+                        produces=n.get("produces", []), expects=n.get("expects", []),
+                        depends_on=n.get("depends_on", []),
+                        depends_on_files=n.get("depends_on_files", []),
+                        extra_tools=n.get("extra_tools", []),
+                        enabled_tools=n.get("enabled_tools", []),
                     ) for n in d.get("nodes", [])],
+                    edges=[PipelineEdge(
+                        id=e["id"], from_node=e["from_node"], to_node=e["to_node"],
+                        edge_type=EdgeType(e.get("edge_type", "flow")),
+                        condition=e.get("condition"), condition_field=e.get("condition_field"),
+                        max_iterations=e.get("max_iterations", 3),
+                        iteration_label=e.get("iteration_label", ""),
+                        priority=e.get("priority", 0), label=e.get("label", ""),
+                    ) for e in d.get("edges", [])],
                 )
             logger.info(f"Loaded {len(data)} pipelines from disk")
     except Exception as e:
@@ -185,18 +229,31 @@ async def create_pipeline(req: PipelineCreateRequest):
     nodes = [
         PipelineNodeSpec(
             id=n.id, title=n.title, agent_id=n.agent_id, task=n.task,
+            role=n.role, produces=n.produces, expects=n.expects,
             depends_on=n.depends_on, depends_on_files=n.depends_on_files,
+            extra_tools=n.extra_tools, enabled_tools=n.enabled_tools,
         )
         for n in req.nodes
     ]
-    pipeline = PipelineSpec(id=pipeline_id, name=req.name, description=req.description, nodes=nodes)
+    edges = [
+        PipelineEdge(
+            id=e.id, from_node=e.from_node, to_node=e.to_node,
+            edge_type=EdgeType(e.edge_type),
+            condition=e.condition, condition_field=e.condition_field,
+            max_iterations=e.max_iterations, iteration_label=e.iteration_label,
+            priority=e.priority, label=e.label,
+        )
+        for e in req.edges
+    ]
+    pipeline = PipelineSpec(id=pipeline_id, name=req.name, description=req.description,
+                            nodes=nodes, edges=edges)
     valid, msg = validate_pipeline(pipeline)
     if not valid:
         raise HTTPException(status_code=400, detail=f"管道配置无效: {msg}")
     _pipelines[pipeline_id] = pipeline
     _save_pipelines()
-    logger.info(f"Pipeline created: {pipeline_id} — {req.name} ({len(nodes)} nodes)")
-    return {"id": pipeline_id, "name": req.name, "node_count": len(nodes), "status": "draft"}
+    logger.info(f"Pipeline created: {pipeline_id} — {req.name} ({len(nodes)} nodes, {len(edges)} edges)")
+    return {"id": pipeline_id, "name": req.name, "node_count": len(nodes), "edge_count": len(edges), "status": "draft"}
 
 
 @router.get("/")
@@ -219,7 +276,19 @@ async def get_pipeline(pipeline_id: str):
         raise HTTPException(status_code=404, detail="管道不存在")
     return {
         "id": p.id, "name": p.name, "description": p.description, "status": p.status.value,
-        "nodes": [{"id": n.id, "title": n.title, "agent_id": n.agent_id, "task": n.task, "depends_on": n.depends_on, "depends_on_files": n.depends_on_files} for n in p.nodes],
+        "nodes": [{
+            "id": n.id, "title": n.title, "agent_id": n.agent_id, "task": n.task,
+            "role": n.role, "produces": n.produces, "expects": n.expects,
+            "depends_on": n.depends_on, "depends_on_files": n.depends_on_files,
+            "extra_tools": n.extra_tools, "enabled_tools": n.enabled_tools,
+        } for n in p.nodes],
+        "edges": [{
+            "id": e.id, "from_node": e.from_node, "to_node": e.to_node,
+            "edge_type": e.edge_type.value,
+            "condition": e.condition, "condition_field": e.condition_field,
+            "max_iterations": e.max_iterations, "iteration_label": e.iteration_label,
+            "priority": e.priority, "label": e.label,
+        } for e in p.edges],
     }
 
 
@@ -230,16 +299,27 @@ async def update_pipeline(pipeline_id: str, req: PipelineCreateRequest):
         raise HTTPException(status_code=404, detail="管道不存在")
     nodes = [
         PipelineNodeSpec(id=n.id, title=n.title, agent_id=n.agent_id, task=n.task,
-                         depends_on=n.depends_on, depends_on_files=n.depends_on_files)
+                         role=n.role, produces=n.produces, expects=n.expects,
+                         depends_on=n.depends_on, depends_on_files=n.depends_on_files,
+                         extra_tools=n.extra_tools, enabled_tools=n.enabled_tools)
         for n in req.nodes
     ]
-    pipeline = PipelineSpec(id=pipeline_id, name=req.name, description=req.description, nodes=nodes)
+    edges = [
+        PipelineEdge(id=e.id, from_node=e.from_node, to_node=e.to_node,
+                     edge_type=EdgeType(e.edge_type),
+                     condition=e.condition, condition_field=e.condition_field,
+                     max_iterations=e.max_iterations, iteration_label=e.iteration_label,
+                     priority=e.priority, label=e.label)
+        for e in req.edges
+    ]
+    pipeline = PipelineSpec(id=pipeline_id, name=req.name, description=req.description,
+                            nodes=nodes, edges=edges)
     valid, msg = validate_pipeline(pipeline)
     if not valid:
         raise HTTPException(status_code=400, detail=f"管道配置无效: {msg}")
     _pipelines[pipeline_id] = pipeline
     _save_pipelines()
-    return {"id": pipeline_id, "name": req.name, "node_count": len(nodes)}
+    return {"id": pipeline_id, "name": req.name, "node_count": len(nodes), "edge_count": len(edges)}
 
 
 @router.get("/{pipeline_id}/runs")

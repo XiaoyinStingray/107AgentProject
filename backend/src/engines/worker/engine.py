@@ -231,6 +231,7 @@ class AgentWorker:
 
     async def execute(
         self, task: str, is_follow_up: bool = False, recipe_id: str = "",
+        extra_tools: list[str] | None = None,
     ) -> AsyncGenerator[str, None]:
         """执行任务——返回 SSE 事件生成器。
 
@@ -238,6 +239,7 @@ class AgentWorker:
             task: 用户的任务描述
             is_follow_up: 是否为追加任务（复用工作区时设为 True）
             recipe_id: 配方 ID（可选，如 "deep_research"）
+            extra_tools: Step 105 — 本节点专属工具名列表
         """
         self._is_follow_up = is_follow_up
 
@@ -260,9 +262,19 @@ class AgentWorker:
             return
 
         self._start_time = time.monotonic()
-        self._tools = make_worker_tools(self._workspace)
+        self._tools = make_worker_tools(self._workspace, extra_tools=extra_tools or [])
 
-        logger.info(f"AgentWorker.execute: task='{task[:80]}...'")
+        # Step 103: 从用户参数读取 max_steps 和 timeout
+        try:
+            from config import get_settings as _get_user_settings
+            _us = _get_user_settings()
+            self._max_steps = _us.worker_max_steps
+            self._timeout_seconds = _us.worker_timeout_minutes * 60
+        except Exception:
+            self._max_steps = MAX_STEPS
+            self._timeout_seconds = 900  # 15 min default
+
+        logger.info(f"AgentWorker.execute: task='{task[:80]}...' max_steps={self._max_steps}")
 
         # 初始事件
         self._transition(WorkerState.PLANNING)
@@ -281,6 +293,19 @@ class AgentWorker:
                     for ev in cancel_events:
                         yield ev
                     return
+
+                # Fix: 全局超时检查 (Step 103 worker_timeout_minutes)
+                _timeout = getattr(self, '_timeout_seconds', 900)
+                if time.monotonic() - self._start_time > _timeout:
+                    logger.warning(f"AgentWorker: timeout after {_timeout}s")
+                    yield _sse_event("worker.error", WorkerErrorData(
+                        step_index=self._step_index,
+                        error_type="timeout",
+                        message=f"任务超时（{_timeout // 60} 分钟）",
+                        recoverable=False,
+                    ).__dict__)
+                    self._transition(WorkerState.DONE)
+                    break
 
                 match self._state:
                     case WorkerState.PLANNING:
@@ -454,9 +479,10 @@ class AgentWorker:
         """
         self._step_index += 1
 
-        # 检查步数限制
-        if self._step_index > MAX_STEPS:
-            logger.warning(f"AgentWorker: reached MAX_STEPS ({MAX_STEPS}), forcing DONE")
+        # 检查步数限制（Step 103: 用户可调）
+        _limit = getattr(self, '_max_steps', MAX_STEPS)
+        if self._step_index > _limit:
+            logger.warning(f"AgentWorker: reached max_steps ({_limit}), forcing DONE")
             self._transition(WorkerState.DONE)
             return
 

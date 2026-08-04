@@ -45,11 +45,20 @@ def create_model_client(profile: LLMProfile = "think"):
         # multiple_system_messages 是 Optional，DeepSeek 支持多条 system message
     }
 
-    temperature = (
-        settings.llm_temperature_think
-        if profile == "think"
-        else settings.llm_temperature_act
-    )
+    # Step 103: 优先使用用户可调参数，兜底用 .env 常量
+    try:
+        from config import get_settings as _get_user_settings
+        _us = _get_user_settings()
+        _user_temp = _us.temperature_think if profile == "think" else _us.temperature_act
+    except Exception:
+        _user_temp = None
+
+    if _user_temp is not None:
+        temperature = _user_temp
+    elif profile == "think":
+        temperature = settings.llm_temperature_think
+    else:
+        temperature = settings.llm_temperature_act
     create_options: dict[str, object] = {"temperature": temperature}
     if _uses_official_deepseek_v4():
         create_options["extra_body"] = {

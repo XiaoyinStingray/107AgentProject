@@ -15,6 +15,7 @@ import {
   PanelLeft,
   LayoutDashboard,
   Terminal,
+  Settings,
 } from "lucide-react";
 import Badge from "../shared/Badge";
 import { MENU_SECTIONS } from "../../data/menuData";
@@ -165,6 +166,23 @@ export default function Sidebar() {
           );
         })}
       </nav>
+
+      {/* Step 103: 设置入口 */}
+      <div className="border-t border-border mt-auto">
+        <button
+          type="button"
+          onClick={() => navigate("/settings")}
+          className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm font-mono
+            transition-colors duration-100
+            ${pathname === "/settings"
+              ? "text-accent-green bg-accent-green/10 border-r-2 border-accent-green"
+              : "text-text-secondary hover:text-text-primary hover:bg-bg-card/30"
+            }`}
+        >
+          <Settings size={16} />
+          {!collapsed && <span>⚙️ 参数设置</span>}
+        </button>
+      </div>
 
       {/* 底部提示 */}
       {!collapsed && (

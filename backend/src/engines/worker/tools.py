@@ -170,7 +170,111 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {t.name: t for t in WORKER_TOOLS}
 # =============================================================================
 
 
-def make_worker_tools(workspace) -> list[ToolSpec]:
+# ── Step 105: Timeline HTML 模板 ──
+
+TIMELINE_HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>时间线</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;padding:2rem}
+.timeline{position:relative;max-width:800px;margin:0 auto}
+.timeline::after{content:'';position:absolute;width:3px;background:#334155;top:0;bottom:0;left:50%;margin-left:-1.5px}
+.timeline-item{padding:10px 40px;position:relative;width:50%}
+.timeline-item.left{left:0}.timeline-item.right{left:50%}
+.timeline-item .date{font-size:12px;color:#94a3b8;margin-bottom:4px}
+.timeline-item .content{background:#1e293b;border-radius:8px;padding:12px 16px;border:1px solid #334155}
+.timeline-item .content h3{font-size:16px;margin-bottom:4px;color:#38bdf8}
+.timeline-item .content p{font-size:14px;color:#cbd5e1}
+@media(max-width:600px){.timeline::after{left:20px}.timeline-item{width:100%;padding-left:50px}.timeline-item.right{left:0}}
+</style></head><body><div class="timeline">{{ITEMS}}</div></body></html>"""
+
+
+# ── Step 105: Special Tools ──
+
+@dataclass
+class SpecialToolSpec:
+    """特殊工具规格——预设的高阶工具，用于 Pipeline 特定节点。"""
+    key: str              # 注册表键名，如 "mindmap"
+    name: str             # 工具函数名（Agent 看到的）
+    description: str      # 出现在 Agent 决策 prompt 中
+    parameters: dict      # 参数定义
+    suitable_roles: list[str]  # 推荐角色
+
+
+SPECIAL_TOOLS: dict[str, SpecialToolSpec] = {
+    "mindmap": SpecialToolSpec(
+        key="mindmap",
+        name="mindmap_generate",
+        description="基于主题生成 Mermaid 思维导图，保存为 mindmap.md",
+        parameters={"topic": {"type": "string", "required": True}},
+        suitable_roles=["analyst", "writer"],
+    ),
+    "chart": SpecialToolSpec(
+        key="chart",
+        name="chart_generate",
+        description="基于 JSON 数据生成图表（bar/line/pie/scatter），保存为 chart.png",
+        parameters={
+            "data_json": {"type": "string", "required": True, "description": "JSON 数据: {labels:[], values:[], title:''}"},
+            "chart_type": {"type": "string", "required": True, "description": "图表类型: bar/line/pie/scatter"},
+        },
+        suitable_roles=["analyst", "executor"],
+    ),
+    "timeline": SpecialToolSpec(
+        key="timeline",
+        name="timeline_generate",
+        description="基于事件 JSON 数组生成交互式时间线 HTML，保存为 timeline.html",
+        parameters={"events_json": {"type": "string", "required": True, "description": "JSON 数组: [{date, title, desc}]"}},
+        suitable_roles=["writer", "analyst"],
+    ),
+    "summarize": SpecialToolSpec(
+        key="summarize",
+        name="summarize",
+        description="对指定文件生成结构化摘要，保存为 summary.md",
+        parameters={
+            "path": {"type": "string", "required": True, "description": "要摘要的文件路径"},
+            "max_words": {"type": "number", "required": False, "description": "最大字数，默认 200"},
+        },
+        suitable_roles=["analyst", "writer", "reviewer"],
+    ),
+    "translate": SpecialToolSpec(
+        key="translate",
+        name="translate",
+        description="将指定文件翻译为目标语言，保存为 {name}_{lang}.md",
+        parameters={
+            "path": {"type": "string", "required": True, "description": "要翻译的文件路径"},
+            "target_lang": {"type": "string", "required": False, "description": "目标语言，默认 'en'"},
+        },
+        suitable_roles=["writer"],
+    ),
+    "data_profile": SpecialToolSpec(
+        key="data_profile",
+        name="data_profile",
+        description="对 CSV/JSON 数据文件生成数据画像（行数/列名/类型/缺失率/分布），保存为 data_profile.md",
+        parameters={"path": {"type": "string", "required": True, "description": "CSV 或 JSON 文件路径"}},
+        suitable_roles=["analyst"],
+    ),
+    "code_review": SpecialToolSpec(
+        key="code_review",
+        name="code_review",
+        description="对代码文件进行 4 维度审查（Bug/风格/性能/安全），保存为 code_review.md",
+        parameters={"path": {"type": "string", "required": True, "description": "代码文件路径"}},
+        suitable_roles=["reviewer"],
+    ),
+    "outline": SpecialToolSpec(
+        key="outline",
+        name="outline_generate",
+        description="为主题生成结构化文档大纲（Markdown 层级标题），保存为 outline.md",
+        parameters={
+            "topic": {"type": "string", "required": True, "description": "文档主题"},
+            "sections": {"type": "number", "required": False, "description": "章节数，默认 5"},
+        },
+        suitable_roles=["writer"],
+    ),
+}
+
+
+def make_worker_tools(workspace, extra_tools: list[str] | None = None) -> list[ToolSpec]:
     """为 Worker 创建闭包工具集——捕获 WorkspaceProvider 引用。
 
     每个 tool handler 通过闭包访问 workspace（LocalWorkspace 或 CloudWorkspace），
@@ -311,7 +415,7 @@ def make_worker_tools(workspace) -> list[ToolSpec]:
             return f"❌ 安装 {pkg_name} 失败: {e}"
 
     # 构造闭包 ToolSpec 列表（复制原 ToolSpec 并填入 handler）
-    return [
+    base_tools = [
         ToolSpec(
             name="web_search",
             description=TOOL_REGISTRY["web_search"].description,
@@ -356,3 +460,238 @@ def make_worker_tools(workspace) -> list[ToolSpec]:
             handler=install_package_handler,
         ),
     ]
+
+    # ── Step 105: 特殊工具闭包 ──
+    extra = extra_tools or []
+    special_specs: list[ToolSpec] = []
+
+    if "mindmap" in extra:
+        async def mindmap_handler(topic: str) -> str:
+            """生成 Mermaid 思维导图。"""
+            prompt = (
+                f"你是思维导图生成器。基于以下主题生成 Mermaid mindmap 格式的思维导图。\n"
+                f"主题：{topic}\n"
+                f"要求：至少 3 层深度，使用 Mermaid mindmap 语法，不要输出非 Mermaid 内容。\n"
+                f"格式示例：\n```mermaid\nmindmap\n  root((中心主题))\n    分支1\n      细节A\n    分支2\n      细节B\n```"
+            )
+            try:
+                from llm.client import create_model_client
+                client = create_model_client("act")
+                result = await client.create(
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.7, max_tokens=500,
+                )
+                content = result.content.strip()
+                # 提取 mermaid 代码块
+                import re
+                m = re.search(r"```mermaid\s*\n?([\s\S]*?)```", content)
+                mermaid = m.group(1).strip() if m else content
+                await workspace.write_file("mindmap.md", "```mermaid\n" + mermaid + "\n```")
+                return f"✅ 思维导图已生成 → mindmap.md"
+            except Exception as e:
+                logger.warning(f"[special-tool] mindmap failed: {e}")
+                return f"❌ 思维导图生成失败: {e}"
+        special_specs.append(ToolSpec(
+            name="mindmap_generate",
+            description=SPECIAL_TOOLS["mindmap"].description,
+            parameters=SPECIAL_TOOLS["mindmap"].parameters,
+            handler=mindmap_handler,
+        ))
+
+    if "chart" in extra:
+        async def chart_handler(data_json: str, chart_type: str) -> str:
+            """用 matplotlib 生成图表。"""
+            # Fix: 转义数据防止代码注入
+            safe_data = data_json.replace("\\", "\\\\").replace("'''", "\\'\\'\\'")
+            safe_type = chart_type.replace("'", "\\'").strip()
+            if safe_type not in ("bar", "line", "pie", "scatter"):
+                return f"❌ 不支持的图表类型: {chart_type[:20]}，请使用 bar/line/pie/scatter"
+            code = (
+                "import matplotlib\nmatplotlib.use('Agg')\n"
+                "import matplotlib.pyplot as plt\nimport json\n"
+                f"data = json.loads('''{safe_data}''')\n"
+                f"chart_type = '{safe_type}'\n"
+                "fig, ax = plt.subplots(figsize=(10, 6))\n"
+                "if chart_type == 'bar': ax.bar(data.get('labels', []), data.get('values', []))\n"
+                "elif chart_type == 'line': ax.plot(data.get('labels', []), data.get('values', []))\n"
+                "elif chart_type == 'pie': ax.pie(data.get('values', []), labels=data.get('labels', []), autopct='%1.1f%%')\n"
+                "elif chart_type == 'scatter': ax.scatter(data.get('x', []), data.get('y', []))\n"
+                "else: print(f'ERROR: unknown chart_type {chart_type}')\n"
+                "ax.set_title(data.get('title', 'Chart'))\n"
+                "plt.tight_layout()\nplt.savefig('chart.png', dpi=150)\nprint('OK')"
+            )
+            result = await workspace.run_python(code)
+            if result.exit_code == 0 and "OK" in (result.stdout or ""):
+                return "✅ 图表已生成 → chart.png"
+            return f"❌ 图表生成失败: {result.stderr or result.stdout or '未知错误'}"
+        special_specs.append(ToolSpec(
+            name="chart_generate",
+            description=SPECIAL_TOOLS["chart"].description,
+            parameters=SPECIAL_TOOLS["chart"].parameters,
+            handler=chart_handler,
+        ))
+
+    if "timeline" in extra:
+        async def timeline_handler(events_json: str) -> str:
+            """生成交互式时间线 HTML。"""
+            import json as _j
+            events = _j.loads(events_json)
+            items = ""
+            for i, ev in enumerate(events):
+                side = "left" if i % 2 == 0 else "right"
+                items += (
+                    f'<div class="timeline-item {side}">'
+                    f'<div class="date">{ev.get("date", "")}</div>'
+                    f'<div class="content"><h3>{ev.get("title", "")}</h3>'
+                    f'<p>{ev.get("desc", "")}</p></div></div>\n'
+                )
+            html = TIMELINE_HTML_TEMPLATE.replace("{{ITEMS}}", items)
+            await workspace.write_file("timeline.html", html)
+            return f"✅ 时间线已生成 → timeline.html ({len(events)} 个事件)"
+        special_specs.append(ToolSpec(
+            name="timeline_generate",
+            description=SPECIAL_TOOLS["timeline"].description,
+            parameters=SPECIAL_TOOLS["timeline"].parameters,
+            handler=timeline_handler,
+        ))
+
+    if "summarize" in extra:
+        async def summarize_handler(path: str, max_words: int = 200) -> str:
+            """LLM 智能摘要。"""
+            content = await workspace.read_file(path)
+            prompt = (
+                f"请用不超过{max_words}字总结以下内容，保留关键数据和结论：\n\n{content[:8000]}"
+            )
+            try:
+                from llm.client import create_model_client
+                client = create_model_client("act")
+                result = await client.create(
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.5, max_tokens=400,
+                )
+                summary = result.content.strip()
+                await workspace.write_file("summary.md", summary)
+                return f"✅ 摘要已生成 → summary.md ({len(summary)} 字符)"
+            except Exception as e:
+                return f"❌ 摘要生成失败: {e}"
+        special_specs.append(ToolSpec(
+            name="summarize",
+            description=SPECIAL_TOOLS["summarize"].description,
+            parameters=SPECIAL_TOOLS["summarize"].parameters,
+            handler=summarize_handler,
+        ))
+
+    if "translate" in extra:
+        async def translate_handler(path: str, target_lang: str = "en") -> str:
+            """LLM 翻译文档。"""
+            content = await workspace.read_file(path)
+            prompt = f"将以下内容翻译为{target_lang}，保持 Markdown 格式不变：\n\n{content[:6000]}"
+            try:
+                from llm.client import create_model_client
+                client = create_model_client("act")
+                result = await client.create(
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.4, max_tokens=600,
+                )
+                translated = result.content.strip()
+                from pathlib import Path
+                stem = Path(path).stem
+                out = f"{stem}_{target_lang}.md"
+                await workspace.write_file(out, translated)
+                return f"✅ 翻译完成 → {out}"
+            except Exception as e:
+                return f"❌ 翻译失败: {e}"
+        special_specs.append(ToolSpec(
+            name="translate",
+            description=SPECIAL_TOOLS["translate"].description,
+            parameters=SPECIAL_TOOLS["translate"].parameters,
+            handler=translate_handler,
+        ))
+
+    if "data_profile" in extra:
+        async def data_profile_handler(path: str) -> str:
+            """pandas 数据画像。"""
+            safe_path = path.replace("\\", "\\\\").replace("'", "\\'")
+            code = (
+                "import pandas as pd, json\n"
+                f"path = '{safe_path}'\n"
+                "df = pd.read_csv(path) if path.endswith('.csv') else pd.read_json(path)\n"
+                "lines = []\n"
+                f"lines.append('# 数据画像: {path}')\n"
+                "lines.append(f'\\n## 基本信息')\n"
+                "lines.append(f'- 行数: {len(df)}')\n"
+                "lines.append(f'- 列数: {len(df.columns)}')\n"
+                "lines.append(f'- 内存: {df.memory_usage(deep=True).sum() / 1024:.1f} KB')\n"
+                "lines.append('\\n## 列信息')\n"
+                "for col in df.columns:\n"
+                "    lines.append(f'- **{col}** ({df[col].dtype}): 缺失 {df[col].isna().sum()} ({df[col].isna().mean():.1%})')\n"
+                "with open('data_profile.md', 'w') as f: f.write('\\n'.join(lines))\n"
+                "print('OK')"
+            )
+            result = await workspace.run_python(code)
+            if result.exit_code == 0:
+                return "✅ 数据画像已生成 → data_profile.md"
+            return f"❌ 数据画像生成失败: {result.stderr or result.stdout or '未知错误'}"
+        special_specs.append(ToolSpec(
+            name="data_profile",
+            description=SPECIAL_TOOLS["data_profile"].description,
+            parameters=SPECIAL_TOOLS["data_profile"].parameters,
+            handler=data_profile_handler,
+        ))
+
+    if "code_review" in extra:
+        async def code_review_handler(path: str) -> str:
+            """LLM 代码审查。"""
+            content = await workspace.read_file(path)
+            ext = path.split(".")[-1] if "." in path else ""
+            prompt = (
+                f"你是代码审查专家。请从 Bug 风险/代码风格/性能问题/安全隐患 4 个维度"
+                f"审查这段 {ext} 代码，输出 Markdown 审查报告（含总体评分 X/10）：\n\n"
+                f"```{ext}\n{content[:6000]}\n```"
+            )
+            try:
+                from llm.client import create_model_client
+                client = create_model_client("think")
+                result = await client.create(
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.5, max_tokens=800,
+                )
+                await workspace.write_file("code_review.md", result.content.strip())
+                return "✅ 代码审查报告已生成 → code_review.md"
+            except Exception as e:
+                return f"❌ 审查失败: {e}"
+        special_specs.append(ToolSpec(
+            name="code_review",
+            description=SPECIAL_TOOLS["code_review"].description,
+            parameters=SPECIAL_TOOLS["code_review"].parameters,
+            handler=code_review_handler,
+        ))
+
+    if "outline" in extra:
+        async def outline_handler(topic: str, sections: int = 5) -> str:
+            """LLM 文档大纲生成。"""
+            prompt = (
+                f"你是一个文档大纲生成器。请为以下主题生成 {sections} 章的文档大纲。\n"
+                f"主题：{topic}\n"
+                f"要求：每章包含章节标题 + 3-5 个要点，使用 Markdown 层级标题"
+                f"（## 第X章 ...），结构从背景到结论，逻辑递进。不要输出其他内容。"
+            )
+            try:
+                from llm.client import create_model_client
+                client = create_model_client("act")
+                result = await client.create(
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.7, max_tokens=500,
+                )
+                await workspace.write_file("outline.md", result.content.strip())
+                return "✅ 文档大纲已生成 → outline.md"
+            except Exception as e:
+                return f"❌ 大纲生成失败: {e}"
+        special_specs.append(ToolSpec(
+            name="outline_generate",
+            description=SPECIAL_TOOLS["outline"].description,
+            parameters=SPECIAL_TOOLS["outline"].parameters,
+            handler=outline_handler,
+        ))
+
+    return base_tools + special_specs
