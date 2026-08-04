@@ -169,6 +169,7 @@ export default function PipelinePage() {
       <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-bg-secondary shrink-0">
         <div className="flex items-center gap-3">
           <h2 className="text-sm font-mono text-text-primary font-semibold">🔗 Agent 管道</h2>
+          <a href="/pipeline-editor" className="text-[10px] font-mono text-accent-green hover:underline ml-2">🎨 图形化编辑器 →</a>
           {msg && <span className="text-xs font-mono text-emerald-400">{msg}</span>}
         </div>
         <div className="flex items-center gap-2">

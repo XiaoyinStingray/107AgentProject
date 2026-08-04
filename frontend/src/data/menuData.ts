@@ -111,7 +111,7 @@ export const MENU_SECTIONS: MenuSection[] = [
     items: [
       { id: 59, emoji: "⚡", label: "终端工作台", priority: "P0" },
       { id: 65, emoji: "🏆", label: "产出纪念墙", priority: "P0", redirect: "/showcase" },
-      { id: 60, emoji: "🔗", label: "管道编辑器", priority: "P2", redirect: "/pipeline" },
+      { id: 60, emoji: "🔗", label: "管道编辑器", priority: "P2", redirect: "/pipeline-editor" },
       { id: 61, emoji: "📁", label: "文件浏览器", priority: "P2" },
       { id: 66, emoji: "🔀", label: "决策分叉", priority: "P2", redirect: "/worker" },
     ],

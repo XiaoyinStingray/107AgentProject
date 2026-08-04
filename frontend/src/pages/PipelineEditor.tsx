@@ -241,29 +241,36 @@ export default function PipelineEditor() {
   return (
     <div className="h-full flex flex-col animate-fade-in">
       {/* 顶部工具栏 */}
-      <div className="flex items-center gap-3 px-4 py-2 border-b border-border bg-bg-secondary/50 shrink-0">
+      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-bg-secondary/80 shrink-0 backdrop-blur-sm">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-mono text-text-primary font-semibold">🎨 管线编辑器</span>
+          <a href="/pipeline" className="text-[10px] font-mono text-text-muted hover:text-text-secondary transition-colors ml-1">
+            旧版表单 →
+          </a>
+        </div>
+        <div className="w-px h-5 bg-border" />
         <input value={pipeName} onChange={(e) => setPipeName(e.target.value)}
-          className="w-40 px-2 py-1 text-sm font-mono bg-bg-primary border border-border rounded text-text-primary outline-none focus:border-accent-green/40"
+          className="w-36 px-2.5 py-1.5 text-xs font-mono bg-bg-primary border border-border rounded-lg text-text-primary outline-none focus:border-accent-green/40 transition-all"
           placeholder="管线名称"
         />
         <input value={pipeDesc} onChange={(e) => setPipeDesc(e.target.value)}
-          className="w-48 px-2 py-1 text-xs font-mono bg-bg-primary border border-border rounded text-text-secondary outline-none focus:border-accent-green/40"
+          className="w-44 px-2.5 py-1.5 text-xs font-mono bg-bg-primary border border-border rounded-lg text-text-secondary outline-none focus:border-accent-green/40 transition-all"
           placeholder="描述（可选）"
         />
-        <div className="w-px h-5 bg-border" />
+        <div className="flex-1" />
         <button onClick={addNode}
-          className="px-3 py-1 text-xs font-mono rounded border border-accent-green/40 text-accent-green hover:bg-accent-green/10 transition-colors">
+          className="px-3 py-1.5 text-xs font-mono rounded-lg border border-accent-green/40 text-accent-green hover:bg-accent-green/10 transition-all">
           + 添加节点
         </button>
         <button onClick={autoLayout}
-          className="px-3 py-1 text-xs font-mono rounded border border-border text-text-secondary hover:border-text-secondary/40 transition-colors">
-          自动布局
+          className="px-3 py-1.5 text-xs font-mono rounded-lg border border-border text-text-secondary hover:border-text-secondary/40 hover:bg-bg-primary/50 transition-all">
+          ▦ 自动布局
         </button>
         <button onClick={handleSave} disabled={saving}
-          className="px-3 py-1 text-xs font-mono rounded border border-accent-orange/40 text-accent-orange hover:bg-accent-orange/10 transition-colors disabled:opacity-40">
-          {saving ? "保存中…" : "保存"}
+          className="px-4 py-1.5 text-xs font-mono rounded-lg border border-accent-orange/40 bg-accent-orange/10 text-accent-orange hover:bg-accent-orange/20 transition-all disabled:opacity-40">
+          {saving ? "保存中…" : "💾 保存"}
         </button>
-        {msg && <span className="text-xs font-mono text-text-secondary">{msg}</span>}
+        {msg && <span className="text-[10px] font-mono text-text-secondary animate-fade-in">{msg}</span>}
       </div>
 
       {/* 主体：画布 + 右侧面板 */}
@@ -281,7 +288,32 @@ export default function PipelineEditor() {
             fitView
             deleteKeyCode={["Backspace", "Delete"]}
             multiSelectionKeyCode="Shift"
+            className="!bg-bg-primary"
           >
+            {/* 空画布引导 */}
+            {nodes.length === 0 && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+                <div className="text-center space-y-3">
+                  <div className="text-5xl">🔗</div>
+                  <h2 className="text-lg font-mono text-text-primary">创建你的第一个管线</h2>
+                  <p className="text-sm font-mono text-text-secondary/60 max-w-md">
+                    点击 <span className="text-accent-green">+ 添加节点</span> 创建节点，
+                    从节点右侧圆点拖出连线到另一个节点左侧圆点来建立数据流。
+                  </p>
+                  <div className="flex gap-2 justify-center text-[10px] font-mono text-text-muted/50">
+                    <span>🟢 flow 数据流</span>
+                    <span>🟠 loop 回边</span>
+                    <span>🟢 branch 分支</span>
+                  </div>
+                </div>
+              </div>
+            )}
+            {/* 节点数统计 */}
+            {nodes.length > 0 && (
+              <Panel position="bottom-center" className="!bg-bg-secondary/90 !border !border-border/60 !rounded-full !px-3 !py-1 !text-[10px] !font-mono !text-text-muted !backdrop-blur-sm">
+                {nodes.length} 节点 · {edges.length} 连线 · 点击节点编辑 · 拖拽圆点连线 · Backspace 删除
+              </Panel>
+            )}
             <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#334155" />
             <Controls className="!bg-bg-primary !border-border !rounded-lg" />
             <MiniMap

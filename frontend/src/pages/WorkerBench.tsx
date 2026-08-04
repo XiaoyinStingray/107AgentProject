@@ -70,6 +70,33 @@ export default function WorkerBench() {
   const selectedAgent = agentOptions.find((a) => a.id === agentId);
   const effectiveAgentId = agentId === "__builtin__" ? "worker-default" : agentId;
 
+  // Step 105: 角色 + 工具选择
+  const [workerRole, setWorkerRole] = useState("worker");
+  const [enabledTools, setEnabledTools] = useState<string[]>([]); // 空=全部可用
+  const ALL_TOOLS = [
+    { key: "web_search", label: "🔍 搜索", group: "基础" },
+    { key: "run_python", label: "🐍 Python", group: "基础" },
+    { key: "write_file", label: "📝 写文件", group: "基础" },
+    { key: "read_file", label: "📖 读文件", group: "基础" },
+    { key: "list_files", label: "📂 列文件", group: "基础" },
+    { key: "install_package", label: "📦 安装包", group: "基础" },
+    { key: "mindmap", label: "🧠 思维导图", group: "特殊" },
+    { key: "chart", label: "📊 图表", group: "特殊" },
+    { key: "timeline", label: "📅 时间线", group: "特殊" },
+    { key: "summarize", label: "📝 摘要", group: "特殊" },
+    { key: "translate", label: "🌐 翻译", group: "特殊" },
+    { key: "data_profile", label: "📈 数据画像", group: "特殊" },
+    { key: "code_review", label: "🔍 代码审查", group: "特殊" },
+    { key: "outline", label: "📋 大纲", group: "特殊" },
+  ];
+  const ROLES_WORKER = [
+    { value: "worker", label: "🔧 默认" },
+    { value: "analyst", label: "📊 分析师" },
+    { value: "writer", label: "✍️ 写手" },
+    { value: "reviewer", label: "🔍 审稿人" },
+    { value: "executor", label: "⚡ 执行者" },
+  ];
+
   const { events, connected, done, error, execute, cancel, reset, hydrate } =
     useWorkerExecute();
 
@@ -161,12 +188,14 @@ export default function WorkerBench() {
   const buildRequest = useCallback((taskText: string, reuse: boolean) => ({
     agent_id: effectiveAgentId,
     task: taskText,
+    role: workerRole,
+    enabled_tools: enabledTools.length > 0 ? enabledTools : undefined,
     workspace_type: workspaceConfig.type,
     workspace_config: workspaceConfig.type === "cloud"
       ? { host: workspaceConfig.host, port: workspaceConfig.port, user: workspaceConfig.user, key: workspaceConfig.key, path: workspaceConfig.path }
       : { path: workspaceConfig.path },
     reuse_run_id: reuse && currentRunId ? currentRunId : undefined,
-  }), [effectiveAgentId, workspaceConfig, currentRunId]);
+  }), [effectiveAgentId, workspaceConfig, currentRunId, workerRole, enabledTools]);
 
   // 执行新任务（新工作区）
   const handleExecute = useCallback(() => {
@@ -185,6 +214,10 @@ export default function WorkerBench() {
       if (resp.ok) setHistory(await resp.json());
     } catch {}
   }, []);
+
+  // 挂载时加载历史 + 任务完成后刷新
+  useEffect(() => { loadHistory(); }, [loadHistory]);
+  useEffect(() => { if (done) loadHistory(); }, [done, loadHistory]);
 
   const [accepted, setAccepted] = useState(false);
 
@@ -255,8 +288,8 @@ export default function WorkerBench() {
       )}
 
       {/* ── 顶部输入栏 ── */}
-      <div className="flex-shrink-0 px-4 py-3 border-b border-border bg-surface-dark">
-        <div className="flex items-start gap-3">
+      <div className="flex-shrink-0 px-4 py-4 border-b border-border bg-gradient-to-b from-surface-dark to-bg-primary">
+        <div className="flex items-start gap-4">
           {/* 任务输入 */}
           <div className="flex-1">
             <textarea
@@ -264,45 +297,87 @@ export default function WorkerBench() {
               onChange={(e) => setTask(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="描述你想让 Agent 完成的任务...&#10;例如：搜索 AI Agent 框架的最新发展，写一份报告"
-              rows={2}
+              rows={3}
               disabled={connected}
-              className="w-full bg-surface border border-border rounded px-3 py-2
+              className="w-full bg-bg-primary border border-border rounded-lg px-4 py-3
                          text-sm font-mono text-text-primary placeholder-text-muted
-                         resize-none focus:outline-none focus:border-cyan-700/50
-                         disabled:opacity-50 disabled:cursor-not-allowed"
+                         resize-none focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20
+                         disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             />
-            {/* 示例任务 */}
+
+            {/* 示例任务 + 快捷操作栏 */}
             {!connected && !done && (
-              <div className="flex gap-2 mt-2 flex-wrap">
+              <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+                <span className="text-[10px] font-mono text-text-muted/60 shrink-0">💡 推荐:</span>
                 {EXAMPLE_TASKS.map((t, i) => (
-                  <button
-                    key={i}
-                    onClick={() => handleExample(t)}
-                    className="text-xs font-mono px-2 py-1 rounded border border-border
-                               text-text-muted hover:text-text-secondary hover:border-cyan-700/30
-                               transition-colors truncate max-w-xs"
-                    title={t}
-                  >
-                    {t.slice(0, 60)}...
-                  </button>
+                  <button key={i} onClick={() => handleExample(t)}
+                    className="text-[10px] font-mono px-2.5 py-1 rounded-full border border-border/60
+                               text-text-muted hover:text-cyan-400 hover:border-cyan-700/40 hover:bg-cyan-500/5
+                               transition-all truncate max-w-[260px]"
+                    title={t}>{t.slice(0, 55)}…</button>
                 ))}
               </div>
             )}
           </div>
 
-          {/* 控制按钮 */}
-          <div className="flex items-center gap-2 shrink-0">
+          {/* 角色 + 工具 + 执行按钮 */}
+          <div className="flex flex-col gap-2.5 shrink-0 min-w-[210px]">
             {!connected && !done && (
-              <button
-                onClick={handleExecute}
-                disabled={!task.trim()}
-                className="px-4 py-2 bg-cyan-700 hover:bg-cyan-600 disabled:bg-surface-dark
-                           disabled:text-text-muted text-white text-sm font-mono rounded
-                           transition-colors disabled:cursor-not-allowed"
-              >
-                ▶ 执行
-              </button>
-            )}
+              <>
+                {/* 角色选择 */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono text-text-muted/60 w-8">角色</span>
+                  <select value={workerRole} onChange={(e) => setWorkerRole(e.target.value)}
+                    className="flex-1 bg-bg-primary border border-border rounded-lg px-2.5 py-1.5 text-xs font-mono text-text-primary outline-none focus:border-accent-green/40 transition-all">
+                    {ROLES_WORKER.map((r) => (
+                      <option key={r.value} value={r.value}>{r.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 工具开关 */}
+                <details className="text-xs font-mono group">
+                  <summary className="flex items-center gap-2 text-text-muted cursor-pointer hover:text-text-primary select-none">
+                    <span className="text-[10px] w-8">工具</span>
+                    <span className="flex-1 px-2 py-1 rounded-lg border border-border/60 bg-bg-primary text-[10px] group-open:border-cyan-700/40 transition-all">
+                      🛠️ {enabledTools.length === 0 ? "全部可用" : `已选 ${enabledTools.length}`}
+                    </span>
+                  </summary>
+                  <div className="mt-1.5 p-2 bg-bg-primary rounded-lg border border-border/60 max-h-[180px] overflow-y-auto space-y-0.5 ml-10">
+                    {ALL_TOOLS.map((t) => {
+                      const allSelected = enabledTools.length === 0;
+                      const checked = allSelected || enabledTools.includes(t.key);
+                      return (
+                        <label key={t.key}
+                          className="flex items-center gap-1.5 px-1.5 py-1 rounded hover:bg-cyan-500/5 cursor-pointer transition-all">
+                          <input type="checkbox" checked={checked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                if (allSelected) setEnabledTools(ALL_TOOLS.filter(t2 => t2.key !== t.key).map(t2 => t2.key));
+                                else {
+                                  const next = [...enabledTools, t.key];
+                                  setEnabledTools(next.length === ALL_TOOLS.length ? [] : next);
+                                }
+                              } else {
+                                if (allSelected) setEnabledTools(ALL_TOOLS.filter(t2 => t2.key !== t.key).map(t2 => t2.key));
+                                else setEnabledTools(enabledTools.filter(k => k !== t.key));
+                              }
+                            }}
+                            className="rounded w-3 h-3 accent-cyan-500" />
+                          <span className="text-[10px] text-text-secondary">{t.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </details>
+
+                <button onClick={handleExecute} disabled={!task.trim()}
+                  className="w-full py-2.5 bg-cyan-600 hover:bg-cyan-500 disabled:bg-bg-secondary
+                             disabled:text-text-muted text-white text-sm font-mono rounded-lg
+                             transition-all disabled:cursor-not-allowed shadow-sm hover:shadow-md">
+                  ▶ 执行任务
+                </button>
+              </>)}
             {connected && (
               <button
                 onClick={handleCancel}
@@ -324,29 +399,6 @@ export default function WorkerBench() {
               </>
             )}
 
-            {/* 历史记录 */}
-            <button
-              onClick={() => { setShowHistory(!showHistory); if (!showHistory) loadHistory(); }}
-              className={`p-2 rounded border transition-colors ${
-                showHistory ? "border-cyan-700/30 text-cyan-400" : "border-border text-text-muted"
-              }`}
-              title="历史记录"
-            >
-              🕐
-            </button>
-
-            {/* 面板切换 */}
-            <button
-              onClick={() => setShowPanel(!showPanel)}
-              className={`p-2 rounded border transition-colors ${
-                showPanel
-                  ? "border-cyan-700/30 text-cyan-400"
-                  : "border-border text-text-muted"
-              }`}
-              title="切换文件面板"
-            >
-              📁
-            </button>
           </div>
         </div>
 
@@ -470,68 +522,10 @@ export default function WorkerBench() {
         )}
       </div>
 
-      {/* 历史面板 */}
-      {showHistory && (
-        <div className="border-b border-border max-h-48 overflow-y-auto bg-bg-secondary">
-          <div className="px-4 py-1.5 border-b border-border/50 flex items-center justify-between">
-            <span className="text-xs font-mono text-text-muted">
-              历史记录 — 点击可加载聊天
-            </span>
-            <div className="flex items-center gap-3 text-xs text-text-muted/50 font-mono">
-              <span>🟢 已验收</span>
-              <span>⚫ 未验收</span>
-            </div>
-          </div>
-          {history.length === 0 ? (
-            <div className="px-4 py-6 text-center">
-              <span className="text-2xl block mb-2">📋</span>
-              <p className="text-xs font-mono text-text-muted">暂无历史记录</p>
-              <p className="text-xs font-mono text-text-muted/50 mt-1">完成任务并点击"认可交付"后，记录会出现在这里</p>
-            </div>
-          ) : (
-            history.map((h) => (
-              <div key={h.run_id}
-                   className="flex items-center gap-3 px-4 py-2 border-b border-border/50
-                              hover:bg-bg-primary/50 transition-colors cursor-pointer"
-                   onClick={async () => {
-                     setCurrentRunId(h.run_id);
-                     setAccepted(h.accepted);
-                     try {
-                       const evResp = await fetch(`/api/workers/${h.run_id}/events`);
-                       if (evResp.ok) {
-                         const evData = await evResp.json();
-                         if (evData.events?.length > 0) hydrate(evData.events);
-                       }
-                     } catch {}
-                   }}>
-                <span className={`w-2 h-2 rounded-full shrink-0 ${h.running ? "bg-emerald-400 animate-pulse" : h.accepted ? "bg-emerald-500" : "bg-text-muted"}`} />
-                {h.accepted && <span className="text-xs text-emerald-500 font-mono shrink-0">✓</span>}
-                <span className="text-xs font-mono text-text-secondary w-20 truncate">{h.agent_name}</span>
-                <span className="text-xs font-mono text-text-muted flex-1 truncate">{h.task}</span>
-                <span className="text-xs font-mono text-text-muted">{h.steps} 步</span>
-                <span className="text-xs font-mono text-text-muted">
-                  {h.files?.length || 0} 文件
-                </span>
-                <span className="text-xs font-mono text-text-muted/50 w-16 text-right">
-                  {h.created_at?.slice(11, 16)}
-                </span>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
       {/* ── 主体区域 ── */}
       <div className="flex-1 flex min-h-0">
-        {/* 左侧: 文件面板 */}
-        {showPanel && (
-          <div className="w-[280px] shrink-0 border-r border-border overflow-hidden">
-            <WorkspacePanel events={events} runId={currentRunId ?? undefined} connected={connected} />
-          </div>
-        )}
-
         {/* 中央: 终端 */}
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 flex flex-col">
           <WorkerTerminal
             events={events}
             connected={connected}
@@ -539,7 +533,6 @@ export default function WorkerBench() {
             accepted={accepted}
             onAccept={handleAccept}
             onRevise={(instruction: string) => {
-              // 直接使用 currentRunId，不通过闭包
               if (!instruction.trim()) return;
               setAccepted(false);
               execute({
@@ -552,6 +545,56 @@ export default function WorkerBench() {
             }}
             onNewTask={handleReset}
           />
+        </div>
+
+        {/* 右侧: 历史 + 文件面板 */}
+        <div className="w-[300px] shrink-0 border-l border-border bg-bg-secondary/30 flex flex-col overflow-hidden">
+          {/* 历史记录 */}
+          <div className="flex-1 flex flex-col min-h-0 border-b border-border">
+            <div className="px-3 py-2 border-b border-border/50 bg-bg-secondary/50 shrink-0">
+              <span className="text-[10px] font-mono text-text-muted font-semibold">🕐 历史记录</span>
+              <span className="text-[10px] font-mono text-text-muted/50 ml-2">{history.length} 条</span>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {history.length === 0 ? (
+                <div className="px-3 py-8 text-center">
+                  <span className="text-xl block mb-1">📋</span>
+                  <p className="text-[10px] font-mono text-text-muted">暂无历史</p>
+                  <p className="text-[10px] font-mono text-text-muted/50 mt-0.5">完成任务后出现</p>
+                </div>
+              ) : (
+                history.map((h) => (
+                  <button key={h.run_id}
+                    onClick={async () => {
+                      setCurrentRunId(h.run_id); setAccepted(h.accepted);
+                      try {
+                        const evResp = await fetch(`/api/workers/${h.run_id}/events`);
+                        if (evResp.ok) { const evData = await evResp.json(); if (evData.events?.length > 0) hydrate(evData.events); }
+                      } catch {}
+                    }}
+                    className="w-full text-left px-3 py-2 border-b border-border/30 hover:bg-bg-primary/50 transition-colors">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${h.running ? "bg-emerald-400 animate-pulse" : h.accepted ? "bg-emerald-500" : "bg-text-muted"}`} />
+                      <span className="text-[10px] font-mono text-text-secondary truncate flex-1">{h.agent_name || "Agent"}</span>
+                      <span className="text-[10px] font-mono text-text-muted/50">{h.created_at?.slice(5, 16)}</span>
+                    </div>
+                    <p className="text-[10px] font-mono text-text-muted truncate mt-0.5 ml-3">{h.task?.slice(0, 40)}</p>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* 文件面板 */}
+          <div className="flex-1 flex flex-col min-h-0">
+            <div className="px-3 py-2 border-b border-border/50 bg-bg-secondary/50 shrink-0">
+              <span className="text-[10px] font-mono text-text-muted font-semibold">📁 文件</span>
+              {currentRunId && <span className="text-[10px] font-mono text-text-muted/50 ml-2">{currentRunId.slice(0, 8)}</span>}
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <WorkspacePanel events={events} runId={currentRunId ?? undefined} connected={connected} />
+            </div>
+          </div>
         </div>
       </div>
     </div>

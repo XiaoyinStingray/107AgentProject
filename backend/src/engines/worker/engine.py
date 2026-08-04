@@ -232,6 +232,7 @@ class AgentWorker:
     async def execute(
         self, task: str, is_follow_up: bool = False, recipe_id: str = "",
         extra_tools: list[str] | None = None,
+        enabled_tools: list[str] | None = None,
     ) -> AsyncGenerator[str, None]:
         """执行任务——返回 SSE 事件生成器。
 
@@ -240,6 +241,7 @@ class AgentWorker:
             is_follow_up: 是否为追加任务（复用工作区时设为 True）
             recipe_id: 配方 ID（可选，如 "deep_research"）
             extra_tools: Step 105 — 本节点专属工具名列表
+            enabled_tools: Step 105 — 精确启用的工具列表（空=全部）
         """
         self._is_follow_up = is_follow_up
 
@@ -262,7 +264,7 @@ class AgentWorker:
             return
 
         self._start_time = time.monotonic()
-        self._tools = make_worker_tools(self._workspace, extra_tools=extra_tools or [])
+        self._tools = make_worker_tools(self._workspace, extra_tools=extra_tools or [], enabled_tools=enabled_tools or [])
 
         # Step 103: 从用户参数读取 max_steps 和 timeout
         try:

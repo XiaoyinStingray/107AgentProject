@@ -67,6 +67,9 @@ class WorkerExecuteRequest(BaseModel):
     """执行任务请求。"""
     agent_id: str = Field(..., description="执行任务的 Agent ID")
     task: str = Field(..., min_length=1, max_length=5000, description="任务描述")
+    role: str = Field(default="worker", description="结点角色: analyst/writer/reviewer/executor/worker (Step 105)")
+    enabled_tools: list[str] = Field(default_factory=list, description="启用的工具列表——空=全部可用 (Step 105)")
+    extra_tools: list[str] = Field(default_factory=list, description="额外启用的特殊工具 (Step 105)")
     workspace_type: str = Field(
         default="local",
         description="工作区类型: 'local' (Phase 23) | 'cloud' (Phase 24)",
@@ -286,7 +289,12 @@ async def execute_worker_task(req: WorkerExecuteRequest):
     async def event_generator():
         entry = _active_workers.get(worker.run_id)
         try:
-            async for event in worker.execute(req.task, is_follow_up=is_follow_up, recipe_id=req.recipe_id):
+            # Step 105: 传递角色和工具配置
+            extra_tools = list(req.extra_tools) if req.extra_tools else []
+            async for event in worker.execute(
+                req.task, is_follow_up=is_follow_up, recipe_id=req.recipe_id,
+                extra_tools=extra_tools,
+            ):
                 yield event
                 # 保存解析后的事件供重连回放（去掉 "data: " 前缀，解析 JSON）
                 if entry and entry.get("events") is not None:

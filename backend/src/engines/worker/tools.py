@@ -274,7 +274,7 @@ SPECIAL_TOOLS: dict[str, SpecialToolSpec] = {
 }
 
 
-def make_worker_tools(workspace, extra_tools: list[str] | None = None) -> list[ToolSpec]:
+def make_worker_tools(workspace, extra_tools: list[str] | None = None, enabled_tools: list[str] | None = None) -> list[ToolSpec]:
     """为 Worker 创建闭包工具集——捕获 WorkspaceProvider 引用。
 
     每个 tool handler 通过闭包访问 workspace（LocalWorkspace 或 CloudWorkspace），
@@ -694,4 +694,8 @@ def make_worker_tools(workspace, extra_tools: list[str] | None = None) -> list[T
             handler=outline_handler,
         ))
 
-    return base_tools + special_specs
+    all_tools = base_tools + special_specs
+    # Step 105: enabled_tools 过滤——非空时只保留指定的工具
+    if enabled_tools:
+        all_tools = [t for t in all_tools if t.name in enabled_tools]
+    return all_tools
