@@ -215,11 +215,29 @@ export default function WorkerBench() {
     } catch {}
   }, []);
 
-  // 挂载时加载历史 + 任务完成后刷新
+  // 挂载时加载历史
   useEffect(() => { loadHistory(); }, [loadHistory]);
-  useEffect(() => { if (done) loadHistory(); }, [done, loadHistory]);
+
+  // 任务完成/出错/停止时刷新历史
+  useEffect(() => {
+    if (events.length === 0) return;
+    const last = events[events.length - 1];
+    if (!last) return;
+    const triggerTypes = ["worker.done", "worker.error", "worker.summary", "worker.cancelled"];
+    if (triggerTypes.includes(last.type)) loadHistory();
+  }, [events, loadHistory]);
 
   const [accepted, setAccepted] = useState(false);
+
+  // 已验收状态变化时刷新
+  useEffect(() => { if (done || accepted) loadHistory(); }, [done, accepted, loadHistory]);
+
+  // 运行中每 10 秒轮询一次历史（防止 SSE 断连导致 done 不触发）
+  useEffect(() => {
+    if (!connected) return;
+    const interval = setInterval(() => loadHistory(), 10_000);
+    return () => clearInterval(interval);
+  }, [connected, loadHistory]);
 
   // 重置 = 新任务
   const handleReset = useCallback(() => {
@@ -229,15 +247,16 @@ export default function WorkerBench() {
     setAccepted(false);
   }, [reset]);
 
-  // 认可交付——先更新 UI，后台持久化
+  // 认可交付——先更新 UI，后台持久化 + 刷新历史
   const handleAccept = useCallback(() => {
     if (accepted) return;
     setAccepted(true);
-    // 后台静默持久化，不阻塞 UI
     if (currentRunId) {
-      fetch(`/api/workers/${currentRunId}/accept`, { method: "POST" }).catch(() => {});
+      fetch(`/api/workers/${currentRunId}/accept`, { method: "POST" })
+        .then(() => loadHistory())
+        .catch(() => {});
     }
-  }, [currentRunId, accepted]);
+  }, [currentRunId, accepted, loadHistory]);
 
   // 追加对话——复用当前工作区（直接传 currentRunId，不绕 buildRequest）
   const handleFollowUp = useCallback((instruction: string) => {
@@ -571,11 +590,22 @@ export default function WorkerBench() {
                         const evResp = await fetch(`/api/workers/${h.run_id}/events`);
                         if (evResp.ok) { const evData = await evResp.json(); if (evData.events?.length > 0) hydrate(evData.events); }
                       } catch {}
+                      loadHistory(); // 确保 accepted 状态同步
                     }}
-                    className="w-full text-left px-3 py-2 border-b border-border/30 hover:bg-bg-primary/50 transition-colors">
+                    className={`w-full text-left px-3 py-2 border-b border-border/30 hover:bg-bg-primary/50 transition-colors ${h.accepted ? "bg-emerald-500/5" : ""}`}>
                     <div className="flex items-center gap-1.5">
-                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${h.running ? "bg-emerald-400 animate-pulse" : h.accepted ? "bg-emerald-500" : "bg-text-muted"}`} />
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${h.running ? "bg-emerald-400 animate-pulse" : h.accepted ? "bg-emerald-400" : "bg-text-muted/60"}`} />
                       <span className="text-[10px] font-mono text-text-secondary truncate flex-1">{h.agent_name || "Agent"}</span>
+                      {h.accepted && (
+                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0">
+                          ✓ 已验收
+                        </span>
+                      )}
+                      {h.running && (
+                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shrink-0 animate-pulse">
+                          运行中
+                        </span>
+                      )}
                       <span className="text-[10px] font-mono text-text-muted/50">{h.created_at?.slice(5, 16)}</span>
                     </div>
                     <p className="text-[10px] font-mono text-text-muted truncate mt-0.5 ml-3">{h.task?.slice(0, 40)}</p>

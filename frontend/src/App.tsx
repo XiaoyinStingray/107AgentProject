@@ -5,6 +5,7 @@ import Home from "./pages/Home";
 import EmptyState from "./components/shared/EmptyState";
 import Badge from "./components/shared/Badge";
 import LoadingSpinner from "./components/shared/LoadingSpinner";
+import WelcomeModal from "./components/layout/WelcomeModal";
 import { findItemById } from "./data/menuData";
 
 // --- 懒加载：8 个模块页面按需加载 ---
@@ -82,6 +83,7 @@ export default function App() {
         v7_relativeSplatPath: true,
       }}
     >
+      <WelcomeModal />
       <Routes>
         <Route path="/" element={<Layout />}>
           {/* Dashboard */}
