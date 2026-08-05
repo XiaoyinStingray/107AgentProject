@@ -182,6 +182,26 @@ export default function SettingsPage() {
         })}
       </div>
 
+      {/* 模型推荐 */}
+      <Card className="p-4 mt-6 bg-gradient-to-r from-accent-green/5 to-accent-purple/5 border-accent-green/20">
+        <div className="flex items-start gap-3">
+          <span className="text-xl shrink-0">💡</span>
+          <div>
+            <h3 className="text-sm font-mono text-text-primary font-semibold">推荐模型</h3>
+            <p className="text-xs font-mono text-text-secondary mt-1 leading-relaxed">
+              建议在 <code className="px-1 rounded bg-bg-primary text-accent-green text-[10px]">.env</code> 中使用
+              <b className="text-accent-green"> DeepSeek Chat</b> 或 <b className="text-accent-green">DeepSeek Flash</b>。
+              Flash 更快更便宜，适合 M12 Worker 大批量任务；Chat 更深思熟虑，适合 M11 场景对话。
+              两款模型都支持 Responses API 内置联网搜索，Worker 搜索工具将自动使用。
+            </p>
+            <p className="text-[10px] font-mono text-text-muted/50 mt-1.5">
+              配置：<code className="text-text-muted/70">LLM_BASE_URL=https://api.deepseek.com/v1</code>
+              {" "}<code className="text-text-muted/70">LLM_MODEL=deepseek-chat</code>
+            </p>
+          </div>
+        </div>
+      </Card>
+
       {/* 操作按钮 */}
       <div className="flex items-center gap-3 mt-6 flex-wrap">
         <button type="button" onClick={handleSave} disabled={update.isPending || saved}

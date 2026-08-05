@@ -121,14 +121,24 @@ export default function WelcomeModal() {
 
           {/* API Key warning */}
           {!hasKey && (
-            <div className="bg-accent-orange/5 border border-accent-orange/20 rounded-xl p-3">
+            <div className="bg-accent-orange/5 border border-accent-orange/20 rounded-xl p-3 space-y-2">
               <p className="text-xs font-mono text-accent-orange leading-relaxed">
-                ⚠️ 未检测到 LLM API Key。请编辑项目根目录的 <code className="px-1 py-0.5 rounded bg-accent-orange/10 text-accent-orange">.env</code> 文件，填入
-                <code className="px-1 py-0.5 rounded bg-accent-orange/10 text-accent-orange">LLM_API_KEY</code>。
-                Key 仅储存在本地，不会上传或分享。
+                ⚠️ 未检测到 LLM API Key。请编辑项目根目录的 <code className="px-1 py-0.5 rounded bg-accent-orange/10 text-accent-orange">.env</code> 文件：
+              </p>
+              <pre className="bg-bg-secondary rounded-lg p-2.5 text-[10px] font-mono text-text-secondary overflow-x-auto leading-relaxed">
+{`LLM_API_KEY=你的DeepSeek_API密钥
+LLM_BASE_URL=https://api.deepseek.com/v1
+LLM_MODEL=deepseek-chat`}
+              </pre>
+              <p className="text-[10px] font-mono text-text-muted/60">
+                💡 推荐使用 <b className="text-accent-green">DeepSeek Chat / Flash</b> 模型——Flash 更快更便宜，Chat 更深思熟虑。
+                M12 Worker 联网搜索需要 Flash 模型的 Responses API 支持。
+              </p>
+              <p className="text-[10px] font-mono text-text-muted/50">
+                🔒 Key 仅储存在本地 <code>.env</code> 文件中，不会上传或分享。
               </p>
               <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener noreferrer"
-                className="inline-block mt-2 text-xs font-mono text-accent-green hover:underline">
+                className="inline-block text-xs font-mono text-accent-green hover:underline">
                 获取 DeepSeek Key →
               </a>
             </div>
