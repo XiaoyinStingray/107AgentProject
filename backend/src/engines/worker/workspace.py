@@ -17,7 +17,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from loguru import logger
 
@@ -205,7 +205,7 @@ def safe_read(path: Path) -> str:
     except UnicodeDecodeError:
         raw = path.read_bytes()
         try:
-            import chardet
+            import chardet  # type: ignore[import-untyped]
             encoding = chardet.detect(raw)["encoding"] or "utf-8"
             return raw.decode(encoding, errors="replace")
         except ImportError:
@@ -386,9 +386,9 @@ class CloudWorkspace(WorkspaceProvider):
         self._key = key
         self._root = path.rstrip("/")
 
-        # 连接状态
-        self._conn = None
-        self._sftp = None
+        # 连接状态（运行时由 _ensure_connected 设置）
+        self._conn: Any = None  # asyncssh.SSHClientConnection
+        self._sftp: Any = None  # asyncssh.SFTPClient
         self._reconnect_attempts = 0
         self._MAX_RECONNECT = 1
 
@@ -463,7 +463,9 @@ class CloudWorkspace(WorkspaceProvider):
             await self._sftp.makedirs(parent, exist_ok=True)
         except Exception:
             pass
-        await self._sftp.write_text(remote, content, encoding='utf-8')
+        # asyncssh SFTP 使用 open() 写入
+        async with self._sftp.open(remote, 'w', encoding='utf-8') as f:
+            await f.write(content)
         logger.info(f"[CloudWorkspace] write: {path} ({len(content)} chars)")
         return remote
 
@@ -471,7 +473,8 @@ class CloudWorkspace(WorkspaceProvider):
         await self._ensure_connected()
         remote = self._remote_path(path)
         try:
-            return await self._sftp.read_text(remote, encoding='utf-8')
+            async with self._sftp.open(remote, 'r', encoding='utf-8') as f:
+                return await f.read()
         except Exception as e:
             raise FileNotFoundError(f"云端文件不存在: {path}") from e
 
@@ -481,10 +484,10 @@ class CloudWorkspace(WorkspaceProvider):
         files = []
         try:
             async for entry in self._sftp.scandir(dir_path):
-                if entry.type == "file" or entry.attrs.isreg:
+                if entry.type == "file" or entry.attrs.isreg:  # type: ignore[union-attr]
                     relative = entry.filename if not directory else f"{directory}/{entry.filename}"
                     files.append(FileInfo(
-                        path=relative,
+                        path=str(relative),  # type: ignore[arg-type]
                         size=entry.attrs.size or 0,
                         modified_at=str(entry.attrs.mtime or 0),
                     ))
@@ -517,14 +520,15 @@ class CloudWorkspace(WorkspaceProvider):
         tmp_path = f"{self._root}/{tmp_name}"
 
         try:
-            await self._sftp.write_text(tmp_path, code, encoding='utf-8')
+            async with self._sftp.open(tmp_path, 'w', encoding='utf-8') as f:
+                await f.write(code)
             result = await self._conn.run(
                 f"cd {self._root} && python {tmp_name}",
                 timeout=timeout,
             )
             return SandboxResult(
-                stdout=result.stdout[:10000] if result.stdout else "",
-                stderr=result.stderr[:5000] if result.stderr else "",
+                stdout=str(result.stdout[:10000]) if result.stdout else "",
+                stderr=str(result.stderr[:5000]) if result.stderr else "",
                 exit_code=result.exit_status or 0,
             )
         except TimeoutError:
