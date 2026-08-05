@@ -190,9 +190,9 @@ export default function SettingsPage() {
             <h3 className="text-sm font-mono text-text-primary font-semibold">推荐模型</h3>
             <p className="text-xs font-mono text-text-secondary mt-1 leading-relaxed">
               建议在 <code className="px-1 rounded bg-bg-primary text-accent-green text-[10px]">.env</code> 中使用
-              <b className="text-accent-green"> DeepSeek Chat</b> 或 <b className="text-accent-green">DeepSeek Flash</b>。
-              Flash 更快更便宜，适合 M12 Worker 大批量任务；Chat 更深思熟虑，适合 M11 场景对话。
-              两款模型都支持 Responses API 内置联网搜索，Worker 搜索工具将自动使用。
+              <b className="text-accent-green"> DeepSeek Chat (v3)</b> 或 <b className="text-accent-green">DeepSeek Flash</b>。
+              Chat 更深思熟虑，适合 M11 场景对话；Flash 更快更便宜，适合 M12 Worker 大批量任务。
+              联网搜索通过 Responses API（<code>api.deepseek.com/responses</code>，不带 /v1）自动工作。
             </p>
             <p className="text-[10px] font-mono text-text-muted/50 mt-1.5">
               配置：<code className="text-text-muted/70">LLM_BASE_URL=https://api.deepseek.com/v1</code>

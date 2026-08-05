@@ -131,8 +131,9 @@ LLM_BASE_URL=https://api.deepseek.com/v1
 LLM_MODEL=deepseek-chat`}
               </pre>
               <p className="text-[10px] font-mono text-text-muted/60">
-                💡 推荐使用 <b className="text-accent-green">DeepSeek Chat / Flash</b> 模型——Flash 更快更便宜，Chat 更深思熟虑。
-                M12 Worker 联网搜索需要 Flash 模型的 Responses API 支持。
+                💡 推荐使用 <b className="text-accent-green">DeepSeek Chat (v3)</b> 或 <b className="text-accent-green">DeepSeek Flash</b>。
+                Chat 更深思熟虑适合 M11 对话，Flash 更快更便宜适合 M12 Worker 大批量任务。
+                M12 联网搜索使用 Responses API（<code>api.deepseek.com/responses</code>，无 /v1）。
               </p>
               <p className="text-[10px] font-mono text-text-muted/50">
                 🔒 Key 仅储存在本地 <code>.env</code> 文件中，不会上传或分享。

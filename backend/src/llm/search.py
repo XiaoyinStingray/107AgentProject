@@ -141,14 +141,14 @@ async def _deepseek_search(query: str, max_results: int) -> list[dict]:
     from config import settings
     try:
         api_key = settings.llm_api_key
-        base_url = settings.llm_base_url.rstrip("/")
         model = settings.llm_model
 
         # 仅当使用 DeepSeek API 时启用
-        if "deepseek" not in base_url.lower():
+        if "deepseek" not in settings.llm_base_url.lower():
             return []
 
-        url = f"{base_url}/responses"
+        # Responses API 端点（不带 /v1）
+        url = "https://api.deepseek.com/responses"
         body = _json.dumps({
             "model": model,
             "input": query,
