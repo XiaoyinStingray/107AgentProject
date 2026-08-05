@@ -25,6 +25,7 @@ const DuelArena = lazy(() => import("./pages/DuelArena"));
 const PipelinePage = lazy(() => import("./pages/PipelinePage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const PipelineEditor = lazy(() => import("./pages/PipelineEditor"));
+const GuidePage = lazy(() => import("./pages/GuidePage"));
 
 /** Suspense 占位——加载中显示 */
 function PageFallback() {
@@ -240,6 +241,16 @@ export default function App() {
             element={
               <Suspense fallback={<PageFallback />}>
                 <PipelinePage />
+              </Suspense>
+            }
+          />
+
+          {/* 使用教程 */}
+          <Route
+            path="guide"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <GuidePage />
               </Suspense>
             }
           />
