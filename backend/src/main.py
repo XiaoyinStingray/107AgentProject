@@ -118,6 +118,83 @@ async def health():
     }
 
 
+from pydantic import BaseModel
+
+
+class ConfigUpdateRequest(BaseModel):
+    llm_api_key: str = ""
+    llm_base_url: str = "https://api.deepseek.com"
+    llm_model: str = "deepseek-v4-flash"
+
+
+@app.post("/api/config")
+async def update_llm_config(body: ConfigUpdateRequest):
+    """前端配置 LLM 参数——安全写入 .env 文件 + 内存生效。
+
+    规则：
+    - 仅修改 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL 三个键
+    - 保留 .env 中其他所有内容（注释、空行、其他键值对）原样不变
+    - 已有值的键不会被空值覆盖（防止前端误传空字符串擦除配置）
+    """
+    from pathlib import Path
+    env_path = Path(__file__).parents[2] / ".env"
+
+    # 读取原始文件内容
+    original_lines: list[str] = []
+    if env_path.exists():
+        original_lines = env_path.read_text(encoding="utf-8").splitlines()
+
+    # 要更新的键
+    updates = {
+        "LLM_API_KEY": body.llm_api_key.strip(),
+        "LLM_BASE_URL": body.llm_base_url.strip(),
+        "LLM_MODEL": body.llm_model.strip(),
+    }
+    updated_keys: set[str] = set()
+
+    # 逐行处理：已有键更新值，不存在的键追加到末尾
+    new_lines: list[str] = []
+    for line in original_lines:
+        stripped = line.strip()
+        if "=" in stripped and not stripped.startswith("#"):
+            k, v = stripped.split("=", 1)
+            k = k.strip()
+            if k in updates and updates[k]:  # 只更新有实际值的键
+                new_lines.append(f"{k}={updates[k]}")
+                updated_keys.add(k)
+                continue
+            elif k in updates and not updates[k]:
+                # 前端传了空值但 .env 已有值 → 保留原值不覆盖
+                logger.info(f"[config] skipping empty overwrite for {k} (existing={v[:20]}...)")
+        new_lines.append(line)
+
+    # 追加 .env 中不存在的键
+    for k, v in updates.items():
+        if k not in updated_keys and v:
+            new_lines.append(f"{k}={v}")
+            updated_keys.add(k)
+
+    # 写入（先备份）
+    if env_path.exists() and env_path.stat().st_size > 0:
+        import shutil
+        backup = env_path.with_suffix(".env.bak")
+        shutil.copy2(env_path, backup)
+
+    env_path.write_text("\n".join(new_lines).rstrip("\n") + "\n", encoding="utf-8")
+
+    # 更新内存中的 settings
+    from config import settings
+    if updates["LLM_API_KEY"]:
+        settings.llm_api_key = updates["LLM_API_KEY"]
+    if updates["LLM_BASE_URL"]:
+        settings.llm_base_url = updates["LLM_BASE_URL"]
+    if updates["LLM_MODEL"]:
+        settings.llm_model = updates["LLM_MODEL"]
+
+    logger.info(f"[config] LLM config updated: model={updates['LLM_MODEL']}, base_url={updates['LLM_BASE_URL']}")
+    return {"ok": True, "model": updates["LLM_MODEL"], "base_url": updates["LLM_BASE_URL"]}
+
+
 @app.get("/api/status")
 async def system_status():
     """系统状态：LLM 配置、Agent 数量、是否需要初始化。"""
@@ -133,6 +210,7 @@ async def system_status():
     return {
         "has_llm_key": bool(settings.llm_api_key),
         "llm_model": settings.llm_model,
+        "llm_base_url": settings.llm_base_url,
         "agent_count": agent_count,
         "needs_seed": agent_count == 0,
     }
