@@ -131,12 +131,24 @@ def validate_pipeline(pipeline: PipelineSpec) -> tuple[bool, str]:
     if len(node_ids) != len(pipeline.nodes):
         return False, "节点 ID 不唯一"
 
+    edge_keys: set[tuple[EdgeType, str, str, str]] = set()
+
     # 检查边引用的节点存在
     for edge in pipeline.edges:
+        normalized_condition = (
+            "" if edge.edge_type == EdgeType.FLOW else (edge.condition or "").strip()
+        )
+        edge_key = (edge.edge_type, edge.from_node, edge.to_node, normalized_condition)
+        if edge_key in edge_keys:
+            return False, f"边 '{edge.id}' 与已有边重复"
+        edge_keys.add(edge_key)
+
         if edge.from_node not in node_ids:
             return False, f"边 '{edge.id}' 的 from_node '{edge.from_node}' 不存在"
         if edge.to_node not in node_ids:
             return False, f"边 '{edge.id}' 的 to_node '{edge.to_node}' 不存在"
+        if edge.edge_type == EdgeType.LOOP and not 1 <= edge.max_iterations <= 10:
+            return False, f"回边 '{edge.id}' 的最大循环次数必须在 1–10 之间"
 
     # 检查 depends_on 引用的节点存在
     for node in pipeline.nodes:
@@ -164,7 +176,42 @@ def validate_pipeline(pipeline: PipelineSpec) -> tuple[bool, str]:
     except ValueError as e:
         return False, str(e)
 
+    for edge in pipeline.edges:
+        if (
+            edge.edge_type == EdgeType.BRANCH
+            and not _is_flow_downstream(flow_deps, edge.from_node, edge.to_node)
+        ):
+            return False, f"分支 '{edge.id}' 的目标必须是起点的下游节点"
+
     return True, "ok"
+
+
+def _is_flow_downstream(
+    flow_deps: dict[str, set[str]],
+    source: str,
+    target: str,
+) -> bool:
+    """Return whether target is reachable downstream from source via FLOW edges."""
+    if source == target:
+        return False
+
+    pending = [source]
+    visited: set[str] = set()
+    while pending:
+        current = pending.pop(0)
+        if current in visited:
+            continue
+        visited.add(current)
+
+        for node_id, dependencies in flow_deps.items():
+            if current not in dependencies:
+                continue
+            if node_id == target:
+                return True
+            if node_id not in visited:
+                pending.append(node_id)
+
+    return False
 
 
 def get_flow_deps(nodes: list[PipelineNodeSpec], edges: list[PipelineEdge]) -> dict[str, set[str]]:

@@ -137,6 +137,106 @@ class TestValidatePipeline:
         assert valid is False
         assert "不存在" in msg
 
+    def test_duplicate_flow_edge_fails(self):
+        spec = PipelineSpec(id="p1", name="duplicate flow", nodes=[
+            self._make_node("a"), self._make_node("b"),
+        ], edges=[
+            PipelineEdge(id="e1", from_node="a", to_node="b", edge_type=EdgeType.FLOW),
+            PipelineEdge(id="e2", from_node="a", to_node="b", edge_type=EdgeType.FLOW),
+        ])
+
+        valid, msg = validate_pipeline(spec)
+
+        assert valid is False
+        assert "重复" in msg
+
+    def test_duplicate_loop_edge_fails_after_trimming_condition(self):
+        spec = PipelineSpec(id="p1", name="duplicate loop", nodes=[
+            self._make_node("a"), self._make_node("b"),
+        ], edges=[
+            PipelineEdge(id="e1", from_node="b", to_node="a", edge_type=EdgeType.LOOP,
+                         condition="FAILED"),
+            PipelineEdge(id="e2", from_node="b", to_node="a", edge_type=EdgeType.LOOP,
+                         condition=" FAILED "),
+        ])
+
+        valid, msg = validate_pipeline(spec)
+
+        assert valid is False
+        assert "重复" in msg
+
+    def test_duplicate_branch_edge_fails(self):
+        spec = PipelineSpec(id="p1", name="duplicate branch", nodes=[
+            self._make_node("a"), self._make_node("b"),
+        ], edges=[
+            PipelineEdge(id="e1", from_node="a", to_node="b", edge_type=EdgeType.BRANCH,
+                         condition="PASS"),
+            PipelineEdge(id="e2", from_node="a", to_node="b", edge_type=EdgeType.BRANCH,
+                         condition="PASS"),
+        ])
+
+        valid, msg = validate_pipeline(spec)
+
+        assert valid is False
+        assert "重复" in msg
+
+    def test_branches_with_different_conditions_are_allowed(self):
+        spec = PipelineSpec(id="p1", name="branch conditions", nodes=[
+            self._make_node("a"), self._make_node("b"),
+        ], edges=[
+            PipelineEdge(id="e0", from_node="a", to_node="b", edge_type=EdgeType.FLOW),
+            PipelineEdge(id="e1", from_node="a", to_node="b", edge_type=EdgeType.BRANCH,
+                         condition="PASS"),
+            PipelineEdge(id="e2", from_node="a", to_node="b", edge_type=EdgeType.BRANCH,
+                         condition="FAILED"),
+        ])
+
+        valid, msg = validate_pipeline(spec)
+
+        assert valid is True
+        assert msg == "ok"
+
+    def test_branch_to_transitive_downstream_node_is_allowed(self):
+        spec = PipelineSpec(id="p1", name="downstream branch", nodes=[
+            self._make_node("a"), self._make_node("b"), self._make_node("c"),
+        ], edges=[
+            PipelineEdge(id="e1", from_node="a", to_node="b", edge_type=EdgeType.FLOW),
+            PipelineEdge(id="e2", from_node="b", to_node="c", edge_type=EdgeType.FLOW),
+            PipelineEdge(id="e3", from_node="a", to_node="c", edge_type=EdgeType.BRANCH),
+        ])
+
+        valid, msg = validate_pipeline(spec)
+
+        assert valid is True
+        assert msg == "ok"
+
+    def test_branch_to_upstream_node_fails(self):
+        spec = PipelineSpec(id="p1", name="upstream branch", nodes=[
+            self._make_node("a"), self._make_node("b"), self._make_node("c"),
+        ], edges=[
+            PipelineEdge(id="e1", from_node="a", to_node="b", edge_type=EdgeType.FLOW),
+            PipelineEdge(id="e2", from_node="b", to_node="c", edge_type=EdgeType.FLOW),
+            PipelineEdge(id="e3", from_node="c", to_node="a", edge_type=EdgeType.BRANCH),
+        ])
+
+        valid, msg = validate_pipeline(spec)
+
+        assert valid is False
+        assert "下游节点" in msg
+
+    def test_branch_to_disconnected_node_fails(self):
+        spec = PipelineSpec(id="p1", name="disconnected branch", nodes=[
+            self._make_node("a"), self._make_node("b"), self._make_node("c"),
+        ], edges=[
+            PipelineEdge(id="e1", from_node="a", to_node="b", edge_type=EdgeType.FLOW),
+            PipelineEdge(id="e2", from_node="b", to_node="c", edge_type=EdgeType.BRANCH),
+        ])
+
+        valid, msg = validate_pipeline(spec)
+
+        assert valid is False
+        assert "下游节点" in msg
+
     def test_depends_on_nonexistent_fails(self):
         """depends_on 引用不存在的节点 → 失败。"""
         spec = PipelineSpec(id="p1", name="坏依赖", nodes=[
@@ -208,6 +308,34 @@ class TestValidatePipeline:
         ])
         valid, msg = validate_pipeline(spec)
         assert valid is True
+
+    def test_loop_edge_rejects_zero_iterations(self):
+        """LOOP 最大循环次数不能小于 1。"""
+        spec = PipelineSpec(id="p1", name="loop", nodes=[
+            self._make_node("a"), self._make_node("b", depends_on=["a"]),
+        ], edges=[
+            PipelineEdge(id="e1", from_node="b", to_node="a",
+                         edge_type=EdgeType.LOOP, max_iterations=0),
+        ])
+
+        valid, msg = validate_pipeline(spec)
+
+        assert valid is False
+        assert "1–10" in msg
+
+    def test_loop_edge_rejects_more_than_ten_iterations(self):
+        """LOOP 最大循环次数不能大于 10。"""
+        spec = PipelineSpec(id="p1", name="loop", nodes=[
+            self._make_node("a"), self._make_node("b", depends_on=["a"]),
+        ], edges=[
+            PipelineEdge(id="e1", from_node="b", to_node="a",
+                         edge_type=EdgeType.LOOP, max_iterations=11),
+        ])
+
+        valid, msg = validate_pipeline(spec)
+
+        assert valid is False
+        assert "1–10" in msg
 
 
 # =============================================================================

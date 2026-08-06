@@ -44,7 +44,7 @@ class EdgeCreateRequest(BaseModel):
     edge_type: str = Field(default="flow", description="flow | loop | branch")
     condition: str | None = None
     condition_field: str | None = None
-    max_iterations: int = 3
+    max_iterations: int = Field(default=3, ge=1, le=10)
     iteration_label: str = ""
     priority: int = 0
     label: str = ""

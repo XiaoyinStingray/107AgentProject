@@ -5,7 +5,7 @@
 
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import {
-  ReactFlow, Controls, MiniMap, Background, BackgroundVariant,
+  ReactFlow, Controls, Background, BackgroundVariant,
   useNodesState, useEdgesState, addEdge, Connection, MarkerType,
   type Node, type Edge, Panel,
 } from "@xyflow/react";
@@ -16,8 +16,15 @@ import {
 import "@xyflow/react/dist/style.css";
 import { useAgents } from "../api/agents";
 import PipelineNodeComponent from "../components/pipeline/PipelineNodeComponent";
+import DraggableMiniMap from "../components/pipeline/DraggableMiniMap";
 import type { PipelineNodeData } from "../components/pipeline/PipelineNodeComponent";
 import { unlock } from "../game/achievements";
+import {
+  hasDuplicateControlFlowEdge,
+  isBranchTargetDownstream,
+  parseLoopMaxIterations,
+} from "./pipeline/controlFlowValidation";
+import { getPipelineFitViewOptions } from "./pipeline/fitView";
 
 /* ── 工具列表 ── */
 const ALL_SPECIAL_TOOLS = [
@@ -84,7 +91,7 @@ function buildPipelineBody(nodes: Node[], edges: Edge[], name: string, descripti
     id: e.id, from_node: e.source, to_node: e.target,
     edge_type: e.data?.edge_type || "flow",
     condition: e.data?.condition || null, condition_field: null,
-    max_iterations: e.data?.max_iterations || 3, iteration_label: "",
+    max_iterations: e.data?.max_iterations ?? 3, iteration_label: "",
     priority: 0, label: e.data?.label || "",
   }));
   return { name, description, nodes: pnodes, edges: pedges };
@@ -121,6 +128,7 @@ export default function PipelineEditor() {
   const [renamePipelineId, setRenamePipelineId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [managementBusyId, setManagementBusyId] = useState<string | null>(null);
+  const [loopMaxInput, setLoopMaxInput] = useState("3");
   const [savedSnapshot, setSavedSnapshot] = useState(() => pipelineSnapshot([], [], "新建管线", ""));
   const nodeCounter = useRef(1);
 
@@ -129,6 +137,11 @@ export default function PipelineEditor() {
     [nodes, edges, pipeName, pipeDesc],
   );
   const isDirty = currentSnapshot !== savedSnapshot;
+  const loopMaxIterations = parseLoopMaxIterations(loopMaxInput);
+  const fitViewOptions = useMemo(
+    () => getPipelineFitViewOptions(edges),
+    [edges],
+  );
 
   // 加载管线列表
   const refreshList = useCallback(async () => {
@@ -349,6 +362,15 @@ export default function PipelineEditor() {
 
   // 连线
   const onConnect = useCallback((conn: Connection) => {
+    if (!conn.source || !conn.target) return;
+    if (hasDuplicateControlFlowEdge(edges, {
+      source: conn.source,
+      target: conn.target,
+      edgeType: "flow",
+    })) {
+      setMsg("❌ 相同数据流已经存在");
+      return;
+    }
     const newEdge: Edge = {
       ...conn,
       id: `e_${conn.source}_${conn.target}_${Date.now()}`,
@@ -358,7 +380,7 @@ export default function PipelineEditor() {
       data: { edge_type: "flow" },
     };
     setEdges((eds) => addEdge(newEdge, eds));
-  }, [setEdges]);
+  }, [edges, setEdges]);
 
   // 更新选中节点的字段
   const updateNodeField = useCallback((field: string, value: unknown) => {
@@ -667,6 +689,8 @@ export default function PipelineEditor() {
             }}
             nodeTypes={nodeTypes}
             fitView
+            fitViewOptions={fitViewOptions}
+            minZoom={0.25}
             deleteKeyCode="Delete"
             multiSelectionKeyCode="Shift"
             className="!bg-bg-primary"
@@ -696,9 +720,11 @@ export default function PipelineEditor() {
               </Panel>
             )}
             <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#334155" />
-            <Controls className="!bg-bg-primary !border-border !rounded-lg" />
-            <MiniMap
-              className="!bg-bg-secondary !border-border !rounded-lg"
+            <Controls
+              fitViewOptions={fitViewOptions}
+              className="!bg-bg-primary !border-border !rounded-lg"
+            />
+            <DraggableMiniMap
               nodeColor={(n) => {
                 const role = (n.data as PipelineNodeData)?.role || "worker";
                 const colors: Record<string, string> = { analyst: "#7c3aed", writer: "#059669", reviewer: "#d97706", executor: "#4b5563" };
@@ -855,26 +881,46 @@ export default function PipelineEditor() {
                   </select>
                   <div className="flex items-center gap-1">
                     <span className="text-[9px] text-text-muted">最多</span>
-                    <input id="loop-max" type="number" min={1} max={10} defaultValue={3}
+                    <input id="loop-max" type="number" min={1} max={10} step={1}
+                      value={loopMaxInput} onChange={(event) => setLoopMaxInput(event.target.value)}
+                      aria-label="最大循环次数" aria-invalid={loopMaxIterations === null}
                       className="w-12 px-1 py-0.5 text-[10px] font-mono bg-bg-secondary border border-border rounded text-text-primary outline-none text-center" />
                     <span className="text-[9px] text-text-muted">次</span>
                   </div>
+                  {loopMaxIterations === null && (
+                    <p role="alert" className="text-[9px] font-mono text-red-400">
+                      请输入 1–10 的整数
+                    </p>
+                  )}
                   <button onClick={() => {
                     const target = (document.getElementById("loop-target") as HTMLSelectElement)?.value;
                     const cond = (document.getElementById("loop-cond") as HTMLInputElement)?.value || "";
-                    const maxIter = parseInt((document.getElementById("loop-max") as HTMLInputElement)?.value || "3", 10);
+                    if (loopMaxIterations === null) {
+                      setMsg("❌ 循环次数必须是 1–10 的整数");
+                      return;
+                    }
                     if (!target || !nodes.find(n => n.id === target)) return;
+                    if (hasDuplicateControlFlowEdge(edges, {
+                      source: selectedNode.id,
+                      target,
+                      edgeType: "loop",
+                      condition: cond,
+                    })) {
+                      setMsg("❌ 相同回边已经存在");
+                      return;
+                    }
                     const newEdge: Edge = {
                       id: `e_loop_${selectedNode.id}_${target}_${Date.now()}`,
                       source: selectedNode.id, target, type: "smoothstep",
                       style: edgeStyle("loop"),
                       markerEnd: { type: MarkerType.ArrowClosed, color: "#f59e0b" },
                       label: cond || "loop",
-                      data: { edge_type: "loop", condition: cond || null, max_iterations: maxIter || 3 },
+                      data: { edge_type: "loop", condition: cond || null, max_iterations: loopMaxIterations },
                     };
                     setEdges(eds => [...eds, newEdge]);
                   }}
-                    className="w-full py-1 text-[10px] font-mono rounded bg-accent-orange/10 border border-accent-orange/30 text-accent-orange hover:bg-accent-orange/20 transition-colors">
+                    disabled={loopMaxIterations === null}
+                    className="w-full py-1 text-[10px] font-mono rounded bg-accent-orange/10 border border-accent-orange/30 text-accent-orange hover:bg-accent-orange/20 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent-orange/10 transition-colors">
                     确认添加回边
                   </button>
                 </div>
@@ -902,6 +948,20 @@ export default function PipelineEditor() {
                     const target = (document.getElementById("branch-target") as HTMLSelectElement)?.value;
                     const cond = (document.getElementById("branch-cond") as HTMLInputElement)?.value || "";
                     if (!target || !nodes.find(n => n.id === target)) return;
+                    if (!isBranchTargetDownstream(edges, selectedNode.id, target)) {
+                      setMsg("❌ 分支目标必须是当前节点的下游节点");
+                      return;
+                    }
+                    if (hasDuplicateControlFlowEdge(edges, {
+                      source: selectedNode.id,
+                      target,
+                      edgeType: "branch",
+                      condition: cond,
+                    })) {
+                      setMsg("❌ 相同条件分支已经存在");
+                      return;
+                    }
+                    setMsg(null);
                     const newEdge: Edge = {
                       id: `e_branch_${selectedNode.id}_${target}_${Date.now()}`,
                       source: selectedNode.id, target, type: "smoothstep",
