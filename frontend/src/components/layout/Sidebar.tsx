@@ -20,6 +20,10 @@ import {
 import Badge from "../shared/Badge";
 import { MENU_SECTIONS } from "../../data/menuData";
 
+/* ── 教程阅读进度 ── */
+function getGuideReadCount(): number { try { return JSON.parse(localStorage.getItem("guide-read-modules") || "[]").length; } catch { return 0; } }
+function isGuideComplete(): boolean { return getGuideReadCount() >= 12; }
+
 /* ================================================================
    模块图标映射 —— M1–M8 对应 Lucide icon
    ================================================================ */
@@ -169,19 +173,28 @@ export default function Sidebar() {
 
       {/* Step 103: 设置入口 */}
       <div className="border-t border-border mt-auto">
-        {/* 使用教程 */}
+        {/* 使用教程（未读完时高亮） */}
         <button
           type="button"
           onClick={() => navigate("/guide")}
-          className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm font-mono
-            transition-colors duration-100
+          className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm font-mono transition-colors duration-100 relative
             ${pathname === "/guide"
               ? "text-accent-green bg-accent-green/10 border-r-2 border-accent-green"
-              : "text-text-secondary hover:text-text-primary hover:bg-bg-card/30"
+              : !isGuideComplete()
+                ? "text-accent-green/80 hover:text-accent-green hover:bg-accent-green/5 animate-pulse"
+                : "text-text-secondary hover:text-text-primary hover:bg-bg-card/30"
             }`}
         >
           <BookOpen size={16} />
           {!collapsed && <span>📖 使用教程</span>}
+          {!collapsed && !isGuideComplete() && (
+            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-accent-green/15 text-accent-green ml-auto">
+              {getGuideReadCount()}/12
+            </span>
+          )}
+          {collapsed && !isGuideComplete() && (
+            <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-accent-green animate-pulse" />
+          )}
         </button>
         <button
           type="button"

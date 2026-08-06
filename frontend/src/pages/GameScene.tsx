@@ -21,6 +21,7 @@ import { pickAccessoryId } from "../game/accessories";
 import { synchronizeScenePause } from "../game/scenePause";
 import { type ProactiveTrigger } from "../game/ProactiveChatManager";
 import { getChatOptions, generateChatOptionsLLM, generateCustomReplyLLM, type TopicCategory } from "../game/dialogue";
+import { unlock } from "../game/achievements";
 import { useChatHistoryStore } from "../stores/useChatHistoryStore";
 import {
   BrainDisconnectWatchdog,
@@ -145,6 +146,9 @@ function savePersonalities(p: Record<string, Personality>): void {
 export default function GameScenePage() {
   const [mapId, setMapId] = useState<string>(() => loadScene());
   const [agents, setAgents] = useState<AgentSpriteData[]>(() => loadAgents(loadScene()));
+
+  // 成就：首次部署 Agent
+  useEffect(() => { if (agents.length > 0) unlock("scene-first-deploy"); }, [agents.length]);
   const [personalities, setPersonalities] = useState<Record<string, Personality>>(() => loadPersonalities());
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [tamperTargetId, setTamperTargetId] = useState<string | null>(null);
@@ -558,6 +562,10 @@ export default function GameScenePage() {
         return;
       }
       gameRef.current?.events.emit("agent-whisper", selectedAgentId, message);
+      // 成就：耳语调教师
+      const wc = (parseInt(localStorage.getItem("whisper-count") || "0", 10) || 0) + 1;
+      localStorage.setItem("whisper-count", String(wc));
+      if (wc >= 20) unlock("scene-whisperer");
     },
     [
       brainEnabled,
@@ -699,6 +707,10 @@ export default function GameScenePage() {
 
   const handleProactiveTrigger = useCallback((trigger: ProactiveTrigger) => {
     setProactiveBanner({ trigger, remainingSeconds: 60 });
+    // 成就：搭话王
+    const pc = (parseInt(localStorage.getItem("proactive-count") || "0", 10) || 0) + 1;
+    localStorage.setItem("proactive-count", String(pc));
+    if (pc >= 5) unlock("scene-proactive");
     // Agent 跳动动画
     const ms = gameRef.current?.scene.getScene("MapScene") as MapScene | undefined;
     const sprite = ms?.getAgentSprite(trigger.agent.agentId);

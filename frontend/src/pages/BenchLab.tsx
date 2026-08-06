@@ -4,6 +4,7 @@ import { useBenchRuns, useBenchRun, useCreateBenchRun, useDeleteBenchRun, useBen
 import { useAgents } from "../api/agents";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
+import { unlock } from "../game/achievements";
 import EmptyState from "../components/shared/EmptyState";
 import HexagonChart from "../components/bench/HexagonChart";
 import CompareView from "../components/bench/CompareView";
@@ -45,6 +46,9 @@ export default function BenchLab() {
   const { data: detailA } = useBenchRun((blindMode ? blindMap?.x : compareA) || null);
   const { data: detailB } = useBenchRun((blindMode ? blindMap?.y : compareB) || null);
   const doneRuns = runs.filter((r) => r.status === "done" && r.scores);
+
+  // 成就：首次完成评测
+  useEffect(() => { if (doneRuns.length > 0) unlock("bench-first-run"); }, [doneRuns.length]);
 
   const startBlindCompare = () => {
     const pool = doneRuns.filter((r) => r.status === "done" && r.scores);
@@ -510,6 +514,10 @@ function ByScenarioRadars({ runId }: { runId: string | null }) {
 /* 70: 评分诊断面板 */
 function FingerprintPanel({ runId, runStatus }: { runId: string | null; runStatus?: string }) {
   const { data } = useBenchFingerprint(runId, runStatus);
+
+  // 成就：指纹收集者
+  useEffect(() => { if (data?.agents && Object.keys(data.agents).length > 0) unlock("bench-fingerprint"); }, [data]);
+
   if (!data?.agents || Object.keys(data.agents).length === 0) return null;
 
   const agents = (data as any)?.agents ?? {};

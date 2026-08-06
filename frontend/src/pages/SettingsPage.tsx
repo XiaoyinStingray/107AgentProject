@@ -7,10 +7,11 @@
 import { useState, useCallback, useEffect } from "react";
 import Card from "../components/shared/Card";
 import { useSettings, useUpdateSettings, useResetSettings, type UserSettingsData } from "../api/settings";
+import { unlock } from "../game/achievements";
 
 /* ── 数据库操作按钮 ── */
-function DBButton({ label, desc, url, method, confirm: confirmMsg }: {
-  label: string; desc: string; url: string; method: string; confirm: string;
+function DBButton({ label, desc, url, method, confirm: confirmMsg, onSuccess }: {
+  label: string; desc: string; url: string; method: string; confirm: string; onSuccess?: () => void;
 }) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string | null>(null);
@@ -21,10 +22,11 @@ function DBButton({ label, desc, url, method, confirm: confirmMsg }: {
     try {
       const r = await fetch(url, { method });
       const d = await r.json();
-      setResult(d.ok ? `✅ ${d.message || "操作成功"}` : `❌ ${d.error || "操作失败"}`);
+      if (d.ok) { setResult(`✅ ${d.message || "操作成功"}`); onSuccess?.(); }
+      else setResult(`❌ ${d.error || "操作失败"}`);
     } catch { setResult("❌ 后端未启动"); }
     setLoading(false);
-  }, [url, method, confirmMsg]);
+  }, [url, method, confirmMsg, onSuccess]);
 
   return (
     <div className="flex flex-col gap-1">
@@ -89,10 +91,20 @@ export default function SettingsPage() {
     setSaved(false);
   }, []);
 
+  const [saveCount, setSaveCount] = useState(() => { try { const v = parseInt(localStorage.getItem("settings-save-count") || "0", 10); return isNaN(v) ? 0 : v; } catch { return 0; } });
+
   const handleSave = useCallback(() => {
     if (!local) return;
-    update.mutate(local, { onSuccess: () => setSaved(true) });
-  }, [local, update]);
+    update.mutate(local, {
+      onSuccess: () => {
+        setSaved(true);
+        const next = saveCount + 1;
+        setSaveCount(next);
+        localStorage.setItem("settings-save-count", String(next));
+        if (next >= 3) unlock("settings-master");
+      },
+    });
+  }, [local, update, saveCount]);
 
   const handleResetGroup = useCallback((group: string) => {
     if (!local) return;
@@ -221,8 +233,14 @@ export default function SettingsPage() {
       <div className="mt-8 pt-6 border-t border-border">
         <h2 className="text-sm font-mono text-text-primary font-semibold mb-3">🗄️ 数据库管理</h2>
         <div className="flex items-center gap-3 flex-wrap">
-          <DBButton label="载入预置数据" desc="用预置数据库替换当前数据（15 张表，3000+ 记录）" url="/api/seed?keep_existing=false" method="POST" confirm="确定要用预置数据替换当前数据库吗？当前数据将丢失。" />
-          <DBButton label="清空数据库" desc="删除所有数据，创建空白数据库" url="/api/reset-db" method="POST" confirm="确定要清空所有数据吗？此操作不可撤销！" />
+          <DBButton label="载入预置数据" desc="用预置数据库替换当前数据（15 张表，3000+ 记录）" url="/api/seed?keep_existing=false" method="POST"
+            confirm="确定要用预置数据替换当前数据库吗？当前数据将丢失。" onSuccess={() => unlock("data-steward")} />
+          <DBButton label="清空数据库" desc="删除所有数据，创建空白数据库" url="/api/reset-db" method="POST"
+            confirm="确定要清空所有数据吗？此操作不可撤销！" onSuccess={() => unlock("data-steward")} />
+          <a href="/api/export-db" download="lifelab-backup.db"
+            className="px-4 py-2 rounded-lg border border-border text-text-secondary text-sm font-mono hover:border-text-secondary/40 hover:bg-bg-primary/50 transition-colors inline-flex items-center gap-1.5">
+            📥 导出数据库
+          </a>
           <button type="button"
             onClick={() => { sessionStorage.setItem("forceWelcome", "1"); window.location.reload(); }}
             className="px-4 py-2 rounded-lg border border-accent-purple/30 bg-accent-purple/5 text-accent-purple text-sm font-mono

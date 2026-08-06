@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo, useEffect } from "react";
 import { useAgents } from "../api/agents";
 import { useTeams, useCreateTeam, useDeleteTeam, useSuggestRoles, useExecuteTeam, useTeamPlan, useEvaluateTeam } from "../api/teams";
 import { usePublishTeam } from "../api/market";
+import { unlock } from "../game/achievements";
 import { usePauseWorld, useStartWorld } from "../api/worlds";
 import { useSSE } from "../hooks/useSSE";
 import type { TeamRole, SuggestedRole } from "../types/team";
@@ -87,6 +88,24 @@ export default function TeamDashboard() {
     }
   }, [livePlan]);
 
+  // 成就：团队任务完成检测（用 run_id 去重防止同一任务重复计数）
+  useEffect(() => {
+    let lastPlan: any = null;
+    for (let i = events.length - 1; i >= 0; i--) { if (events[i].type === "plan_updated") { lastPlan = events[i]; break; } }
+    if ((lastPlan?.data as any)?.all_done) {
+      const runId = (lastPlan?.data as any)?.run_id || lastPlan?.timestamp || "";
+      const doneSet = new Set<string>(JSON.parse((() => { try { return localStorage.getItem("team-done-ids") || "[]"; } catch { return "[]"; } })()));
+      if (!doneSet.has(runId)) {
+        doneSet.add(runId);
+        localStorage.setItem("team-done-ids", JSON.stringify([...doneSet]));
+        unlock("team-task-done");
+        const count = doneSet.size;
+        localStorage.setItem("team-task-count", String(count));
+        if (count >= 5) unlock("team-veteran");
+      }
+    }
+  }, [events]);
+
   // 优先用 SSE 实时数据，fallback 到轮询
   const steps = livePlan?.steps ?? teamPlan?.steps ?? [];
   const progressPct = livePlan?.progress_pct ?? teamPlan?.progress_pct ?? 0;
@@ -161,6 +180,7 @@ export default function TeamDashboard() {
         agent_ids: [...selectedIds],
         roles,
       });
+      unlock("team-formed");
       // 重置表单
       setName("");
       setDescription("");

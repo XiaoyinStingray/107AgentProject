@@ -17,6 +17,7 @@ import "@xyflow/react/dist/style.css";
 import { useAgents } from "../api/agents";
 import PipelineNodeComponent from "../components/pipeline/PipelineNodeComponent";
 import type { PipelineNodeData } from "../components/pipeline/PipelineNodeComponent";
+import { unlock } from "../game/achievements";
 
 /* ── 工具列表 ── */
 const ALL_SPECIAL_TOOLS = [
@@ -393,8 +394,10 @@ export default function PipelineEditor() {
       });
       if (r.ok) {
         const d = await r.json();
+        const isNew = !pipeId;
         const savedId = pipeId || d.id;
         setPipeId(savedId);
+        if (isNew) unlock("worker-pipeline");
         setPipeList((prev) => {
           const saved = { id: savedId, name: pipeName };
           return prev.some((p) => p.id === savedId)

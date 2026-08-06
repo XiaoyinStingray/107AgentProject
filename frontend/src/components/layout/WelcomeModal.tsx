@@ -2,6 +2,7 @@
  * WelcomeModal — 首次使用引导。左栏 API 配置，右栏数据库选择。
  */
 import { useState, useEffect, useCallback } from "react";
+import { unlock } from "../../game/achievements";
 
 /* ── 步骤指示器 ── */
 function Step({ num, title, children }: { num: number; title: string; children: React.ReactNode }) {
@@ -67,7 +68,7 @@ export default function WelcomeModal() {
         }),
       });
       const d = await r.json();
-      if (d.ok) { setKeySaved(true); setHasKey(true); }
+      if (d.ok) { setKeySaved(true); setHasKey(true); unlock("self-starter"); }
     } catch {}
     setSavingKey(false);
   }, [apiKey, baseUrl, model]);

@@ -15,6 +15,7 @@ import WorkspaceSelector, {
   type WorkspaceConfig,
 } from "../components/worker/WorkspaceSelector";
 import { useAgents } from "../api/agents";
+import { unlock } from "../game/achievements";
 
 // =============================================================================
 // 常量
@@ -217,6 +218,33 @@ export default function WorkerBench() {
 
   // 挂载时加载历史
   useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  // M12 成就：第一个任务完成（仅成功）+ 工具大师 + 产出达人
+  useEffect(() => {
+    if (effectiveDone && events.length > 0) {
+      // 仅 worker.done 才算完成（排除 worker.error）
+      const lastDone = events[events.length - 1];
+      if (lastDone?.type === "worker.done" || lastDone?.type === "worker.summary") {
+        unlock("worker-first-task");
+      }
+      // 工具大师
+      const specialNames = ["mindmap_generate", "chart_generate", "timeline_generate", "summarize", "translate", "data_profile", "code_review", "outline_generate"];
+      let used: Set<string>;
+      try { used = new Set(JSON.parse(localStorage.getItem("used-special-tools") || "[]")); } catch { used = new Set(); }
+      for (const ev of events) {
+        const toolName = (ev.data as any)?.tool_name as string | undefined;
+        if (ev.type === "worker.tool_start" && toolName && specialNames.includes(toolName)) used.add(toolName);
+      }
+      localStorage.setItem("used-special-tools", JSON.stringify([...used]));
+      if (used.size >= 3) unlock("worker-special-tool");
+    }
+  }, [effectiveDone, events]);
+
+  // 产出达人：累计产出 10 个文件
+  useEffect(() => {
+    const totalFiles = history.reduce((sum, h) => sum + (h.files?.length || 0), 0);
+    if (totalFiles >= 10) unlock("worker-output-10");
+  }, [history]);
 
   // 任务完成/出错/停止时刷新历史
   useEffect(() => {

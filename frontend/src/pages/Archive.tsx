@@ -10,6 +10,7 @@ import { useSimulations } from "../api/simulations";
 import { useAchievements } from "../api/achievements";
 import { useScenarios } from "../api/scenarios";
 import { useExportReport } from "../api/export";
+import { ACHIEVEMENTS, getUnlocked } from "../game/achievements";
 import { convertSimEventsToSSE } from "../types/control";
 import {
   ARCHIVE_TABS,
@@ -382,7 +383,24 @@ function AchievementsPanel() {
     return <LoadingSpinner title="加载成就数据…" detail="从数据库统计中" />;
   }
 
-  const achievements = data?.achievements ?? [];
+  // 合并后端成就 + 前端 localStorage 成就
+  const localUnlocked = getUnlocked();
+  const backendAchievements = data?.achievements ?? [];
+  const mergedAchievements = [
+    ...backendAchievements,
+    ...Object.values(ACHIEVEMENTS)
+      .filter(a => !backendAchievements.some(b => b.id === a.id))
+      .map(a => ({
+        id: a.id,
+        emoji: a.icon,
+        title: a.title,
+        description: a.desc,
+        progress: localUnlocked.has(a.id) ? 1 : 0,
+        unlocked: localUnlocked.has(a.id),
+        unlockedAt: undefined as string | undefined,
+      })),
+  ];
+
   const summary = data?.summary ?? {
     totalAgents: 0,
     totalSimulations: 0,
@@ -390,7 +408,7 @@ function AchievementsPanel() {
     totalNarratives: 0,
   };
 
-  const unlockedCount = achievements.filter((a) => a.unlocked).length;
+  const unlockedCount = mergedAchievements.filter((a) => a.unlocked).length;
 
   return (
     <div>
@@ -412,13 +430,13 @@ function AchievementsPanel() {
 
       {/* 成就进度 */}
       <h2 className="text-sm font-mono text-text-secondary uppercase tracking-wider mb-3">
-        🎖️ 成就 ({unlockedCount}/{achievements.length})
+        🎖️ 成就 ({unlockedCount}/{mergedAchievements.length})
       </h2>
-      {achievements.length === 0 ? (
+      {mergedAchievements.length === 0 ? (
         <EmptyState title="暂无成就" description="完成操作后将自动解锁成就" />
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          {achievements.map((ach) => (
+          {mergedAchievements.map((ach) => (
             <Card
               key={ach.id}
               className={`text-center ${ach.unlocked ? "" : "opacity-50"}`}

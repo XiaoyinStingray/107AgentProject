@@ -1,8 +1,14 @@
 /**
  * GuidePage — 📖 使用教程。M1–M12 完整功能指南，带交互动画。
  */
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import { unlock } from "../game/achievements";
+
+/* ── 阅读进度 ── */
+const READ_KEY = "guide-read-modules";
+function getReadModules(): Set<string> { try { return new Set(JSON.parse(localStorage.getItem(READ_KEY) || "[]")); } catch { return new Set(); } }
+function markRead(title: string) { const s = getReadModules(); s.add(title); localStorage.setItem(READ_KEY, JSON.stringify([...s])); return s; }
 
 /* ── 模块数据 ── */
 
@@ -189,29 +195,48 @@ function featureLink(mod: ModuleGuide, f: Feature): string | null {
   return mod.route;
 }
 
-function ModuleCard({ mod, index }: { mod: ModuleGuide; index: number }) {
+function ModuleCard({ mod, index, onRead }: { mod: ModuleGuide; index: number; onRead?: () => void }) {
   const navigate = useNavigate();
   const { ref, visible } = useAnimatedEntry(index, 60);
   const [expanded, setExpanded] = useState(false);
+  const [read, setRead] = useState(() => getReadModules().has(mod.title));
+
+  const handleClick = useCallback(() => {
+    if (!read) { markRead(mod.title); setRead(true); onRead?.(); }
+    navigate(mod.route);
+  }, [read, mod.title, mod.route, navigate, onRead]);
 
   return (
     <div
       ref={ref}
       className={`rounded-2xl border overflow-hidden transition-all duration-500 ease-out
-        ${visible ? "opacity-100 translate-y-0 scale-100" : "opacity-0 translate-y-8 scale-95"}`}
-      style={{ background: mod.colorBg, borderColor: mod.colorBorder }}
+        ${visible ? "opacity-100 translate-y-0 scale-100" : "opacity-0 translate-y-8 scale-95"}
+        ${!read ? "ring-1 ring-accent-green/30 shadow-lg shadow-accent-green/5" : ""}`}
+      style={{ background: mod.colorBg, borderColor: !read ? mod.color : mod.colorBorder }}
     >
+      {/* 未读标记 */}
+      {!read && (
+        <div className="absolute -top-0.5 -right-0.5 z-10">
+          <span className="text-[9px] font-mono px-2 py-0.5 rounded-bl-lg bg-accent-green text-bg-primary animate-pulse">
+            🆕 未读
+          </span>
+        </div>
+      )}
+
       {/* 头部 */}
       <div
-        className="px-5 py-4 flex items-center gap-4 cursor-pointer hover:brightness-110 transition-all duration-200 group"
+        className="px-5 py-4 flex items-center gap-4 cursor-pointer hover:brightness-110 transition-all duration-200 group relative"
         style={{ background: `linear-gradient(135deg, ${mod.colorBg}, transparent)` }}
-        onClick={() => navigate(mod.route)}
+        onClick={handleClick}
         role="button" tabIndex={0}
-        onKeyDown={(e) => { if (e.key === "Enter") navigate(mod.route); }}
+        onKeyDown={(e) => { if (e.key === "Enter") handleClick(); }}
       >
         <div
-          className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0 shadow-lg group-hover:scale-110 group-hover:shadow-xl transition-all duration-300"
-          style={{ background: `${mod.color}20`, boxShadow: `0 0 20px ${mod.color}20` }}
+          className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0 transition-all duration-300"
+          style={{
+            background: `${mod.color}20`,
+            boxShadow: !read ? `0 0 24px ${mod.color}40` : `0 0 20px ${mod.color}20`,
+          }}
         >
           {mod.emoji}
         </div>
@@ -219,6 +244,7 @@ function ModuleCard({ mod, index }: { mod: ModuleGuide; index: number }) {
           <div className="flex items-center gap-2 mb-0.5">
             <h2 className="text-base font-mono font-bold text-text-primary">{mod.title}</h2>
             <span className="text-[11px] font-mono text-text-muted/40 tracking-wide">{mod.subtitle}</span>
+            {read && <span className="text-[9px] font-mono text-text-muted/30">✓ 已读</span>}
           </div>
           <p className="text-sm font-mono text-text-secondary/80 leading-relaxed">{mod.overview}</p>
         </div>
@@ -271,15 +297,35 @@ function ModuleCard({ mod, index }: { mod: ModuleGuide; index: number }) {
 
 export default function GuidePage() {
   const navigate = useNavigate();
+  const [readCount, setReadCount] = useState(() => getReadModules().size);
+  const [showAchievement, setShowAchievement] = useState(false);
+
+  const handleRead = useCallback(() => {
+    const count = getReadModules().size;
+    setReadCount(count);
+    if (count >= 12 && !showAchievement && unlock("guide-complete")) { setShowAchievement(true); setTimeout(() => setShowAchievement(false), 5000); }
+  }, [showAchievement]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-bg-primary via-bg-primary to-bg-secondary/30">
       <div className="max-w-4xl mx-auto px-6 py-10 animate-fade-in">
+        {/* 成就弹窗 */}
+        {showAchievement && (
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 animate-fade-in">
+            <div className="bg-gradient-to-r from-accent-green/20 to-accent-purple/20 border-2 border-accent-green/40 rounded-2xl px-6 py-4 shadow-2xl backdrop-blur-sm text-center">
+              <span className="text-3xl block mb-1">🏆</span>
+              <p className="text-sm font-mono font-bold text-accent-green">成就解锁：学无止境</p>
+              <p className="text-xs font-mono text-text-secondary mt-1">已阅读全部 12 个模块的使用教程</p>
+            </div>
+          </div>
+        )}
+
         {/* Hero */}
         <div className="text-center mb-12">
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-accent-green/5 border border-accent-green/20 mb-6">
             <span className="w-1.5 h-1.5 rounded-full bg-accent-green animate-pulse" />
             <span className="text-xs font-mono text-accent-green/80">12 个模块 · 59 个功能点</span>
+            <span className="text-[10px] font-mono text-text-muted/50">· 已读 {readCount}/12</span>
           </div>
           <h1 className="text-3xl font-mono font-bold text-text-primary mb-3">
             📖 使用教程
@@ -321,7 +367,7 @@ export default function GuidePage() {
         {/* 卡片网格 */}
         <div className="space-y-4">
           {MODULES.map((mod, i) => (
-            <ModuleCard key={mod.title} mod={mod} index={i} />
+            <ModuleCard key={mod.title} mod={mod} index={i} onRead={handleRead} />
           ))}
         </div>
 

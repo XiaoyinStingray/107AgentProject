@@ -90,6 +90,18 @@ app.include_router(pipelines_router)
 app.include_router(settings_router)
 
 
+@app.get("/api/export-db")
+async def export_database():
+    """导出当前数据库文件供下载。"""
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+    from fastapi import HTTPException
+    db_path = Path("backend/data/lifelab.db")
+    if not db_path.exists():
+        raise HTTPException(status_code=404, detail="数据库文件不存在")
+    return FileResponse(db_path, media_type="application/octet-stream", filename="lifelab-backup.db")
+
+
 @app.post("/api/reset-db")
 async def reset_database():
     """清空数据库——删除 lifelab.db，创建全新空白数据库。"""
