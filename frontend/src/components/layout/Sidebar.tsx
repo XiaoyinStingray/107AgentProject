@@ -169,6 +169,20 @@ export default function Sidebar() {
 
       {/* Step 103: 设置入口 */}
       <div className="border-t border-border mt-auto">
+        {/* 使用教程 */}
+        <button
+          type="button"
+          onClick={() => navigate("/guide")}
+          className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm font-mono
+            transition-colors duration-100
+            ${pathname === "/guide"
+              ? "text-accent-green bg-accent-green/10 border-r-2 border-accent-green"
+              : "text-text-secondary hover:text-text-primary hover:bg-bg-card/30"
+            }`}
+        >
+          <BookOpen size={16} />
+          {!collapsed && <span>📖 使用教程</span>}
+        </button>
         <button
           type="button"
           onClick={() => navigate("/settings")}

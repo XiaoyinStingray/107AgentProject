@@ -17,6 +17,48 @@ export interface WhisperTile {
   tileY: number;
 }
 
+export type LocalCommandType =
+  | "talk"
+  | "move"
+  | "move_then_talk"
+  | "observe"
+  | "wait"
+  | "end_dialogue"
+  | "cancel";
+
+interface LocalCommandBase {
+  actorAgentId: string;
+}
+
+export type LocalAgentCommand =
+  | (LocalCommandBase & {
+      type: "talk";
+      targetAgentId: string;
+      message: string;
+    })
+  | (LocalCommandBase & {
+      type: "move_then_talk";
+      targetAgentId: string;
+      message: string;
+    })
+  | (LocalCommandBase & {
+      type: "move";
+      targetAgentId: string;
+    })
+  | (LocalCommandBase & {
+      type: "observe" | "wait" | "end_dialogue" | "cancel";
+    });
+
+/** Whether a local command requires another deployed Agent. */
+export function localCommandNeedsTarget(type: LocalCommandType): boolean {
+  return type === "talk" || type === "move" || type === "move_then_talk";
+}
+
+/** Whether a local command requires an exact opening line. */
+export function localCommandNeedsMessage(type: LocalCommandType): boolean {
+  return type === "talk" || type === "move_then_talk";
+}
+
 const MAX_WHISPER_LENGTH = 300;
 const SOCIAL_INTENT_PATTERN = /聊天|聊聊|交流|对话|谈谈|说话|讨论|打招呼|找.{0,4}人/;
 const MOVE_NEAR_PATTERN =

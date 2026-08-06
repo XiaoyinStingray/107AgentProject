@@ -1,10 +1,11 @@
 """
-Web 搜索 — Bing Web Search API 为主，DuckDuckGo 为 fallback。
+Web 搜索 — DeepSeek Responses API 为主，Bing/DDG 为 fallback。
 
-Step 100: 替换纯 DuckDuckGo 方案。
-  - 主搜索: Bing Web Search API (国内可用，免费层 1000次/月)
-  - Fallback: DuckDuckGo Instant Answer API
-  - 结果缓存: 5 分钟 TTL
+2026-08: DeepSeek 支持 Responses API 内置联网搜索（web_search tool）。
+  优先使用 DeepSeek Responses API（当 LLM 配置为 DeepSeek 时），
+  自动获得带引用的搜索摘要。
+  Fallback: Bing API → DuckDuckGo Instant Answer API
+  结果缓存: 5 分钟 TTL
 """
 
 import asyncio
@@ -40,12 +41,14 @@ async def web_search(query: str, max_results: int = 5) -> list[dict]:
     if cached and (now - cached[0]) < _CACHE_TTL:
         return cached[1][:max_results]
 
-    # 尝试 Bing
-    results = []
-    if _BING_API_KEY:
+    # 1. 优先: DeepSeek Responses API（内置联网搜索，2026-08 新功能）
+    results = await _deepseek_search(query, max_results)
+
+    # 2. Fallback: Bing
+    if not results and _BING_API_KEY:
         results = await _bing_search(query, max_results)
 
-    # Fallback: DuckDuckGo
+    # 3. Fallback: DuckDuckGo
     if not results:
         results = await _ddg_search(query, max_results)
 
@@ -125,6 +128,95 @@ async def _ddg_search(query: str, max_results: int) -> list[dict]:
         return results
     except Exception as e:
         logger.warning(f"[ddg_search] {e}")
+        return []
+
+
+async def _deepseek_search(query: str, max_results: int) -> list[dict]:
+    """DeepSeek Responses API — 内置联网搜索 (2026-08 新功能)。
+
+    当 LLM 配置为 DeepSeek 时优先使用此方法，AI 自动提取和总结搜索结果。
+    Docs: https://api-docs.deepseek.com/zh-cn/guides/responses_api/
+    """
+    import ssl
+    from config import settings
+    try:
+        api_key = settings.llm_api_key
+        model = settings.llm_model
+
+        # 仅当使用 DeepSeek API 时启用
+        if "deepseek" not in settings.llm_base_url.lower():
+            return []
+
+        # Responses API 端点（不带 /v1）
+        url = "https://api.deepseek.com/responses"
+        body = _json.dumps({
+            "model": model,
+            "input": query,
+            "tools": [{"type": "web_search"}],
+            "stream": False,
+        }).encode("utf-8")
+
+        def _fetch():
+            req = Request(url, data=body, headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "LifeLab/1.0",
+            })
+            ctx = ssl.create_default_context()
+            with urlopen(req, timeout=15, context=ctx) as resp:
+                return _json.loads(resp.read().decode("utf-8"))
+
+        loop = asyncio.get_running_loop()
+        data = await loop.run_in_executor(None, _fetch)
+
+        results = []
+        # 提取 output 中的文本
+        for item in data.get("output", []):
+            if item.get("type") == "message":
+                for content in item.get("content", []):
+                    if content.get("type") == "output_text":
+                        text = content.get("text", "")
+                        title = text[:80].split("\n")[0].strip("#* -")
+                        results.append({
+                            "title": title or query,
+                            "snippet": text[:500],
+                            "url": "",
+                        })
+
+        # 提取 annotations（引用链接）
+        annotations = []
+        for item in data.get("output", []):
+            if item.get("type") == "message":
+                for ann in item.get("annotations", []):
+                    if ann.get("type") == "url_citation":
+                        annotations.append({
+                            "title": ann.get("title", "")[:120],
+                            "url": ann.get("url", ""),
+                            "index": ann.get("index", len(annotations) + 1),
+                        })
+
+        # 合并：如果 DeepSeek 返回了文本结果，优先使用
+        if results:
+            # 将 annotations 的 URL 附加到最后一个 result
+            if annotations:
+                urls = "\n".join(f"[{a['index']}] {a['url']}" for a in annotations)
+                results[-1]["snippet"] += f"\n\n🔗 引用来源:\n{urls}"
+            logger.info(f"[deepseek_search] {query[:50]} -> {len(results)} results + {len(annotations)} citations")
+            return results[:max_results]
+
+        # 如果只有 annotations 没有文本
+        if annotations:
+            for a in annotations[:max_results]:
+                results.append({
+                    "title": a["title"],
+                    "snippet": "",
+                    "url": a["url"],
+                })
+            return results
+
+        return []
+    except Exception as e:
+        logger.warning(f"[deepseek_search] {e}")
         return []
 
 

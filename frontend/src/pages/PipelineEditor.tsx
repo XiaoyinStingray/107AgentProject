@@ -3,7 +3,7 @@
  * PipelineEditor — Step 106: 图形化管线编辑器。
  */
 
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import {
   ReactFlow, Controls, MiniMap, Background, BackgroundVariant,
   useNodesState, useEdgesState, addEdge, Connection, MarkerType,
@@ -66,7 +66,14 @@ export default function PipelineEditor() {
   const [pipeId, setPipeId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [pipeList, setPipeList] = useState<Array<{id:string;name:string}>>([]);
   const nodeCounter = useRef(1);
+
+  // 加载管线列表
+  const refreshList = useCallback(async () => {
+    try { const r = await fetch("/api/pipelines/"); if (r.ok) setPipeList(await r.json()); } catch {}
+  }, []);
+  useEffect(() => { refreshList(); }, [refreshList]);
 
   // 选中节点数据（类型安全访问）
   const selectedNode = useMemo(
@@ -88,7 +95,7 @@ export default function PipelineEditor() {
         id: n.id, type: "pipelineNode",
         position: { x: 50 + (i % 3) * 280, y: 50 + Math.floor(i / 3) * 200 },
         data: {
-          title: n.title, agent_id: n.agent_id, task: n.task, role: n.role || "worker",
+          id: n.id, title: n.title, agent_id: n.agent_id, task: n.task, role: n.role || "worker",
           produces: n.produces || [], extra_tools: n.extra_tools || [],
         },
       }));
@@ -129,7 +136,7 @@ export default function PipelineEditor() {
     const newNode: Node = {
       id, type: "pipelineNode", position: { x, y },
       data: {
-        title: `节点 ${nodeCounter.current - 1}`, agent_id: agents[0]?.id || "worker-default",
+        id, title: `节点 ${nodeCounter.current - 1}`, agent_id: agents[0]?.id || "worker-default",
         task: "", role: "worker", produces: [], extra_tools: [],
       } satisfies PipelineNodeData,
     };
@@ -190,10 +197,22 @@ export default function PipelineEditor() {
         if (!pipeId) setPipeId(d.id);
         setMsg(`✅ 已保存 (${d.node_count} 节点, ${d.edge_count || pedges.length} 边)`);
       } else {
-        const err = await r.json();
-        setMsg(`❌ 保存失败: ${err.detail || "未知错误"}`);
+        let detail = "";
+        try { const err = await r.json(); detail = err.detail || ""; } catch {}
+        if (r.status === 400) setMsg(`❌ 数据不合法: ${detail || "请检查节点和边的配置"}`);
+        else if (r.status === 404) setMsg(`❌ 管线不存在（请刷新页面）`);
+        else if (r.status >= 500) setMsg(`❌ 服务器错误 (${r.status}): ${detail || "请稍后重试"}`);
+        else setMsg(`❌ 保存失败 (${r.status}): ${detail || "未知错误"}`);
       }
-    } catch (e) { setMsg(`❌ 网络错误: ${String(e)}`); }
+    } catch (e) {
+      const msg = String(e);
+      if (msg.includes("Failed to fetch") || msg.includes("NetworkError"))
+        setMsg("❌ 无法连接后端，请确认后端服务已启动 (python run.py)");
+      else if (msg.includes("timeout") || msg.includes("Timeout"))
+        setMsg("❌ 请求超时，请检查后端服务状态");
+      else
+        setMsg(`❌ 网络错误: ${msg}`);
+    }
     setSaving(false);
   }, [nodes, edges, pipeName, pipeDesc, pipeId]);
 
@@ -258,6 +277,15 @@ export default function PipelineEditor() {
           placeholder="描述（可选）"
         />
         <div className="flex-1" />
+        {/* 加载已有管线 */}
+        <select
+          value=""
+          onChange={(e) => { if (e.target.value) loadPipeline(e.target.value); }}
+          className="px-2.5 py-1.5 text-xs font-mono bg-bg-primary border border-border rounded-lg text-text-secondary outline-none focus:border-accent-green/40 transition-all min-w-[120px]">
+          <option value="">📂 加载管线…</option>
+          {pipeList.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          {pipeList.length === 0 && <option disabled>暂无已保存的管线</option>}
+        </select>
         <button onClick={addNode}
           className="px-3 py-1.5 text-xs font-mono rounded-lg border border-accent-green/40 text-accent-green hover:bg-accent-green/10 transition-all">
           + 添加节点
@@ -391,9 +419,11 @@ export default function PipelineEditor() {
               />
             </label>
 
-            {/* 特殊工具 */}
-            <div>
-              <span className="text-[10px] font-mono text-text-secondary">特殊工具</span>
+            {/* 特殊工具 (折叠) */}
+            <details className="text-xs font-mono group">
+              <summary className="text-[10px] text-text-secondary cursor-pointer hover:text-text-primary select-none">
+                🧰 特殊工具 {selectedNode.data.extra_tools?.length > 0 ? `(${selectedNode.data.extra_tools.length})` : ""}
+              </summary>
               <div className="mt-1 space-y-0.5 max-h-[200px] overflow-y-auto">
                 {ALL_SPECIAL_TOOLS.map((tool) => {
                   const active = (selectedNode.data.extra_tools || []).includes(tool.key);
@@ -414,55 +444,120 @@ export default function PipelineEditor() {
                   );
                 })}
               </div>
-            </div>
+            </details>
 
-            {/* Loop/Branch 面板（选中节点后，显示以其为起点的特殊边） */}
-            <div>
-              <span className="text-[10px] font-mono text-text-secondary">高级（回边/分支）</span>
-              <div className="mt-1 space-y-1">
-                <button
-                  onClick={() => {
-                    const target = prompt("回边目标节点 ID：", "");
-                    if (!target || !nodes.find((n) => n.id === target)) return;
-                    const cond = prompt("触发条件（如 FAILED，留空=无条件）：", "FAILED");
-                    const maxIter = parseInt(prompt("最大循环次数：", "3") || "3", 10);
+            {/* Loop/Branch 面板 (折叠) */}
+            <details className="text-xs font-mono group" open>
+              <summary className="text-[10px] text-text-secondary cursor-pointer hover:text-text-primary select-none">
+                🔄🔀 回边 / 分支 控制流
+              </summary>
+              <p className="text-[9px] font-mono text-text-muted/50 mt-1 mb-2">
+                从当前节点（{selectedNode.id}）画控制流到目标节点
+              </p>
+
+              {/* 已有特殊边（可删除） */}
+              {edges.filter(e => e.source === selectedNode.id && e.data?.edge_type !== 'flow').length > 0 && (
+                <div className="mb-2 space-y-0.5">
+                  {edges.filter(e => e.source === selectedNode.id && e.data?.edge_type !== 'flow').map(e => (
+                    <div key={e.id} className="flex items-center gap-1 text-[9px] font-mono bg-bg-primary rounded px-2 py-1 border border-border/40">
+                      <span className={e.data?.edge_type === "loop" ? "text-accent-orange" : "text-accent-green"}>
+                        {e.data?.edge_type === "loop" ? "🔄" : "🔀"}
+                      </span>
+                      <span className="text-text-secondary">{e.source}</span>
+                      <span className="text-text-muted">→</span>
+                      <span className="text-text-secondary">{e.target}</span>
+                      <span className="text-text-muted/50 ml-auto">{e.data?.condition || ""}</span>
+                      <button onClick={() => setEdges(eds => eds.filter(x => x.id !== e.id))}
+                        className="ml-1 text-text-muted hover:text-red-400">✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* 添加回边 — 下拉选择目标节点 */}
+              <details className="text-xs font-mono group">
+                <summary className="flex items-center gap-1 px-2 py-1.5 rounded border border-dashed border-accent-orange/30 text-accent-orange/70 hover:text-accent-orange hover:border-accent-orange/50 cursor-pointer transition-colors">
+                  <span>🔄 添加回边</span>
+                </summary>
+                <div className="mt-1.5 p-2 bg-bg-primary rounded border border-border/60 space-y-1.5">
+                  <select id="loop-target" className="w-full px-2 py-1 text-[10px] font-mono bg-bg-secondary border border-border rounded text-text-primary outline-none">
+                    <option value="">选择回边目标…</option>
+                    {nodes.filter(n => n.id !== selectedNode.id).map(n => (
+                      <option key={n.id} value={n.id}>{n.data.title} ({n.id})</option>
+                    ))}
+                  </select>
+                  <select id="loop-cond" className="w-full px-2 py-1 text-[10px] font-mono bg-bg-secondary border border-border rounded text-text-primary outline-none">
+                    <option value="FAILED">质检结果为 FAILED</option>
+                    <option value="PASS">质检结果为 PASS</option>
+                    <option value="/error|失败/">包含关键词 error/失败</option>
+                    <option value="score < 0.7">评分 score &lt; 0.7</option>
+                    <option value="">无条件（始终触发）</option>
+                  </select>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[9px] text-text-muted">最多</span>
+                    <input id="loop-max" type="number" min={1} max={10} defaultValue={3}
+                      className="w-12 px-1 py-0.5 text-[10px] font-mono bg-bg-secondary border border-border rounded text-text-primary outline-none text-center" />
+                    <span className="text-[9px] text-text-muted">次</span>
+                  </div>
+                  <button onClick={() => {
+                    const target = (document.getElementById("loop-target") as HTMLSelectElement)?.value;
+                    const cond = (document.getElementById("loop-cond") as HTMLInputElement)?.value || "";
+                    const maxIter = parseInt((document.getElementById("loop-max") as HTMLInputElement)?.value || "3", 10);
+                    if (!target || !nodes.find(n => n.id === target)) return;
                     const newEdge: Edge = {
                       id: `e_loop_${selectedNode.id}_${target}_${Date.now()}`,
-                      source: selectedNode.id, target,
-                      type: "smoothstep",
+                      source: selectedNode.id, target, type: "smoothstep",
                       style: edgeStyle("loop"),
                       markerEnd: { type: MarkerType.ArrowClosed, color: "#f59e0b" },
                       label: cond || "loop",
-                      data: { edge_type: "loop", condition: cond, max_iterations: maxIter || 3 },
+                      data: { edge_type: "loop", condition: cond || null, max_iterations: maxIter || 3 },
                     };
-                    setEdges((eds) => [...eds, newEdge]);
+                    setEdges(eds => [...eds, newEdge]);
                   }}
-                  className="w-full text-left px-2 py-1 text-[10px] font-mono rounded border border-dashed border-border/60 text-text-secondary hover:border-accent-orange/40 hover:text-accent-orange transition-colors"
-                >
-                  + 添加回边 (loop)
-                </button>
-                <button
-                  onClick={() => {
-                    const target = prompt("分支目标节点 ID：", "");
-                    if (!target || !nodes.find((n) => n.id === target)) return;
-                    const cond = prompt("触发条件（如 PASS）：", "PASS");
+                    className="w-full py-1 text-[10px] font-mono rounded bg-accent-orange/10 border border-accent-orange/30 text-accent-orange hover:bg-accent-orange/20 transition-colors">
+                    确认添加回边
+                  </button>
+                </div>
+              </details>
+
+              {/* 添加分支 — 下拉选择目标节点 */}
+              <details className="text-xs font-mono group mt-1">
+                <summary className="flex items-center gap-1 px-2 py-1.5 rounded border border-dashed border-accent-green/30 text-accent-green/70 hover:text-accent-green hover:border-accent-green/50 cursor-pointer transition-colors">
+                  <span>🔀 添加分支</span>
+                </summary>
+                <div className="mt-1.5 p-2 bg-bg-primary rounded border border-border/60 space-y-1.5">
+                  <select id="branch-target" className="w-full px-2 py-1 text-[10px] font-mono bg-bg-secondary border border-border rounded text-text-primary outline-none">
+                    <option value="">选择分支目标…</option>
+                    {nodes.filter(n => n.id !== selectedNode.id).map(n => (
+                      <option key={n.id} value={n.id}>{n.data.title} ({n.id})</option>
+                    ))}
+                  </select>
+                  <select id="branch-cond" className="w-full px-2 py-1 text-[10px] font-mono bg-bg-secondary border border-border rounded text-text-primary outline-none">
+                    <option value="PASS">质检结果为 PASS</option>
+                    <option value="FAILED">质检结果为 FAILED</option>
+                    <option value="score &gt;= 0.7">评分 score &gt;= 0.7</option>
+                    <option value="">无条件（始终触发）</option>
+                  </select>
+                  <button onClick={() => {
+                    const target = (document.getElementById("branch-target") as HTMLSelectElement)?.value;
+                    const cond = (document.getElementById("branch-cond") as HTMLInputElement)?.value || "";
+                    if (!target || !nodes.find(n => n.id === target)) return;
                     const newEdge: Edge = {
                       id: `e_branch_${selectedNode.id}_${target}_${Date.now()}`,
-                      source: selectedNode.id, target,
-                      type: "smoothstep",
+                      source: selectedNode.id, target, type: "smoothstep",
                       style: edgeStyle("branch"),
                       markerEnd: { type: MarkerType.ArrowClosed, color: "#10b981" },
                       label: cond || "branch",
-                      data: { edge_type: "branch", condition: cond, label: cond },
+                      data: { edge_type: "branch", condition: cond || null, label: cond },
                     };
-                    setEdges((eds) => [...eds, newEdge]);
+                    setEdges(eds => [...eds, newEdge]);
                   }}
-                  className="w-full text-left px-2 py-1 text-[10px] font-mono rounded border border-dashed border-border/60 text-text-secondary hover:border-accent-green/40 hover:text-accent-green transition-colors"
-                >
-                  + 添加分支 (branch)
-                </button>
-              </div>
-            </div>
+                    className="w-full py-1 text-[10px] font-mono rounded bg-accent-green/10 border border-accent-green/30 text-accent-green hover:bg-accent-green/20 transition-colors">
+                    确认添加分支
+                  </button>
+                </div>
+              </details>
+            </details>
           </div>
         )}
       </div>

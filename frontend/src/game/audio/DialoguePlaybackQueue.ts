@@ -54,11 +54,6 @@ export class DialoguePlaybackQueue {
     return this.enabled && !this.muted ? this.volume : 0;
   }
 
-  /** BUG-044 修复：获取当前有效音量（动态反映 enabled/muted 状态） */
-  getEffectiveVolume(): number {
-    return this.enabled && !this.muted ? this.volume : 0;
-  }
-
   /** 设置音量 (0-1)，持久化到 localStorage */
   setVolume(v: number): void {
     this.volume = Math.max(0, Math.min(1, v));
@@ -154,12 +149,9 @@ export class DialoguePlaybackQueue {
     const engine = this.getEngine(msg.agentId);
     // BUG-044 修复：传递动态音量查询函数，engine 逐页检查当前有效音量
     // （支持对话中途开启/关闭声音）
-    // BUG-044 修复：传递动态音量查询函数，engine 逐页检查当前有效音量
-    // （支持对话中途开启/关闭声音）
     engine.speak(
       msg.text,
       msg.emotion,
-      () => this.getEffectiveVolume(),
       () => this.getEffectiveVolume(),
       {
         onPageText: (text, isFirst) => {

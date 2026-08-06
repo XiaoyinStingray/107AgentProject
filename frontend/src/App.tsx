@@ -5,6 +5,7 @@ import Home from "./pages/Home";
 import EmptyState from "./components/shared/EmptyState";
 import Badge from "./components/shared/Badge";
 import LoadingSpinner from "./components/shared/LoadingSpinner";
+import WelcomeModal from "./components/layout/WelcomeModal";
 import { findItemById } from "./data/menuData";
 
 // --- 懒加载：8 个模块页面按需加载 ---
@@ -25,6 +26,7 @@ const DuelArena = lazy(() => import("./pages/DuelArena"));
 const PipelinePage = lazy(() => import("./pages/PipelinePage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const PipelineEditor = lazy(() => import("./pages/PipelineEditor"));
+const GuidePage = lazy(() => import("./pages/GuidePage"));
 
 /** Suspense 占位——加载中显示 */
 function PageFallback() {
@@ -81,6 +83,7 @@ export default function App() {
         v7_relativeSplatPath: true,
       }}
     >
+      <WelcomeModal />
       <Routes>
         <Route path="/" element={<Layout />}>
           {/* Dashboard */}
@@ -240,6 +243,16 @@ export default function App() {
             element={
               <Suspense fallback={<PageFallback />}>
                 <PipelinePage />
+              </Suspense>
+            }
+          />
+
+          {/* 使用教程 */}
+          <Route
+            path="guide"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <GuidePage />
               </Suspense>
             }
           />

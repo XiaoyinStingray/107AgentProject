@@ -1,12 +1,43 @@
 /**
  * SettingsPage — Step 103: 用户可调参数面板。
  *
- * 8 个滑块 + 开关，改完即生效。支持恢复默认值。
+ * 8 个滑块 + 开关，改完即生效。支持恢复默认值 + 数据库管理。
  */
 
 import { useState, useCallback, useEffect } from "react";
 import Card from "../components/shared/Card";
 import { useSettings, useUpdateSettings, useResetSettings, type UserSettingsData } from "../api/settings";
+
+/* ── 数据库操作按钮 ── */
+function DBButton({ label, desc, url, method, confirm: confirmMsg }: {
+  label: string; desc: string; url: string; method: string; confirm: string;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+
+  const handle = useCallback(async () => {
+    if (!window.confirm(confirmMsg)) return;
+    setLoading(true); setResult(null);
+    try {
+      const r = await fetch(url, { method });
+      const d = await r.json();
+      setResult(d.ok ? `✅ ${d.message || "操作成功"}` : `❌ ${d.error || "操作失败"}`);
+    } catch { setResult("❌ 后端未启动"); }
+    setLoading(false);
+  }, [url, method, confirmMsg]);
+
+  return (
+    <div className="flex flex-col gap-1">
+      <button type="button" onClick={handle} disabled={loading}
+        className="px-4 py-2 rounded-lg border border-red-500/20 bg-red-500/5 text-red-400 text-sm font-mono
+          hover:bg-red-500/10 transition-colors disabled:opacity-50">
+        {loading ? "执行中…" : label}
+      </button>
+      <p className="text-[10px] font-mono text-text-muted/50">{desc}</p>
+      {result && <p className="text-[10px] font-mono text-text-secondary">{result}</p>}
+    </div>
+  );
+}
 
 /* ── 滑块定义 ── */
 interface SliderDef {
@@ -151,29 +182,54 @@ export default function SettingsPage() {
         })}
       </div>
 
+      {/* 模型推荐 */}
+      <Card className="p-4 mt-6 bg-gradient-to-r from-accent-green/5 to-accent-purple/5 border-accent-green/20">
+        <div className="flex items-start gap-3">
+          <span className="text-xl shrink-0">💡</span>
+          <div>
+            <h3 className="text-sm font-mono text-text-primary font-semibold">推荐模型</h3>
+            <p className="text-xs font-mono text-text-secondary mt-1 leading-relaxed">
+              建议在 <code className="px-1 rounded bg-bg-primary text-accent-green text-[10px]">.env</code> 中使用
+              <b className="text-accent-green"> DeepSeek Chat (v3)</b> 或 <b className="text-accent-green">DeepSeek Flash</b>。
+              Chat 更深思熟虑，适合 M11 场景对话；Flash 更快更便宜，适合 M12 Worker 大批量任务。
+              联网搜索通过 Responses API（<code>api.deepseek.com/responses</code>，不带 /v1）自动工作。
+            </p>
+            <p className="text-[10px] font-mono text-text-muted/50 mt-1.5">
+              配置：<code className="text-text-muted/70">LLM_BASE_URL=https://api.deepseek.com/v1</code>
+              {" "}<code className="text-text-muted/70">LLM_MODEL=deepseek-chat</code>
+            </p>
+          </div>
+        </div>
+      </Card>
+
       {/* 操作按钮 */}
-      <div className="flex items-center gap-3 mt-6">
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={update.isPending || saved}
+      <div className="flex items-center gap-3 mt-6 flex-wrap">
+        <button type="button" onClick={handleSave} disabled={update.isPending || saved}
           className="px-6 py-2 rounded-lg border border-accent-green/40 bg-accent-green/10 text-accent-green text-sm font-mono
-            hover:bg-accent-green/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-        >
+            hover:bg-accent-green/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
           {update.isPending ? "保存中…" : saved ? "✓ 已保存" : "保存"}
         </button>
-        <button
-          type="button"
-          onClick={handleResetAll}
-          disabled={reset.isPending}
+        <button type="button" onClick={handleResetAll} disabled={reset.isPending}
           className="px-4 py-2 rounded-lg border border-border text-text-secondary text-sm font-mono
-            hover:border-text-secondary/40 transition-colors disabled:opacity-40"
-        >
+            hover:border-text-secondary/40 transition-colors disabled:opacity-40">
           {reset.isPending ? "恢复中…" : "全部恢复默认"}
         </button>
-        {update.isError && (
-          <span className="text-xs text-red-400 font-mono">保存失败: {String(update.error)}</span>
-        )}
+        {update.isError && <span className="text-xs text-red-400 font-mono">保存失败: {String(update.error)}</span>}
+      </div>
+
+      {/* 数据库管理 */}
+      <div className="mt-8 pt-6 border-t border-border">
+        <h2 className="text-sm font-mono text-text-primary font-semibold mb-3">🗄️ 数据库管理</h2>
+        <div className="flex items-center gap-3 flex-wrap">
+          <DBButton label="载入预置数据" desc="用预置数据库替换当前数据（15 张表，3000+ 记录）" url="/api/seed?keep_existing=false" method="POST" confirm="确定要用预置数据替换当前数据库吗？当前数据将丢失。" />
+          <DBButton label="清空数据库" desc="删除所有数据，创建空白数据库" url="/api/reset-db" method="POST" confirm="确定要清空所有数据吗？此操作不可撤销！" />
+          <button type="button"
+            onClick={() => { sessionStorage.setItem("forceWelcome", "1"); window.location.reload(); }}
+            className="px-4 py-2 rounded-lg border border-accent-purple/30 bg-accent-purple/5 text-accent-purple text-sm font-mono
+              hover:bg-accent-purple/10 transition-colors">
+            🔄 重新显示新手引导
+          </button>
+        </div>
       </div>
     </div>
   );

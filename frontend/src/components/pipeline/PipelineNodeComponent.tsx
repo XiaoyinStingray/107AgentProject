@@ -14,6 +14,7 @@ const ROLE_COLORS: Record<string, { border: string; bg: string; icon: string }> 
 };
 
 export interface PipelineNodeData {
+  id?: string;
   title: string;
   agent_id: string;
   task: string;
@@ -50,6 +51,9 @@ export default function PipelineNodeComponent({ data, selected }: Node & { data:
           </span>
         </div>
         <div className="flex items-center gap-2 mt-1">
+          <span className="text-[9px] font-mono text-text-muted/50">
+            {data.id || "?"}
+          </span>
           <span className="text-[10px] font-mono px-1 rounded"
             style={{ background: c.border + "30", color: c.border }}>
             {data.role}

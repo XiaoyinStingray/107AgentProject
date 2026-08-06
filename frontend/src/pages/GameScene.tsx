@@ -31,6 +31,7 @@ import {
   isWhisperMoveNearIntent,
   resolveMentionedWhisperTarget,
   resolveWhisperMoveTarget,
+  type LocalAgentCommand,
 } from "../game/whisper";
 
 /* —— 场景列表 —— */
@@ -569,6 +570,26 @@ export default function GameScenePage() {
     ],
   );
 
+  /** BRAIN OFF: user speaks directly to the selected Agent. */
+  const handlePanelTalk = useCallback(
+    (message: string) => {
+      if (!selectedAgentId) return;
+      const mapScene = gameRef.current?.scene.getScene("MapScene") as
+        | MapScene
+        | undefined;
+      void mapScene?.receiveUserMessage(selectedAgentId, message);
+    },
+    [selectedAgentId],
+  );
+
+  /** BRAIN OFF: route a validated structured command to Phaser. */
+  const handleLocalCommand = useCallback((command: LocalAgentCommand) => {
+    const mapScene = gameRef.current?.scene.getScene("MapScene") as
+      | MapScene
+      | undefined;
+    mapScene?.executeLocalCommand(command);
+  }, []);
+
   /** 暂停/继续：Brain 模式下保持前后端状态一致。 */
   const handleTogglePause = useCallback(async () => {
     if (sceneControlPending) return;
@@ -1063,9 +1084,14 @@ export default function GameScenePage() {
       {/* Agent 详情面板 */}
       <AgentPanel
         agent={selectedAgent}
+        availableAgents={agents}
+        brainEnabled={brainEnabled}
+        brainPending={startScene.isPending}
         onClose={() => setSelectedAgentId(null)}
         onEmotionChange={handlePanelEmotion}
         onWhisper={handlePanelWhisper}
+        onTalk={handlePanelTalk}
+        onLocalCommand={handleLocalCommand}
       />
 
       {/* 双击篡改面板 */}

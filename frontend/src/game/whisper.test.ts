@@ -3,6 +3,8 @@ import {
   buildWhisperContext,
   chooseWhisperApproachTile,
   isWhisperMoveNearIntent,
+  localCommandNeedsMessage,
+  localCommandNeedsTarget,
   normalizeWhisper,
   resolveMentionedWhisperTarget,
   resolveWhisperMoveTarget,
@@ -72,5 +74,16 @@ describe("whisper helpers", () => {
     expect(
       chooseWhisperApproachTile(agents[0], agents[1], () => false),
     ).toBeNull();
+  });
+
+  it("declares fields required by each structured local command", () => {
+    expect(localCommandNeedsTarget("talk")).toBe(true);
+    expect(localCommandNeedsTarget("move")).toBe(true);
+    expect(localCommandNeedsTarget("move_then_talk")).toBe(true);
+    expect(localCommandNeedsTarget("observe")).toBe(false);
+    expect(localCommandNeedsMessage("talk")).toBe(true);
+    expect(localCommandNeedsMessage("move_then_talk")).toBe(true);
+    expect(localCommandNeedsMessage("move")).toBe(false);
+    expect(localCommandNeedsMessage("cancel")).toBe(false);
   });
 });

@@ -101,11 +101,16 @@ describe("MapScene dialogue lifecycle", () => {
   it("clears stale dialogue state before rebuilding another map", () => {
     const scanner = { destroy: vi.fn() };
     const sessionTimer = { destroy: vi.fn() };
+    const first = { agentId: "a", setAction: vi.fn() };
+    const second = { agentId: "b", setAction: vi.fn() };
     const scene = Object.create(MapScene.prototype) as any;
     Object.assign(scene, {
       dialogueTimer: scanner,
       dialogueCooldowns: new Map([["a|b", Date.now()]]),
-      activeSessions: new Map([["a|b", { timer: sessionTimer }]]),
+      activeSessions: new Map([[
+        "a|b",
+        { a: first, b: second, timer: sessionTimer },
+      ]]),
       busyAgents: new Set(["a", "b"]),
       movementReservations: new Map([["a", "1,1"]]),
       pendingWhispers: new Map([["a", "测试耳语"]]),
@@ -120,6 +125,8 @@ describe("MapScene dialogue lifecycle", () => {
     expect(scene.activeSessions.size).toBe(0);
     expect(scene.busyAgents.size).toBe(0);
     expect(scene.movementReservations.size).toBe(0);
+    expect(first.setAction).toHaveBeenCalledWith("idle");
+    expect(second.setAction).toHaveBeenCalledWith("idle");
     expect(playbackMocks.clear).toHaveBeenCalledOnce();
   });
 
@@ -188,6 +195,8 @@ describe("MapScene dialogue lifecycle", () => {
         ["agent-b", target],
       ]),
       movers: new Map([["agent-a", mover]]),
+      activeSessions: new Map(),
+      busyAgents: new Set(),
       pendingWhispers: new Map(),
       showAgentBubble: vi.fn(),
       isWalkable: vi.fn(() => true),
@@ -195,17 +204,160 @@ describe("MapScene dialogue lifecycle", () => {
     });
 
     expect(scene.receiveWhisper("agent-a", "  去和陈墨说话  ")).toBe(true);
-    expect(scene.pendingWhispers.get("agent-a")).toEqual({
-      message: "去和陈墨说话",
-      targetAgentId: "agent-b",
-      targetName: "陈墨",
-    });
+    expect(scene.pendingWhispers.get("agent-a")).toEqual(
+      expect.objectContaining({
+        message: "去和陈墨说话",
+        targetAgentId: "agent-b",
+        targetName: "陈墨",
+        expiresAt: expect.any(Number),
+      }),
+    );
     expect(mover.pushCommand).toHaveBeenCalled();
     expect(scene.showAgentBubble).toHaveBeenCalledWith(
       "agent-a",
       "已收到，正前往 陈墨",
     );
     expect(scene.receiveWhisper("missing", "测试")).toBe(false);
+  });
+
+  it("interrupts an ambient session before queuing a direct whisper", () => {
+    const speaker = {
+      agentId: "agent-a",
+      tileX: 1,
+      tileY: 1,
+      getData: vi.fn(() => "苏敏"),
+      setAction: vi.fn(),
+    };
+    const listener = {
+      agentId: "agent-b",
+      tileX: 2,
+      tileY: 1,
+      getData: vi.fn(() => "林毅"),
+      setAction: vi.fn(),
+    };
+    const moverA = { pushCommand: vi.fn(), start: vi.fn() };
+    const moverB = { start: vi.fn() };
+    const scene = Object.create(MapScene.prototype) as any;
+    Object.assign(scene, {
+      paused: false,
+      agentSprites: new Map([
+        ["agent-a", speaker],
+        ["agent-b", listener],
+      ]),
+      movers: new Map([
+        ["agent-a", moverA],
+        ["agent-b", moverB],
+      ]),
+      activeSessions: new Map([[
+        "agent-a|agent-b",
+        { a: speaker, b: listener, timer: { destroy: vi.fn() } },
+      ]]),
+      busyAgents: new Set(["agent-a", "agent-b"]),
+      pendingWhispers: new Map(),
+      showAgentBubble: vi.fn(),
+      isWalkable: vi.fn(() => true),
+      isOccupiedByOther: vi.fn(() => false),
+    });
+
+    expect(scene.receiveWhisper("agent-a", "对林毅说：你好")).toBe(true);
+
+    expect(scene.activeSessions.size).toBe(0);
+    expect(scene.busyAgents.size).toBe(0);
+    expect(speaker.setAction).toHaveBeenCalledWith("idle");
+    expect(listener.setAction).toHaveBeenCalledWith("idle");
+    expect(moverA.start).toHaveBeenCalledOnce();
+    expect(moverB.start).toHaveBeenCalledOnce();
+    expect(scene.pendingWhispers.get("agent-a")).toEqual(
+      expect.objectContaining({ targetAgentId: "agent-b" }),
+    );
+    expect(playbackMocks.clear).toHaveBeenCalledOnce();
+  });
+
+  it("starts a pending whisper before ambient dialogue and bypasses cooldown", () => {
+    const now = Date.now();
+    const speaker = { agentId: "agent-a", tileX: 1, tileY: 1 };
+    const listener = { agentId: "agent-b", tileX: 2, tileY: 1 };
+    const scene = Object.create(MapScene.prototype) as any;
+    Object.assign(scene, {
+      _brainEnabled: false,
+      _allFrozen: false,
+      scene: { isActive: vi.fn(() => true) },
+      agentSprites: new Map([
+        ["agent-a", speaker],
+        ["agent-b", listener],
+      ]),
+      activeSessions: new Map(),
+      busyAgents: new Set(),
+      pendingWhispers: new Map([[
+        "agent-a",
+        {
+          message: "对林毅说：你好",
+          targetAgentId: "agent-b",
+          targetName: "林毅",
+          expiresAt: now + 10_000,
+        },
+      ]]),
+      dialogueCooldowns: new Map([["agent-a|agent-b", now]]),
+      showAgentBubble: vi.fn(),
+      startConversationSession: vi.fn(),
+      checkItemProximity: vi.fn(),
+    });
+
+    scene.scanAndDialogue();
+
+    expect(scene.pendingWhispers.size).toBe(0);
+    expect(scene.startConversationSession).toHaveBeenCalledWith(
+      speaker,
+      listener,
+      1,
+      ["【用户只对你说的耳语指令】对林毅说：你好"],
+      { speakerId: "agent-a", targetName: "林毅" },
+      undefined,
+    );
+    expect(scene.showAgentBubble).toHaveBeenCalledWith(
+      "agent-a",
+      "正在执行耳语：与 林毅 对话",
+    );
+  });
+
+  it("expires a pending whisper with visible feedback", () => {
+    const now = Date.now();
+    const speaker = { agentId: "agent-a", tileX: 1, tileY: 1 };
+    const listener = { agentId: "agent-b", tileX: 2, tileY: 1 };
+    const scene = Object.create(MapScene.prototype) as any;
+    Object.assign(scene, {
+      _brainEnabled: false,
+      _allFrozen: false,
+      scene: { isActive: vi.fn(() => true) },
+      agentSprites: new Map([
+        ["agent-a", speaker],
+        ["agent-b", listener],
+      ]),
+      activeSessions: new Map(),
+      busyAgents: new Set(),
+      pendingWhispers: new Map([[
+        "agent-a",
+        {
+          message: "对林毅说：你好",
+          targetAgentId: "agent-b",
+          targetName: "林毅",
+          expiresAt: now - 1,
+        },
+      ]]),
+      dialogueCooldowns: new Map([["agent-a|agent-b", now]]),
+      showAgentBubble: vi.fn(),
+      startConversationSession: vi.fn(),
+      checkItemProximity: vi.fn(),
+    });
+
+    scene.scanAndDialogue();
+
+    expect(scene.pendingWhispers.size).toBe(0);
+    expect(scene.startConversationSession).not.toHaveBeenCalled();
+    expect(scene.showAgentBubble).toHaveBeenCalledWith(
+      "agent-a",
+      "耳语执行超时，请重新发送",
+    );
   });
 
   it("executes a move-near whisper without creating a dialogue request", () => {
@@ -351,11 +503,70 @@ describe("MapScene dialogue lifecycle", () => {
     expect(scene.receiveSseDialogue({ ...event, fromId: "missing" })).toBe(false);
   });
 
-  it("clears stale subtitle playback before a priority Brain whisper", () => {
-    const scene = Object.create(MapScene.prototype) as MapScene;
+  it("releases stale local sessions before a priority Brain whisper", () => {
+    const first = { agentId: "agent-a", setAction: vi.fn() };
+    const second = { agentId: "agent-b", setAction: vi.fn() };
+    const moverA = { start: vi.fn() };
+    const moverB = { start: vi.fn() };
+    const scene = Object.create(MapScene.prototype) as any;
+    Object.assign(scene, {
+      paused: false,
+      activeSessions: new Map([[
+        "agent-a|agent-b",
+        { a: first, b: second, timer: { destroy: vi.fn() } },
+      ]]),
+      busyAgents: new Set(["agent-a", "agent-b"]),
+      pendingWhispers: new Map([["agent-a", { targetAgentId: "agent-b" }]]),
+      activeBubbles: new Set(),
+      activeUserMessageBubbles: new Set(),
+      userMessageGeneration: 0,
+      movers: new Map([
+        ["agent-a", moverA],
+        ["agent-b", moverB],
+      ]),
+    });
 
     scene.preparePriorityBrainDialogue();
 
+    expect(scene.activeSessions.size).toBe(0);
+    expect(scene.busyAgents.size).toBe(0);
+    expect(scene.pendingWhispers.size).toBe(0);
+    expect(first.setAction).toHaveBeenCalledWith("idle");
+    expect(second.setAction).toHaveBeenCalledWith("idle");
+    expect(moverA.start).toHaveBeenCalledOnce();
+    expect(moverB.start).toHaveBeenCalledOnce();
+    expect(playbackMocks.clear).toHaveBeenCalledOnce();
+  });
+
+  it("releases local sessions when Brain mode changes", () => {
+    const first = { agentId: "agent-a", setAction: vi.fn() };
+    const second = { agentId: "agent-b", setAction: vi.fn() };
+    const scene = Object.create(MapScene.prototype) as any;
+    Object.assign(scene, {
+      _brainEnabled: false,
+      paused: false,
+      activeSessions: new Map([[
+        "agent-a|agent-b",
+        { a: first, b: second, timer: { destroy: vi.fn() } },
+      ]]),
+      busyAgents: new Set(["agent-a", "agent-b"]),
+      pendingWhispers: new Map([["agent-a", { targetAgentId: "agent-b" }]]),
+      activeBubbles: new Set(),
+      activeUserMessageBubbles: new Set(),
+      userMessageGeneration: 0,
+      movers: new Map([
+        ["agent-a", { start: vi.fn() }],
+        ["agent-b", { start: vi.fn() }],
+      ]),
+    });
+
+    scene.onBrainToggle(true);
+
+    expect(scene._brainEnabled).toBe(true);
+    expect(scene.activeSessions.size).toBe(0);
+    expect(scene.busyAgents.size).toBe(0);
+    expect(scene.pendingWhispers.size).toBe(0);
+    expect(scene.userMessageGeneration).toBe(1);
     expect(playbackMocks.clear).toHaveBeenCalledOnce();
   });
 
