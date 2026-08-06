@@ -9,6 +9,10 @@ import {
   useNodesState, useEdgesState, addEdge, Connection, MarkerType,
   type Node, type Edge, Panel,
 } from "@xyflow/react";
+import {
+  Check, ChevronDown, Copy, FolderOpen, MoreHorizontal,
+  Pencil, RefreshCw, Trash2, X,
+} from "lucide-react";
 import "@xyflow/react/dist/style.css";
 import { useAgents } from "../api/agents";
 import PipelineNodeComponent from "../components/pipeline/PipelineNodeComponent";
@@ -49,6 +53,14 @@ interface PEdge {
   condition: string | null; max_iterations: number; label: string;
 }
 
+interface PipelineListItem {
+  id: string;
+  name: string;
+  description?: string;
+  node_count?: number;
+  status?: string;
+}
+
 /* ── 边样式 ── */
 function edgeStyle(type: string) {
   if (type === "loop") return { stroke: "#f59e0b", strokeDasharray: "6 3" };
@@ -56,29 +68,94 @@ function edgeStyle(type: string) {
   return { stroke: "#6b7280" };
 }
 
+function buildPipelineBody(nodes: Node[], edges: Edge[], name: string, description: string) {
+  const pnodes = nodes.map((n) => ({
+    id: n.id, title: n.data.title,
+    agent_id: (n.data as PipelineNodeData).agent_id || "worker-default",
+    task: n.data.task || "", role: n.data.role || "worker",
+    produces: n.data.produces || [], extra_tools: n.data.extra_tools || [],
+    depends_on: edges
+      .filter((e) => e.target === n.id && e.data?.edge_type !== "loop" && e.data?.edge_type !== "branch")
+      .map((e) => e.source),
+    depends_on_files: [], expects: [], enabled_tools: [],
+  }));
+  const pedges = edges.map((e) => ({
+    id: e.id, from_node: e.source, to_node: e.target,
+    edge_type: e.data?.edge_type || "flow",
+    condition: e.data?.condition || null, condition_field: null,
+    max_iterations: e.data?.max_iterations || 3, iteration_label: "",
+    priority: 0, label: e.data?.label || "",
+  }));
+  return { name, description, nodes: pnodes, edges: pedges };
+}
+
+function pipelineSnapshot(nodes: Node[], edges: Edge[], name: string, description: string) {
+  return JSON.stringify(buildPipelineBody(nodes, edges, name, description));
+}
+
+function nextCopyName(name: string, pipelines: PipelineListItem[]) {
+  const names = new Set(pipelines.map((pipeline) => pipeline.name));
+  const base = `${name} - 副本`;
+  if (!names.has(base)) return base;
+  let index = 2;
+  while (names.has(`${base} (${index})`)) index += 1;
+  return `${base} (${index})`;
+}
+
 export default function PipelineEditor() {
   const { data: agents = [] } = useAgents();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [pipeName, setPipeName] = useState("新建管线");
   const [pipeDesc, setPipeDesc] = useState("");
   const [pipeId, setPipeId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-  const [pipeList, setPipeList] = useState<Array<{id:string;name:string}>>([]);
+  const [pipeList, setPipeList] = useState<PipelineListItem[]>([]);
+  const [listLoading, setListLoading] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [menuPipelineId, setMenuPipelineId] = useState<string | null>(null);
+  const [renamePipelineId, setRenamePipelineId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [managementBusyId, setManagementBusyId] = useState<string | null>(null);
+  const [savedSnapshot, setSavedSnapshot] = useState(() => pipelineSnapshot([], [], "新建管线", ""));
   const nodeCounter = useRef(1);
+
+  const currentSnapshot = useMemo(
+    () => pipelineSnapshot(nodes, edges, pipeName, pipeDesc),
+    [nodes, edges, pipeName, pipeDesc],
+  );
+  const isDirty = currentSnapshot !== savedSnapshot;
 
   // 加载管线列表
   const refreshList = useCallback(async () => {
-    try { const r = await fetch("/api/pipelines/"); if (r.ok) setPipeList(await r.json()); } catch {}
+    setListLoading(true);
+    try {
+      const r = await fetch("/api/pipelines/", { cache: "no-store" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      if (!Array.isArray(data)) throw new Error("响应格式错误");
+      setPipeList(data);
+      return true;
+    } catch (e) {
+      setMsg(`❌ 管线列表加载失败: ${String(e)}`);
+      return false;
+    } finally {
+      setListLoading(false);
+    }
   }, []);
-  useEffect(() => { refreshList(); }, [refreshList]);
+  useEffect(() => { void refreshList(); }, [refreshList]);
 
   // 选中节点数据（类型安全访问）
   const selectedNode = useMemo(
     () => nodes.find((n) => n.id === selectedNodeId),
     [nodes, selectedNodeId],
+  );
+  const selectedEdge = useMemo(
+    () => edges.find((edge) => edge.id === selectedEdgeId),
+    [edges, selectedEdgeId],
   );
   const nd = (selectedNode?.data ?? {}) as Partial<PipelineNodeData>;
   const getVal = <K extends keyof PipelineNodeData>(key: K, fallback: PipelineNodeData[K]) =>
@@ -86,9 +163,12 @@ export default function PipelineEditor() {
 
   // 从现有 Pipeline 加载
   const loadPipeline = useCallback(async (id: string) => {
+    if (isDirty && !window.confirm("当前管线有未保存的修改。确定放弃这些修改并加载其他管线吗？")) {
+      return false;
+    }
     try {
       const r = await fetch(`/api/pipelines/${id}`);
-      if (!r.ok) return;
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const p = await r.json();
       setPipeId(p.id); setPipeName(p.name); setPipeDesc(p.description || "");
       const ns: Node[] = (p.nodes || []).map((n: PNode, i: number) => ({
@@ -125,8 +205,129 @@ export default function PipelineEditor() {
       setNodes(ns); setEdges([...es, ...extraEs]);
       nodeCounter.current = ns.length + 1;
       setSelectedNodeId(null);
-    } catch { setMsg("加载失败"); }
-  }, [setNodes, setEdges]);
+      setSelectedEdgeId(null);
+      setSavedSnapshot(pipelineSnapshot(ns, [...es, ...extraEs], p.name, p.description || ""));
+      setMsg(`✅ 已加载“${p.name}”`);
+      return true;
+    } catch (e) {
+      setMsg(`❌ 管线加载失败: ${String(e)}`);
+      return false;
+    }
+  }, [isDirty, setNodes, setEdges]);
+
+  const fetchPipelineDetail = useCallback(async (id: string) => {
+    const response = await fetch(`/api/pipelines/${id}`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  }, []);
+
+  const renamePipeline = useCallback(async (pipeline: PipelineListItem) => {
+    const name = renameValue.trim();
+    if (!name) {
+      setMsg("❌ 管线名称不能为空");
+      return;
+    }
+    if (name === pipeline.name) {
+      setRenamePipelineId(null);
+      return;
+    }
+    setManagementBusyId(pipeline.id);
+    try {
+      const detail = await fetchPipelineDetail(pipeline.id);
+      const response = await fetch(`/api/pipelines/${pipeline.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          description: detail.description || "",
+          nodes: detail.nodes || [],
+          edges: detail.edges || [],
+        }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      setPipeList((items) => items.map((item) => item.id === pipeline.id ? { ...item, name } : item));
+      if (pipeId === pipeline.id) {
+        setPipeName(name);
+        setSavedSnapshot((snapshot) => {
+          const saved = JSON.parse(snapshot);
+          return JSON.stringify({ ...saved, name });
+        });
+      }
+      setRenamePipelineId(null);
+      setMenuPipelineId(null);
+      const listReady = await refreshList();
+      setMsg(listReady ? `✅ 已重命名为“${name}”` : `✅ 已重命名为“${name}”；列表刷新失败`);
+    } catch (e) {
+      setMsg(`❌ 重命名失败: ${String(e)}`);
+    } finally {
+      setManagementBusyId(null);
+    }
+  }, [renameValue, pipeId, fetchPipelineDetail, refreshList]);
+
+  const duplicatePipeline = useCallback(async (pipeline: PipelineListItem) => {
+    setManagementBusyId(pipeline.id);
+    try {
+      const detail = await fetchPipelineDetail(pipeline.id);
+      const name = nextCopyName(pipeline.name, pipeList);
+      const response = await fetch("/api/pipelines/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          description: detail.description || "",
+          nodes: detail.nodes || [],
+          edges: detail.edges || [],
+        }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const created = await response.json();
+      setPipeList((items) => [...items, {
+        id: created.id,
+        name,
+        description: detail.description || "",
+        node_count: created.node_count,
+        status: "draft",
+      }]);
+      setMenuPipelineId(null);
+      const listReady = await refreshList();
+      setMsg(listReady ? `✅ 已创建“${name}”` : `✅ 已创建“${name}”；列表刷新失败`);
+    } catch (e) {
+      setMsg(`❌ 创建副本失败: ${String(e)}`);
+    } finally {
+      setManagementBusyId(null);
+    }
+  }, [pipeList, fetchPipelineDetail, refreshList]);
+
+  const deletePipeline = useCallback(async (pipeline: PipelineListItem) => {
+    const nodeCount = pipeline.node_count ?? 0;
+    const warning = `确定删除“${pipeline.name}”吗？\n该管线包含 ${nodeCount} 个节点，删除后无法恢复。`;
+    if (!window.confirm(warning)) return;
+    setManagementBusyId(pipeline.id);
+    try {
+      const response = await fetch(`/api/pipelines/${pipeline.id}`, { method: "DELETE" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      setPipeList((items) => items.filter((item) => item.id !== pipeline.id));
+      if (pipeId === pipeline.id) {
+        setPipeId(null);
+        setPipeName("新建管线");
+        setPipeDesc("");
+        setNodes([]);
+        setEdges([]);
+        setSelectedNodeId(null);
+        setSelectedEdgeId(null);
+        nodeCounter.current = 1;
+        setSavedSnapshot(pipelineSnapshot([], [], "新建管线", ""));
+      }
+      setMenuPipelineId(null);
+      setRenamePipelineId(null);
+      const listReady = await refreshList();
+      setMsg(listReady ? `✅ 已删除“${pipeline.name}”` : `✅ 已删除“${pipeline.name}”；列表刷新失败`);
+    } catch (e) {
+      setMsg(`❌ 删除失败: ${String(e)}`);
+    } finally {
+      setManagementBusyId(null);
+    }
+  }, [pipeId, refreshList, setNodes, setEdges]);
 
   // 添加节点
   const addNode = useCallback(() => {
@@ -142,6 +343,7 @@ export default function PipelineEditor() {
     };
     setNodes((nds) => [...nds, newNode]);
     setSelectedNodeId(id);
+    setSelectedEdgeId(null);
   }, [setNodes]);
 
   // 连线
@@ -165,27 +367,24 @@ export default function PipelineEditor() {
     ));
   }, [selectedNodeId, setNodes]);
 
+  const deleteNode = useCallback((nodeId: string) => {
+    setNodes((items) => items.filter((node) => node.id !== nodeId));
+    setEdges((items) => items.filter(
+      (edge) => edge.source !== nodeId && edge.target !== nodeId,
+    ));
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
+  }, [setNodes, setEdges]);
+
+  const deleteEdge = useCallback((edgeId: string) => {
+    setEdges((items) => items.filter((edge) => edge.id !== edgeId));
+    setSelectedEdgeId(null);
+  }, [setEdges]);
+
   // 保存
   const handleSave = useCallback(async () => {
     setSaving(true); setMsg(null);
-    const pnodes = nodes.map((n) => ({
-      id: n.id, title: n.data.title,
-      agent_id: (n.data as PipelineNodeData).agent_id || "worker-default",
-      task: n.data.task || "", role: n.data.role || "worker",
-      produces: n.data.produces || [], extra_tools: n.data.extra_tools || [],
-      depends_on: edges
-        .filter((e) => e.target === n.id && e.data?.edge_type !== "loop" && e.data?.edge_type !== "branch")
-        .map((e) => e.source),
-      depends_on_files: [], expects: [], enabled_tools: [],
-    }));
-    const pedges = edges.map((e) => ({
-      id: e.id, from_node: e.source, to_node: e.target,
-      edge_type: e.data?.edge_type || "flow",
-      condition: e.data?.condition || null, condition_field: null,
-      max_iterations: e.data?.max_iterations || 3, iteration_label: "",
-      priority: 0, label: e.data?.label || "",
-    }));
-    const body = { name: pipeName, description: pipeDesc, nodes: pnodes, edges: pedges };
+    const body = buildPipelineBody(nodes, edges, pipeName, pipeDesc);
     try {
       const url = pipeId ? `/api/pipelines/${pipeId}` : "/api/pipelines/";
       const method = pipeId ? "PUT" : "POST";
@@ -194,8 +393,18 @@ export default function PipelineEditor() {
       });
       if (r.ok) {
         const d = await r.json();
-        if (!pipeId) setPipeId(d.id);
-        setMsg(`✅ 已保存 (${d.node_count} 节点, ${d.edge_count || pedges.length} 边)`);
+        const savedId = pipeId || d.id;
+        setPipeId(savedId);
+        setPipeList((prev) => {
+          const saved = { id: savedId, name: pipeName };
+          return prev.some((p) => p.id === savedId)
+            ? prev.map((p) => p.id === savedId ? saved : p)
+            : [...prev, saved];
+        });
+        setSavedSnapshot(pipelineSnapshot(nodes, edges, pipeName, pipeDesc));
+        const listReady = await refreshList();
+        const savedMsg = `✅ 已保存 (${d.node_count} 节点, ${d.edge_count || body.edges.length} 边)`;
+        setMsg(listReady ? savedMsg : `${savedMsg}；但列表刷新失败，请点击刷新按钮重试`);
       } else {
         let detail = "";
         try { const err = await r.json(); detail = err.detail || ""; } catch {}
@@ -214,7 +423,7 @@ export default function PipelineEditor() {
         setMsg(`❌ 网络错误: ${msg}`);
     }
     setSaving(false);
-  }, [nodes, edges, pipeName, pipeDesc, pipeId]);
+  }, [nodes, edges, pipeName, pipeDesc, pipeId, refreshList]);
 
   // 自动布局 (dagre)
   const autoLayout = useCallback(() => {
@@ -260,7 +469,7 @@ export default function PipelineEditor() {
   return (
     <div className="h-full flex flex-col animate-fade-in">
       {/* 顶部工具栏 */}
-      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-bg-secondary/80 shrink-0 backdrop-blur-sm">
+      <div className="relative z-30 flex items-center gap-3 px-4 py-2.5 border-b border-border bg-bg-secondary/80 shrink-0 backdrop-blur-sm">
         <div className="flex items-center gap-2">
           <span className="text-sm font-mono text-text-primary font-semibold">🎨 管线编辑器</span>
           <a href="/pipeline" className="text-[10px] font-mono text-text-muted hover:text-text-secondary transition-colors ml-1">
@@ -277,15 +486,136 @@ export default function PipelineEditor() {
           placeholder="描述（可选）"
         />
         <div className="flex-1" />
-        {/* 加载已有管线 */}
-        <select
-          value=""
-          onChange={(e) => { if (e.target.value) loadPipeline(e.target.value); }}
-          className="px-2.5 py-1.5 text-xs font-mono bg-bg-primary border border-border rounded-lg text-text-secondary outline-none focus:border-accent-green/40 transition-all min-w-[120px]">
-          <option value="">📂 加载管线…</option>
-          {pipeList.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          {pipeList.length === 0 && <option disabled>暂无已保存的管线</option>}
-        </select>
+        {/* 管线库 */}
+        <div className="relative">
+          <button type="button" onClick={() => {
+            setLibraryOpen((open) => !open);
+            setMenuPipelineId(null);
+            setRenamePipelineId(null);
+          }}
+            className="h-8 min-w-[132px] px-2.5 inline-flex items-center gap-2 text-xs font-mono bg-bg-primary border border-border rounded-lg text-text-secondary hover:border-text-secondary/40 transition-colors"
+            aria-haspopup="menu" aria-expanded={libraryOpen}>
+            <FolderOpen size={14} />
+            <span className="flex-1 text-left">管线库</span>
+            {isDirty && <span className="w-1.5 h-1.5 rounded-full bg-accent-orange" title="有未保存修改" />}
+            <ChevronDown size={13} className={libraryOpen ? "rotate-180 transition-transform" : "transition-transform"} />
+          </button>
+
+          {libraryOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => {
+                setLibraryOpen(false);
+                setMenuPipelineId(null);
+                setRenamePipelineId(null);
+              }} />
+              <div className="absolute right-0 top-full z-50 mt-1 w-80 overflow-hidden rounded-lg border border-border bg-bg-card shadow-2xl"
+                role="menu" aria-label="管线库">
+                <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-mono font-semibold text-text-primary">管线库</p>
+                    <p className="text-[10px] font-mono text-text-muted">{pipeList.length} 条已保存管线</p>
+                  </div>
+                  <button type="button" onClick={() => { void refreshList(); }} disabled={listLoading}
+                    className="w-7 h-7 inline-flex items-center justify-center rounded text-text-muted hover:bg-bg-primary hover:text-text-primary transition-colors disabled:opacity-40"
+                    title="刷新管线列表" aria-label="刷新管线列表">
+                    <RefreshCw size={14} className={listLoading ? "animate-spin" : ""} />
+                  </button>
+                </div>
+
+                <div className="max-h-72 overflow-y-auto p-1.5">
+                  {listLoading && pipeList.length === 0 && (
+                    <p className="px-2 py-5 text-center text-xs font-mono text-text-muted">正在加载…</p>
+                  )}
+                  {!listLoading && pipeList.length === 0 && (
+                    <p className="px-2 py-5 text-center text-xs font-mono text-text-muted">暂无已保存的管线</p>
+                  )}
+                  {pipeList.map((pipeline) => {
+                    const isCurrent = pipeline.id === pipeId;
+                    const isBusy = managementBusyId === pipeline.id;
+                    const isRenaming = renamePipelineId === pipeline.id;
+                    return (
+                      <div key={pipeline.id} className="relative mb-1 last:mb-0 rounded border border-transparent hover:border-border/60"
+                        onContextMenu={(event) => {
+                          event.preventDefault();
+                          setMenuPipelineId(pipeline.id);
+                          setRenamePipelineId(null);
+                        }}>
+                        <div className={isCurrent ? "flex items-center rounded bg-accent-green/10" : "flex items-center rounded hover:bg-bg-primary/70"}>
+                          <button type="button" disabled={isBusy}
+                            onClick={async () => {
+                              const loaded = await loadPipeline(pipeline.id);
+                              if (loaded) {
+                                setLibraryOpen(false);
+                                setMenuPipelineId(null);
+                              }
+                            }}
+                            className="min-w-0 flex-1 px-2.5 py-2 text-left disabled:opacity-40">
+                            <div className="flex items-center gap-2">
+                              <FolderOpen size={13} className={isCurrent ? "text-accent-green" : "text-text-muted"} />
+                              <span className="min-w-0 flex-1 truncate text-xs font-mono text-text-primary">{pipeline.name}</span>
+                              {isCurrent && <Check size={13} className="shrink-0 text-accent-green" />}
+                            </div>
+                            <p className="mt-0.5 pl-5 truncate text-[9px] font-mono text-text-muted"
+                              title={pipeline.description || undefined}>
+                              {pipeline.node_count ?? 0} 节点{pipeline.description ? ` · ${pipeline.description}` : ""}
+                            </p>
+                          </button>
+                          <button type="button" disabled={isBusy}
+                            onClick={() => {
+                              setMenuPipelineId((id) => id === pipeline.id ? null : pipeline.id);
+                              setRenamePipelineId(null);
+                            }}
+                            className="mr-1 w-7 h-7 shrink-0 inline-flex items-center justify-center rounded text-text-muted hover:bg-bg-secondary hover:text-text-primary disabled:opacity-40"
+                            title={`管理“${pipeline.name}”`} aria-label={`管理“${pipeline.name}”`}>
+                            <MoreHorizontal size={15} />
+                          </button>
+                        </div>
+
+                        {menuPipelineId === pipeline.id && !isRenaming && (
+                          <div className="mx-1 mb-1 grid grid-cols-3 gap-1 rounded border border-border/60 bg-bg-secondary/70 p-1" role="menu">
+                            <button type="button" onClick={() => {
+                              setRenamePipelineId(pipeline.id);
+                              setRenameValue(pipeline.name);
+                            }} className="inline-flex items-center justify-center gap-1 rounded px-1.5 py-1.5 text-[10px] font-mono text-text-secondary hover:bg-bg-primary hover:text-text-primary">
+                              <Pencil size={12} />重命名
+                            </button>
+                            <button type="button" onClick={() => { void duplicatePipeline(pipeline); }} disabled={isBusy}
+                              className="inline-flex items-center justify-center gap-1 rounded px-1.5 py-1.5 text-[10px] font-mono text-text-secondary hover:bg-bg-primary hover:text-text-primary disabled:opacity-40">
+                              <Copy size={12} />创建副本
+                            </button>
+                            <button type="button" onClick={() => { void deletePipeline(pipeline); }} disabled={isBusy}
+                              className="inline-flex items-center justify-center gap-1 rounded px-1.5 py-1.5 text-[10px] font-mono text-red-400/80 hover:bg-red-400/10 hover:text-red-400 disabled:opacity-40">
+                              <Trash2 size={12} />删除
+                            </button>
+                          </div>
+                        )}
+
+                        {isRenaming && (
+                          <div className="mx-1 mb-1 flex items-center gap-1 rounded border border-border/60 bg-bg-secondary/70 p-1">
+                            <input autoFocus value={renameValue} disabled={isBusy}
+                              onChange={(event) => setRenameValue(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") void renamePipeline(pipeline);
+                                if (event.key === "Escape") setRenamePipelineId(null);
+                              }}
+                              className="min-w-0 flex-1 rounded border border-border bg-bg-primary px-2 py-1 text-[10px] font-mono text-text-primary outline-none focus:border-accent-green/40"
+                              aria-label={`重命名“${pipeline.name}”`} />
+                            <button type="button" onClick={() => { void renamePipeline(pipeline); }} disabled={isBusy}
+                              className="w-6 h-6 inline-flex items-center justify-center rounded text-accent-green hover:bg-accent-green/10 disabled:opacity-40"
+                              title="确认重命名" aria-label="确认重命名"><Check size={13} /></button>
+                            <button type="button" onClick={() => setRenamePipelineId(null)} disabled={isBusy}
+                              className="w-6 h-6 inline-flex items-center justify-center rounded text-text-muted hover:bg-bg-primary hover:text-text-primary disabled:opacity-40"
+                              title="取消重命名" aria-label="取消重命名"><X size={13} /></button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
         <button onClick={addNode}
           className="px-3 py-1.5 text-xs font-mono rounded-lg border border-accent-green/40 text-accent-green hover:bg-accent-green/10 transition-all">
           + 添加节点
@@ -310,11 +640,31 @@ export default function PipelineEditor() {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
-            onNodeClick={(_e, node) => setSelectedNodeId(node.id)}
-            onPaneClick={() => setSelectedNodeId(null)}
+            onNodeClick={(_e, node) => {
+              setSelectedNodeId(node.id);
+              setSelectedEdgeId(null);
+            }}
+            onEdgeClick={(_e, edge) => {
+              setSelectedEdgeId(edge.id);
+              setSelectedNodeId(null);
+            }}
+            onPaneClick={() => {
+              setSelectedNodeId(null);
+              setSelectedEdgeId(null);
+            }}
+            onNodesDelete={(deletedNodes) => {
+              if (deletedNodes.some((node) => node.id === selectedNodeId)) {
+                setSelectedNodeId(null);
+              }
+            }}
+            onEdgesDelete={(deletedEdges) => {
+              if (deletedEdges.some((edge) => edge.id === selectedEdgeId)) {
+                setSelectedEdgeId(null);
+              }
+            }}
             nodeTypes={nodeTypes}
             fitView
-            deleteKeyCode={["Backspace", "Delete"]}
+            deleteKeyCode="Delete"
             multiSelectionKeyCode="Shift"
             className="!bg-bg-primary"
           >
@@ -339,7 +689,7 @@ export default function PipelineEditor() {
             {/* 节点数统计 */}
             {nodes.length > 0 && (
               <Panel position="bottom-center" className="!bg-bg-secondary/90 !border !border-border/60 !rounded-full !px-3 !py-1 !text-[10px] !font-mono !text-text-muted !backdrop-blur-sm">
-                {nodes.length} 节点 · {edges.length} 连线 · 点击节点编辑 · 拖拽圆点连线 · Backspace 删除
+                {nodes.length} 节点 · {edges.length} 连线 · 点击节点编辑 · 拖拽圆点连线 · Delete 删除
               </Panel>
             )}
             <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#334155" />
@@ -358,9 +708,16 @@ export default function PipelineEditor() {
         {/* 右侧编辑面板 */}
         {selectedNode && (
           <div className="w-72 shrink-0 border-l border-border bg-bg-secondary/50 overflow-y-auto p-4 space-y-4">
-            <h3 className="text-sm font-mono text-text-primary font-semibold">
-              编辑节点: {selectedNode.data.title}
-            </h3>
+            <div className="flex items-start gap-2">
+              <h3 className="min-w-0 flex-1 text-sm font-mono text-text-primary font-semibold break-words">
+                编辑节点: {selectedNode.data.title}
+              </h3>
+              <button type="button" onClick={() => deleteNode(selectedNode.id)}
+                className="w-8 h-8 shrink-0 inline-flex items-center justify-center rounded border border-transparent text-text-muted hover:text-red-400 hover:border-red-400/30 hover:bg-red-400/10 transition-colors"
+                title="删除节点" aria-label="删除节点">
+                <Trash2 size={15} />
+              </button>
+            </div>
 
             {/* 标题 */}
             <label className="block">
@@ -558,6 +915,38 @@ export default function PipelineEditor() {
                 </div>
               </details>
             </details>
+          </div>
+        )}
+
+        {!selectedNode && selectedEdge && (
+          <div className="w-72 shrink-0 border-l border-border bg-bg-secondary/50 overflow-y-auto p-4 space-y-4">
+            <div className="flex items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm font-mono text-text-primary font-semibold">选中连线</h3>
+                <p className="mt-1 text-xs font-mono text-text-secondary break-words">
+                  {nodes.find((node) => node.id === selectedEdge.source)?.data.title || selectedEdge.source}
+                  <span className="mx-1 text-text-muted">→</span>
+                  {nodes.find((node) => node.id === selectedEdge.target)?.data.title || selectedEdge.target}
+                </p>
+              </div>
+              <button type="button" onClick={() => deleteEdge(selectedEdge.id)}
+                className="w-8 h-8 shrink-0 inline-flex items-center justify-center rounded border border-transparent text-text-muted hover:text-red-400 hover:border-red-400/30 hover:bg-red-400/10 transition-colors"
+                title="删除连线" aria-label="删除连线">
+                <Trash2 size={15} />
+              </button>
+            </div>
+            <dl className="space-y-2 text-xs font-mono">
+              <div>
+                <dt className="text-[10px] text-text-muted">类型</dt>
+                <dd className="mt-0.5 text-text-primary">{selectedEdge.data?.edge_type || "flow"}</dd>
+              </div>
+              {selectedEdge.data?.condition && (
+                <div>
+                  <dt className="text-[10px] text-text-muted">条件</dt>
+                  <dd className="mt-0.5 text-text-primary break-words">{selectedEdge.data.condition}</dd>
+                </div>
+              )}
+            </dl>
           </div>
         )}
       </div>
