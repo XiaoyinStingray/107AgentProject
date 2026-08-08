@@ -118,7 +118,13 @@ class TeamEngine:
             yield _make_sse("team.error", {"error": "任务分解失败"})
             return
         for s in steps:
-            s["assignee_name"] = self._find_agent_name(s.get("assignee"))
+            # 安全网：LLM 可能返回名字而非 UUID → 映射回 UUID
+            raw_assignee = s.get("assignee")
+            resolved = self._resolve_agent_id(raw_assignee)
+            if resolved != raw_assignee:
+                logger.info(f"[TeamEngine] assignee name→id: {raw_assignee!r} → {resolved!r}")
+            s["assignee"] = resolved
+            s["assignee_name"] = self._find_agent_name(resolved)
 
         # ── 先创建 PlanRow（确保 plan_id 立即可用）──
         self._plan_id = await self._create_plan_row(task, steps)
@@ -158,35 +164,39 @@ class TeamEngine:
             }, step_id=sid)
 
             # === 准备步骤工作区 ===
+            # Worker 文件空间: step_i/work/files/ —— Agent 的 read_file/list_files/write_file
+            # 都在这下面操作。所以 shared/ 和上游产出必须复制到 files/ 子目录内。
             step_dir = Path(self._workspace_root) / f"step_{i + 1}"
-            step_dir.mkdir(parents=True, exist_ok=True)
+            worker_files_dir = step_dir / "work" / "files"
+            worker_files_dir.mkdir(parents=True, exist_ok=True)
 
-            # 复制 shared 上下文到步骤工作区（使 Agent 可通过 read_file 访问）
+            # 复制 shared 上下文 → worker 可见的 files/shared/
             shared_src = Path(self._workspace_root) / "shared"
-            shared_dst = step_dir / "shared"
+            shared_dst = worker_files_dir / "shared"
             if shared_src.exists():
                 if shared_dst.exists():
                     shutil.rmtree(shared_dst)
                 shutil.copytree(shared_src, shared_dst)
 
-            # 复制上游步骤产出到步骤工作区（使 Agent 可读取前序产出）
+            # 复制上游步骤产出 → worker 可见的 files/
             for prev_r in step_results:
                 if prev_r.success:
-                    prev_dir = Path(self._workspace_root) / f"step_{self._find_step_index(steps, prev_r.step_id) + 1}"
-                    if prev_dir.exists():
+                    prev_files_dir = Path(self._workspace_root) / f"step_{self._find_step_index(steps, prev_r.step_id) + 1}" / "work" / "files"
+                    if prev_files_dir.exists():
                         for f_path in prev_r.files:
-                            src_file = prev_dir / f_path
+                            src_file = prev_files_dir / f_path
                             if src_file.exists():
-                                dst_file = step_dir / f_path
+                                dst_file = worker_files_dir / f_path
                                 dst_file.parent.mkdir(parents=True, exist_ok=True)
                                 try:
                                     shutil.copy2(src_file, dst_file)
                                 except Exception:
                                     pass
 
-            # 写入步骤上下文文件
+            # 写入步骤上下文文件（到 worker 可见目录）
             ctx = await self._build_step_context(step, completed)
-            write_step_context(str(step_dir), sid, ctx)
+            ctx_file = worker_files_dir / "CONTEXT.md"
+            ctx_file.write_text(ctx, encoding="utf-8")
 
             # 构建任务 prompt
             task_desc = step.get("description", title)
@@ -194,10 +204,14 @@ class TeamEngine:
                 f"# 团队任务\n\n{task}\n\n"
                 f"# 你的子任务: {title}\n\n{task_desc}\n\n"
                 f"# 上下文\n\n{ctx}\n\n"
+                f"# 可用文件\n"
+                f"- 上下文文件: shared/TASK.md, shared/TEAM.json\n"
+                f"- 你的上下文: CONTEXT.md\n"
+                f"- 上游产出文件（如有）已复制到当前工作区\n"
+                f"- 使用 list_files 查看所有可用文件，使用 read_file 读取内容\n\n"
                 f"# 要求\n"
                 f"1. 专注完成你的子任务，产出可直接使用的文件交付物\n"
-                f"2. 可使用 read_file 读取工作区内的 shared/ 上下文文件和其他文件\n"
-                f"3. 完成后将最终产出写入文件\n"
+                f"2. 完成后将最终产出写入文件（如 output.md）\n"
             )
 
             # === 获取 Agent ===
@@ -337,7 +351,13 @@ class TeamEngine:
 
     async def _get_agent_instance(self, agent_id: str | None):
         if not agent_id:
-            return None
+            # "全员"步骤 → 回退到第一个 Agent
+            if self._agents:
+                agent_id = self._agents[0]["id"]
+                logger.info(f"[TeamEngine] '全员' step → fallback to first agent {agent_id}")
+            else:
+                logger.warning("[TeamEngine] _get_agent_instance: agent_id is None/empty and no agents loaded")
+                return None
         if agent_id in self._agent_instances:
             return self._agent_instances[agent_id]
 
@@ -346,20 +366,43 @@ class TeamEngine:
         from engines.agent_factory.factory import LifeAgent
         from llm.client import create_model_client
 
-        result = await self.db.execute(select(AgentRow).where(AgentRow.id == agent_id))
-        row = result.scalar_one_or_none()
-        if not row:
+        logger.info(f"[TeamEngine] _get_agent_instance: loading agent {agent_id}")
+        try:
+            result = await self.db.execute(select(AgentRow).where(AgentRow.id == agent_id))
+            row = result.scalar_one_or_none()
+        except Exception as e:
+            logger.error(f"[TeamEngine] _get_agent_instance: DB query failed for {agent_id}: {e}")
             return None
 
-        data = row.to_dict()
-        persona = Persona(**data["persona"])
-        background = Background(**data["background"])
-        goals = [Goal(**g) for g in data["goals"]]
-        mc = self._model_client or create_model_client()
+        if not row:
+            logger.error(f"[TeamEngine] _get_agent_instance: AgentRow not found for id={agent_id}")
+            return None
 
-        agent = LifeAgent(id=row.id, persona=persona, background=background,
-                          goals=goals, model_client=mc, tools=[])
+        try:
+            data = row.to_dict()
+            logger.debug(f"[TeamEngine] agent data keys: {list(data.keys())}")
+            persona = Persona(**data["persona"])
+            background = Background(**data["background"])
+            goals = [Goal(**g) for g in data.get("goals", [])]
+        except Exception as e:
+            logger.error(f"[TeamEngine] _get_agent_instance: failed to build persona/bg/goals for {agent_id}: {e}")
+            return None
+
+        try:
+            mc = self._model_client or create_model_client()
+        except Exception as e:
+            logger.error(f"[TeamEngine] _get_agent_instance: no model_client available: {e}")
+            return None
+
+        try:
+            agent = LifeAgent(id=row.id, persona=persona, background=background,
+                              goals=goals, model_client=mc, tools=[])
+        except Exception as e:
+            logger.error(f"[TeamEngine] _get_agent_instance: LifeAgent creation failed for {agent_id}: {e}")
+            return None
+
         self._agent_instances[agent_id] = agent
+        logger.info(f"[TeamEngine] _get_agent_instance: agent {agent_id} ({persona.name}) created ok")
         return agent
 
     # =================================================================
@@ -420,16 +463,43 @@ class TeamEngine:
             parts.append(f"- {a['name']} — {role}")
 
         parts.append("\n## 执行结果\n")
-        for r in step_results:
+        for i, r in enumerate(step_results):
             icon = "✅" if r.success else "❌"
             parts.append(f"### {icon} {r.step_title}")
             parts.append(f"- 负责人: {r.assignee_name} | 耗时: {r.duration_secs:.1f}s | Worker步数: {r.steps_used}")
-            if r.output_summary:
-                parts.append(f"- 产出: {r.output_summary[:300]}")
-            if r.files:
-                parts.append(f"- 文件: {', '.join(r.files)}")
+
+            # 读取 Worker 产出文件（只读 work/files/ 下的用户文件，跳过 shared/ 系统文件）
+            step_dir = Path(self._workspace_root) / f"step_{i + 1}"
+            output_dir = step_dir / "work" / "files"
+            files_found: list[str] = []
+            if output_dir.exists():
+                for fpath in output_dir.rglob("*"):
+                    if not fpath.is_file():
+                        continue
+                    rel = str(fpath.relative_to(output_dir))
+                    # 跳过系统文件
+                    if rel.startswith("shared/") or rel == "CONTEXT.md":
+                        continue
+                    if fpath.suffix in (".md", ".txt", ".json", ".py", ".c", ".html", ".csv", ".ts", ".js", ".yaml", ".yml"):
+                        try:
+                            content = fpath.read_text(encoding="utf-8")
+                            files_found.append(rel)
+                            max_len = 5000
+                            truncated = content[:max_len] + ("\n...(截断)" if len(content) > max_len else "")
+                            parts.append(f"\n#### 📄 {rel}\n\n```\n{truncated}\n```")
+                        except Exception:
+                            pass
+
+            if not files_found:
+                if r.output_summary:
+                    parts.append(f"\n产出摘要: {r.output_summary[:500]}")
+                elif r.files:
+                    parts.append(f"\n产出文件: {', '.join(r.files)} (内容未找到)")
+                else:
+                    parts.append(f"\n无产出文件")
+
             if r.error:
-                parts.append(f"- 错误: {r.error}")
+                parts.append(f"\n> ⚠️ 错误: {r.error}")
             parts.append("")
 
         content = "\n".join(parts)
@@ -485,6 +555,26 @@ class TeamEngine:
     # =================================================================
     # 辅助
     # =================================================================
+
+    def _resolve_agent_id(self, name_or_id: str | None) -> str | None:
+        """将名字或 UUID 解析为标准 UUID。LLM 可能返回名字而非 UUID。"""
+        if not name_or_id:
+            return None
+        # 已经是 UUID → 直接返回
+        for a in self._agents:
+            if a.get("id") == name_or_id:
+                return name_or_id
+        # 尝试按名字匹配
+        for a in self._agents:
+            if a.get("name") == name_or_id:
+                return a["id"]
+        # 尝试部分匹配
+        for a in self._agents:
+            name = a.get("name", "")
+            if name and name_or_id in name:
+                return a["id"]
+        # 找不到 → 返回原值（后续会因为查不到报错，但至少 log 已记录）
+        return name_or_id
 
     def _find_agent_name(self, agent_id: str | None) -> str:
         if not agent_id:

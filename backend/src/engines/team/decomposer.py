@@ -23,10 +23,10 @@ async def decompose_task(
 
     返回: [{title, assignee, description, depends_on}]
     """
-    # 构建 Agent 角色摘要
+    # 构建 Agent 角色摘要（包含 ID 供 LLM 精确引用）
     agent_lines = ""
     for a in agents:
-        agent_lines += f"- {a['name']}（{a['role']}，{a['mbti']}）\n"
+        agent_lines += f"- ID={a['id']} | {a['name']}（{a['role']}，{a['mbti']}）\n"
 
     prompt = f"""你是一个项目经理。请将以下团队任务分解为 3-6 个可执行的子任务，并分配给合适的团队成员。
 
@@ -37,7 +37,7 @@ async def decompose_task(
 
 请返回一个 JSON 数组，每个元素包含：
 - title: 子任务名称（简洁，≤15字）
-- assignee: 负责人的 agent_id（从上面列表选，如果是全员协作则填 null）
+- assignee: 负责人的 ID（从上面列表的 ID=xxx 中选，如果是全员协作则填 null）
 - description: 子任务详细描述（一句话）
 
 格式：[{{"title": "...", "assignee": "...", "description": "..."}}]

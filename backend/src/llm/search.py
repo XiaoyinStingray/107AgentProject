@@ -105,7 +105,7 @@ async def _ddg_search(query: str, max_results: int) -> list[dict]:
 
         def _fetch():
             req = Request(url, headers={"User-Agent": "LifeLab/1.0"})
-            with urlopen(req, timeout=5) as resp:
+            with urlopen(req, timeout=8) as resp:
                 return _json.loads(resp.read().decode("utf-8"))
 
         data = await loop.run_in_executor(None, _fetch)
@@ -163,7 +163,7 @@ async def _deepseek_search(query: str, max_results: int) -> list[dict]:
                 "User-Agent": "LifeLab/1.0",
             })
             ctx = ssl.create_default_context()
-            with urlopen(req, timeout=15, context=ctx) as resp:
+            with urlopen(req, timeout=30, context=ctx) as resp:
                 return _json.loads(resp.read().decode("utf-8"))
 
         loop = asyncio.get_running_loop()

@@ -349,7 +349,9 @@ async def execute_team(
     if not steps:
         raise HTTPException(status_code=400, detail="任务分解失败——无法生成步骤")
     for s in steps:
-        s["assignee_name"] = engine._find_agent_name(s.get("assignee"))
+        resolved = engine._resolve_agent_id(s.get("assignee"))
+        s["assignee"] = resolved
+        s["assignee_name"] = engine._find_agent_name(resolved)
 
     plan_id = await engine._create_plan_row(task, steps)
     engine._plan_id = plan_id
@@ -358,23 +360,27 @@ async def execute_team(
     event_queue: asyncio.Queue = asyncio.Queue()
 
     async def _run():
-        try:
-            async for sse_str in engine.execute(model_client):
-                await event_queue.put(sse_str)
-        except Exception as e:
-            logger.error(f"[Team] execution error: {e}")
-            import json as _json
-            payload = _json.dumps({
-                "type": "team.error",
-                "data": {"error": str(e)},
-                "timestamp": "",
-            }, ensure_ascii=False)
-            await event_queue.put(f"data: {payload}\n\n")
-        finally:
-            await event_queue.put(None)
-            # 延迟清理——等所有 SSE 消费者读完
-            await asyncio.sleep(5)
-            _cleanup_team_run(team_id)
+        from db import async_session as _async_session
+        async with _async_session() as run_db:
+            engine.db = run_db
+            engine._agent_instances = {}
+            logger.info(f"[Team] _run: switched to independent db session for team {team_id}")
+            try:
+                async for sse_str in engine.execute(model_client):
+                    await event_queue.put(sse_str)
+            except Exception as e:
+                logger.error(f"[Team] execution error: {e}")
+                import json as _json
+                payload = _json.dumps({
+                    "type": "team.error",
+                    "data": {"error": str(e)},
+                    "timestamp": "",
+                }, ensure_ascii=False)
+                await event_queue.put(f"data: {payload}\n\n")
+            finally:
+                await event_queue.put(None)
+                await asyncio.sleep(5)
+                _cleanup_team_run(team_id)
 
     _active_team_runs[team_id] = {
         "engine": engine,

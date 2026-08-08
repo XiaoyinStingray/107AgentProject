@@ -68,7 +68,8 @@ async def evaluate_and_evolve(
 
     try:
         import asyncio
-        from autogen_core.models import UserMessage, CancellationToken
+        from autogen_core.models import UserMessage
+        from autogen_core import CancellationToken
 
         response = await asyncio.wait_for(
             model_client.create(

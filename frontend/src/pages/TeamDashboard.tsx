@@ -17,6 +17,8 @@ import EmptyState from "../components/shared/EmptyState";
 import StepTimeline from "../components/team/StepTimeline";
 import RoleEvolutionBadge from "../components/team/RoleEvolutionBadge";
 import TeamHistory from "../components/team/TeamHistory";
+import { ReportViewer } from "../components/team/ReportViewer";
+import MarketPanel from "./team/MarketPanel";
 import VersusPanel from "./team/VersusPanel";
 import LearningCurve from "./team/LearningCurve";
 
@@ -34,6 +36,7 @@ export default function TeamDashboard() {
   const store = useTeamStore();
   const { connected, isRunning, isDone, error: sseError } = useTeamSSE(activeTeamId);
   const [evaluation, setEvaluation] = useState<string | null>(null);
+  const [showMarket, setShowMarket] = useState(false);
   const [showVersus, setShowVersus] = useState(false);
   const [publishMsg, setPublishMsg] = useState<string | null>(null);
 
@@ -253,17 +256,6 @@ export default function TeamDashboard() {
                 <div className="flex items-center gap-2">
                   <span className="text-lg">📄</span>
                   <h3 className="text-sm font-mono text-accent-green">{store.report.title}</h3>
-                  <button type="button" onClick={() => {
-                    const text = `# ${store.report!.title}\n\n${store.report!.content}`;
-                    const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement("a");
-                    a.href = url; a.download = "team-report.md";
-                    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-                    setTimeout(() => URL.revokeObjectURL(url), 0);
-                  }} className="px-3 py-1 text-xs font-mono rounded border border-border text-text-secondary hover:border-accent-green hover:text-accent-green transition-colors">
-                    ⬇ 下载
-                  </button>
                   <button type="button" disabled={evaluateTeam.isPending}
                     onClick={async () => {
                       try { const r = await evaluateTeam.mutateAsync(activeTeamId); setEvaluation(r.evaluation); }
@@ -273,10 +265,19 @@ export default function TeamDashboard() {
                     {evaluateTeam.isPending ? "评估中…" : "📊 评估团队"}
                   </button>
                 </div>
-                <Card className="p-4 max-h-[50vh] overflow-y-auto">
-                  <div className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap font-mono">
-                    {store.report.content}
-                  </div>
+                <Card className="p-4 max-h-[55vh] overflow-y-auto">
+                  <ReportViewer
+                    content={store.report.content}
+                    onDownload={() => {
+                    const text = `# ${store.report!.title}\n\n${store.report!.content}`;
+                    const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url; a.download = "team-report.md";
+                    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                    setTimeout(() => URL.revokeObjectURL(url), 0);
+                  }}
+                />
                 </Card>
                 {evaluation && (
                   <Card className="p-4 border-accent-orange/40 bg-accent-orange/5">
@@ -314,9 +315,14 @@ export default function TeamDashboard() {
       </p>
 
       {showVersus && <div className="mb-6"><VersusPanel onClose={() => setShowVersus(false)} /></div>}
+      {showMarket && <div className="mb-6"><MarketPanel /></div>}
 
       <div className="flex gap-2 mb-6">
-        <button onClick={() => setShowVersus((v) => !v)}
+        <button onClick={() => { setShowMarket((v) => !v); setShowVersus(false); }}
+          className="px-3 py-1 text-xs font-mono rounded border border-border text-text-secondary hover:border-text-secondary/40">
+          {showMarket ? "← 返回列表" : "📦 Team 模板"}
+        </button>
+        <button onClick={() => { setShowVersus((v) => !v); setShowMarket(false); }}
           className="px-3 py-1 text-xs font-mono rounded border border-border text-text-secondary hover:border-text-secondary/40">
           {showVersus ? "← 返回列表" : "⚔️ Team 对抗"}
         </button>
