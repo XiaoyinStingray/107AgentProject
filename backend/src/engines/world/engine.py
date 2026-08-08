@@ -66,9 +66,6 @@ class WorldEngine(
         # === State 4: SceneBridge 注入点（scenes.py start_scene 赋值）===
         self.scene_bridge: "SceneBridge | None" = None
 
-        # === Team 任务注入点（team engine 赋值）===
-        self.team_task = None
-
         # === State 4 D2: 行为指纹采集器 ===
         from engines.agent_factory.fingerprint import FingerprintCollector
         self._fingerprint_collector = FingerprintCollector()
@@ -310,9 +307,6 @@ class WorldEngine(
             if event.type == "agent_action":
                 derived.extend(self._apply_action(event))
         goal_events = await self._update_goal_progress(tick_events)
-        # Team 任务：不需要关系变化和冲突检测
-        if hasattr(self, "team_task") and self.team_task:
-            return [*derived, *goal_events]
         relationship_events = self._update_relationships([*tick_events, *derived])
         conflict_events = self._detect_conflict()
         return [*derived, *goal_events, *relationship_events, *conflict_events]

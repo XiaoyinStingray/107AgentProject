@@ -108,10 +108,7 @@ class WorldMessageMixin:
         return matches[0] if len(matches) == 1 else None
 
     def _has_identity_conflict(self, source_id: str, content: str) -> bool:
-        """Reject obvious self/other identity contradictions before persistence。
-        Team 任务模式下放宽检查——Agent 在讨论中提及同事名字是正常的。"""
-        if hasattr(self, "team_task") and self.team_task:
-            return False  # Team 模式不检查身份冲突
+        """Reject obvious self/other identity contradictions before persistence。"""
         source_agent = self.agents.get(source_id)
         if source_agent is None:
             return False
@@ -152,24 +149,7 @@ class WorldMessageMixin:
         return content
 
     def _build_group_task(self) -> str:
-        """Build one shared task with explicit multiplayer identity rules。
-        Team 模式下注入跨 tick 对话历史，保持上下文连贯。"""
-        # Team 模式：注入历史对话
-        if hasattr(self, "team_task") and self.team_task:
-            base = "继续团队协作。参考以下最近的对话历史，接着上次的进度继续讨论。\n"
-            history = getattr(self, "_team_chat_history", None)
-            if history:
-                recent = "\n".join(
-                    "[{}]: {}".format(
-                        getattr(m, "source", "?"),
-                        str(getattr(m, "content", ""))[:200],
-                    )
-                    for m in history[-10:]
-                )
-                base += "\n--- 最近对话 ---\n{}\n---\n".format(recent)
-            base += "\n继续推进当前阶段的任务。完成你的部分后请调用 submit_deliverable 提交。"
-            return base
-
+        """Build one shared task with explicit multiplayer identity rules。"""
         initial_events = self.world.scenario.initial_events
         return (
             f"场景：{self.world.scenario.name} — {self.world.scenario.description}\n"

@@ -1,23 +1,19 @@
 /**
- * Step 51 — Agent Team 类型定义。
- * Team 的任务类型是开放的：产品设计、市场调研、代码工作等。
+ * M9 Agent Team 类型定义（State 8 更新）。
  */
 
-/** 单个 Agent 在 Team 中的角色分配 */
 export interface TeamRole {
   agent_id: string;
-  role: string;   // "产品经理" | "后端开发" | ...
-  reason: string; // LLM 推荐理由
+  role: string;
+  reason: string;
 }
 
-/** 角色推荐 API 返回项 */
 export interface SuggestedRole {
   agent_id: string;
   role: string;
   reason: string;
 }
 
-/** 创建 Team 的请求体 */
 export interface TeamCreate {
   name: string;
   description: string;
@@ -25,7 +21,6 @@ export interface TeamCreate {
   roles?: TeamRole[];
 }
 
-/** Team 摘要（列表用） */
 export interface TeamSummary {
   id: string;
   name: string;
@@ -36,7 +31,6 @@ export interface TeamSummary {
   created_at: string;
 }
 
-/** Team 详情（含 Agent 摘要） */
 export interface AgentBrief {
   id: string;
   name: string;
@@ -47,7 +41,6 @@ export interface TeamDetail extends TeamSummary {
   agents: AgentBrief[];
 }
 
-/** Plan 步骤 */
 export interface PlanStep {
   id: string;
   title: string;
@@ -58,7 +51,6 @@ export interface PlanStep {
   depends_on: string[];
 }
 
-/** Team 执行 Plan */
 export interface TeamPlan {
   id: string;
   team_id: string;
@@ -69,4 +61,88 @@ export interface TeamPlan {
   created_at: string;
   progress_pct?: number;
   report?: { title: string; content: string } | null;
+}
+
+// ── State 8: Team SSE 事件类型 ──
+
+export interface TeamPlanCreated {
+  plan_id: string;
+  task: string;
+  total_steps: number;
+  steps: Array<{
+    id: string;
+    title: string;
+    assignee_id: string | null;
+    assignee_name: string;
+    description: string;
+  }>;
+}
+
+export type StepStatus = "pending" | "running" | "done" | "error" | "skipped";
+
+export interface StepState {
+  id: string;
+  title: string;
+  assigneeId: string | null;
+  assigneeName: string;
+  status: StepStatus;
+  stepIndex: number;
+  totalSteps: number;
+  files: string[];
+  outputSummary: string;
+  stepsUsed: number;
+  durationSecs: number | null;
+  error: string | null;
+  events: TeamSSEEvent[];  // buffered step.* events
+}
+
+export interface TeamSSEEvent {
+  type: string;
+  step_id?: string;
+  data: Record<string, unknown>;
+  timestamp: string;
+}
+
+export interface RoleEvolution {
+  agent_id: string;
+  agent_name?: string;
+  name?: string;
+  old_role: string;
+  new_role: string;
+  reason: string;
+  step_title?: string;
+}
+
+export interface StepWorkerDone {
+  success: boolean;
+  files: string[];
+  output_summary: string;
+  steps_used: number;
+  duration_secs: number;
+}
+
+export interface TeamDoneData {
+  total_duration_secs: number;
+  total_steps_completed: number;
+  total_steps: number;
+  steps: Array<{
+    step_title: string;
+    success: boolean;
+    files: string[];
+    duration_secs: number;
+  }>;
+  report: { title: string; content: string };
+  workspace_root: string;
+}
+
+export interface TeamExecuteResponse {
+  team_id: string;
+  plan_id: string;
+  status: string;
+}
+
+export interface TeamFileResponse {
+  path: string;
+  content: string;
+  size: number;
 }

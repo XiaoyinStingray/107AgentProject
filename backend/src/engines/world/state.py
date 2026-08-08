@@ -54,10 +54,6 @@ class WorldStateMixin:
 
     def _build_world_context(self) -> str:
         """Build the current tick context injected into every Agent."""
-        # Team 任务模式（Step 53）：用团队上下文替代场景上下文
-        if hasattr(self, "team_task") and self.team_task:
-            return self._build_team_context()
-
         params = self.world.scenario.environment_params
         location = params.get("location", "未知")
         names = ", ".join(
@@ -80,56 +76,6 @@ class WorldStateMixin:
         if goal_hints:
             context += goal_hints
         return context
-
-    def _build_team_context(self) -> str:
-        """构建团队任务专用上下文——目标是产出结构化交付物，不是聊天。"""
-        task = getattr(self, "team_task", "团队任务")
-        agent_steps = getattr(self, "team_agent_steps", {})
-        agent_roles = getattr(self, "team_agent_roles", {})
-
-        lines = [
-            f"📋 团队任务：{task}",
-            "",
-            "⚡ 核心规则：你的目标不是聊天，是产出结构化交付物。",
-            "",
-            "工作流程：",
-            "1. 快速讨论（1-2轮即可）确认理解和分工",
-            "2. 各自完成分配的任务——调用 submit_deliverable(step_title, deliverable) 提交",
-            "   deliverable 必须是可直接使用的结构化内容：表格、列表、方案文档",
-            "   ❌ 错误：'我们讨论了选题，觉得可以做课表App'",
-            "   ✅ 正确：'| 选题名 | 技术栈 | 难度 | 创新点 |\\n| 智能课表 | React+Node | 中 | AI推荐 |'",
-            "3. 提交后系统自动推进到下一阶段",
-            "",
-            "禁止事项：",
-            "- 禁止闲聊、禁止寒暄、禁止讨论无关话题",
-            "- 禁止使用 observe、set_goal——你只有 send_message、think_aloud、submit_deliverable",
-            "- 如果连续3轮没有实质产出，协调器会介入",
-            "",
-            "─── 当前分工 ───",
-        ]
-
-        for agent in self.agents.values():
-            name = agent.persona.name or agent.id[:8]
-            role = agent_roles.get(agent.id, "成员")
-            my_steps = agent_steps.get(agent.id, [])
-            lines.append(f"👤 {name} — 角色：{role}")
-            if my_steps:
-                for s in my_steps:
-                    status_label = {"pending": "⏳待开始", "active": "🔄进行中", "done": "✅已完成"}.get(
-                        s.get("status", ""), s.get("status", ""))
-                    lines.append(f"   📌 {s['title']} [{status_label}]")
-            lines.append("")
-
-        lines.append(f"⏰ 阶段 {self.current_tick} | 当前工作：{self._current_step_name()}")
-        return "\n".join(lines)
-
-    def _current_step_name(self) -> str:
-        """获取当前活跃步骤的名称（用于 Team 上下文显示）。"""
-        if hasattr(self, "team_plan") and self.team_plan:
-            step = self.team_plan.current_step()
-            if step:
-                return f"{step.get('title', '')}（负责人：{step.get('assignee') or '全员'}）"
-        return "等待开始"
 
     def _build_goal_context(self) -> str:
         """Build goal status hints for each agent with recently achieved goals."""

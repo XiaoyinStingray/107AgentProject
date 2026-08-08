@@ -3,16 +3,21 @@ Team 路由 — CRUD + 角色推荐 API。
 Step 51: 为 Agent Team 模块提供数据层。
 """
 
+import asyncio
+import json
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from loguru import logger
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
+from pathlib import Path
 
 from db import get_db
 from models.team_orm import TeamRow
+from models.plan_orm import PlanRow
 from config import settings
 
 router = APIRouter(prefix="/api/teams", tags=["teams"])
@@ -277,7 +282,19 @@ async def suggest_roles(body: dict) -> list[dict]:
 
 
 # =============================================================================
-# 执行 + Plan（Step 52）
+# 内存 Team 执行注册表
+# =============================================================================
+
+_active_team_runs: dict[str, dict] = {}  # team_id → {engine, queue, plan_id, done, task}
+
+
+def _cleanup_team_run(team_id: str):
+    """清理 Team 执行注册表——释放内存。"""
+    _active_team_runs.pop(team_id, None)
+
+
+# =============================================================================
+# 执行 + Plan（State 8 重写）
 # =============================================================================
 
 
@@ -286,9 +303,9 @@ async def execute_team(
     team_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """启动 Team 执行——分解任务、创建 Plan、创建临时 World。"""
-    from engines.team.engine import TeamEngine
-    from models.plan_orm import PlanRow
+    """启动 Team 执行——分解任务、创建 Plan、后台执行 Worker 步骤。"""
+    from engines.team.decomposer import decompose_task
+    from engines.team.workspace import init_team_workspace
 
     result = await db.execute(select(TeamRow).where(TeamRow.id == team_id))
     team_row = result.scalar_one_or_none()
@@ -305,16 +322,14 @@ async def execute_team(
         )
         plan_row = plan_result.scalar_one_or_none()
         if plan_row:
-            return plan_row.to_dict()
-        raise HTTPException(status_code=400, detail="Team 正在执行中但 Plan 丢失")
+            return {"team_id": team_id, "plan_id": plan_row.id, "status": "executing"}
+        team_row.status = "idle"
 
     if team_row.status not in ("idle", "finished"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Team 状态为 {team_row.status}，无法启动"
-        )
+        raise HTTPException(status_code=400, detail=f"Team 状态为 {team_row.status}，无法启动")
 
     team = team_row.to_dict()
+    task = team.get("description", "") or team.get("name", "")
 
     try:
         from api.agents import get_agent_factory
@@ -322,55 +337,204 @@ async def execute_team(
     except Exception:
         model_client = None
 
+    from engines.team.engine import TeamEngine
+
+    # ── 预计算：加载 Agent + 分解任务 + 创建 Plan（在后台任务之前，确保 plan_id 立即可用）──
     engine = TeamEngine(team, db)
-    plan = await engine.execute(model_client)
+    agents = await engine._load_agents()
+    if not agents:
+        raise HTTPException(status_code=400, detail="Team 中没有有效的 Agent")
 
-    # Step 53: 自动启动关联的 World + 挂载 PlanManager
-    world_id = plan.get("world_id")
-    if world_id:
+    steps = await decompose_task(task, agents, model_client)
+    if not steps:
+        raise HTTPException(status_code=400, detail="任务分解失败——无法生成步骤")
+    for s in steps:
+        s["assignee_name"] = engine._find_agent_name(s.get("assignee"))
+
+    plan_id = await engine._create_plan_row(task, steps)
+    engine._plan_id = plan_id
+    engine._agents = agents
+
+    event_queue: asyncio.Queue = asyncio.Queue()
+
+    async def _run():
         try:
-            from api.worlds import _rebuild_agents_from_db, _build_world_engine
-            from api.sse import register_world as sse_register
-            from models.world_orm import WorldRow
-            from models.world import WorldResponse
-
-            world_result = await db.execute(
-                select(WorldRow).where(WorldRow.id == world_id)
-            )
-            world_row = world_result.scalar_one_or_none()
-            if world_row:
-                world = WorldResponse(**world_row.to_dict())
-                world_engine = await _build_world_engine(world)
-                world_engine.world.status = "running"
-                world_engine.current_tick = 0
-                # 替换为 Team 专用闭包 tools（含 submit_deliverable/finish_task，访问 PlanManager）
-                from engines.agent_factory.tools import make_team_tools
-                for agent_id, agent in world_engine.agents.items():
-                    agent._patch_tools(make_team_tools(world_engine, agent_id))
-                # Team 任务上下文——替换默认场景上下文
-                world_engine.team_task = team.get("description") or team.get("name")
-                world_engine.team_agent_steps = {
-                    s["assignee"]: [s]
-                    for s in plan.get("steps", [])
-                    if s.get("assignee")
-                }
-                world_engine.team_agent_roles = {
-                    r.get("agent_id"): r.get("role", "成员")
-                    for r in (team.get("roles") or [])
-                }
-                # 挂载 PlanManager → SSE tick 循环中自动推进进度
-                world_engine.team_plan = engine.plan
-                world_engine.team_engine = engine  # 保持引用，防止 GC
-                sse_register(world_id, world_engine)
-                world.status = "running"
-                world_row.status = "running"
-                await db.commit()
-                logger.info(f"Team world {world_id} auto-started for team {team_id}")
+            async for sse_str in engine.execute(model_client):
+                await event_queue.put(sse_str)
         except Exception as e:
-            logger.warning(f"Failed to auto-start team world: {e}")
+            logger.error(f"[Team] execution error: {e}")
+            import json as _json
+            payload = _json.dumps({
+                "type": "team.error",
+                "data": {"error": str(e)},
+                "timestamp": "",
+            }, ensure_ascii=False)
+            await event_queue.put(f"data: {payload}\n\n")
+        finally:
+            await event_queue.put(None)
+            # 延迟清理——等所有 SSE 消费者读完
+            await asyncio.sleep(5)
+            _cleanup_team_run(team_id)
 
-    logger.info(f"Team {team_id!r} execution started: plan={plan['id']}")
-    return plan
+    _active_team_runs[team_id] = {
+        "engine": engine,
+        "queue": event_queue,
+        "plan_id": plan_id,
+        "done": False,
+        "task": task,
+    }
+
+    asyncio.create_task(_run())
+
+    logger.info(f"Team {team_id!r} execution started, plan={plan_id}")
+    return {"team_id": team_id, "plan_id": plan_id, "status": "executing"}
+
+
+@router.get("/{team_id}/stream")
+async def stream_team(
+    team_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """SSE 端点——前端 EventSource 连接此 URL，实时接收 Team 执行事件。"""
+    result = await db.execute(select(TeamRow).where(TeamRow.id == team_id))
+    team_row = result.scalar_one_or_none()
+    if not team_row:
+        raise HTTPException(status_code=404, detail=f"Team {team_id!r} 不存在")
+
+    run_info = _active_team_runs.get(team_id)
+
+    # 服务重启后执行中的 Team 没有活跃 run——从 DB 恢复 Plan 信息返回给前端
+    if not run_info:
+        if team_row.status == "executing":
+            plan_result = await db.execute(
+                select(PlanRow)
+                .where(PlanRow.team_id == team_id)
+                .order_by(PlanRow.created_at.desc())
+                .limit(1)
+            )
+            plan_row = plan_result.scalar_one_or_none()
+            if plan_row:
+                plan = plan_row.to_dict()
+                # 发送一个合成的 plan_created 事件让前端恢复状态
+                event_queue: asyncio.Queue = asyncio.Queue()
+                import json as _json
+                payload = _json.dumps({
+                    "type": "plan_created",
+                    "data": {
+                        "plan_id": plan["id"],
+                        "task": plan.get("task", ""),
+                        "total_steps": len(plan.get("steps", [])),
+                        "steps": [
+                            {"id": s.get("id", ""), "title": s.get("title", ""),
+                             "assignee_id": s.get("assignee"), "assignee_name": s.get("assignee_name", "?"),
+                             "description": s.get("description", "")}
+                            for s in plan.get("steps", [])
+                        ],
+                    },
+                    "timestamp": "",
+                }, ensure_ascii=False)
+                await event_queue.put(f"data: {payload}\n\n")
+                if plan.get("report"):
+                    report_payload = _json.dumps({
+                        "type": "team_done",
+                        "data": {
+                            "total_duration_secs": 0,
+                            "total_steps_completed": sum(1 for s in plan.get("steps", []) if s.get("status") == "done"),
+                            "total_steps": len(plan.get("steps", [])),
+                            "steps": [
+                                {"step_title": s.get("title", ""), "success": s.get("status") == "done",
+                                 "files": (s.get("result") or {}).get("files", []), "duration_secs": 0}
+                                for s in plan.get("steps", [])
+                            ],
+                            "report": plan["report"],
+                            "workspace_root": "",
+                        },
+                        "timestamp": "",
+                    }, ensure_ascii=False)
+                    await event_queue.put(f"data: {report_payload}\n\n")
+
+                async def _restored_generator():
+                    while True:
+                        try:
+                            event = await asyncio.wait_for(event_queue.get(), timeout=5.0)
+                            if event is None:
+                                break
+                            yield event
+                        except asyncio.TimeoutError:
+                            break
+
+                return StreamingResponse(
+                    _restored_generator(),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+                )
+
+        raise HTTPException(status_code=404, detail=f"Team {team_id!r} 没有活跃的执行")
+
+    event_queue: asyncio.Queue = run_info["queue"]
+
+    async def _event_generator():
+        while True:
+            try:
+                event = await asyncio.wait_for(event_queue.get(), timeout=30.0)
+                if event is None:
+                    run_info["done"] = True
+                    break
+                yield event
+            except asyncio.TimeoutError:
+                yield f'data: {{"type":"heartbeat","data":{{}},"timestamp":""}}\n\n'
+
+    return StreamingResponse(
+        _event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/{team_id}/history")
+async def get_team_history(
+    team_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """获取 Team 的全部历史执行 Plan。"""
+    result = await db.execute(
+        select(PlanRow)
+        .where(PlanRow.team_id == team_id)
+        .order_by(PlanRow.created_at.desc())
+    )
+    rows = result.scalars().all()
+    return [row.to_dict() for row in rows]
+
+
+@router.get("/{team_id}/files/{file_path:path}")
+async def get_team_file(
+    team_id: str,
+    file_path: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """读取 Team 工作区文件内容。"""
+    result = await db.execute(select(TeamRow).where(TeamRow.id == team_id))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail=f"Team {team_id!r} 不存在")
+
+    workspaces_root = Path.home() / "workspaces" / "teams" / team_id
+    if not workspaces_root.exists():
+        raise HTTPException(status_code=404, detail="Team 工作区不存在")
+
+    run_dirs = sorted(workspaces_root.glob("run-*"), reverse=True)
+    if not run_dirs:
+        raise HTTPException(status_code=404, detail="没有找到 Team 执行记录")
+
+    # 路径穿越检查——resolved 必须在 run_dir 内
+    run_dir = run_dirs[0]
+    resolved = (run_dir / file_path).resolve()
+    if not str(resolved).startswith(str(run_dir.resolve())):
+        raise HTTPException(status_code=403, detail="不允许访问工作区外的文件")
+    if not resolved.exists() or not resolved.is_file():
+        raise HTTPException(status_code=404, detail=f"文件 {file_path!r} 不存在")
+
+    content = resolved.read_text(encoding="utf-8")
+    return {"path": file_path, "content": content, "size": len(content)}
 
 
 @router.get("/{team_id}/plan")
