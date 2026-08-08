@@ -3,7 +3,7 @@
  * 两阶段 UI：Setup（创建/列表）→ Execution（步骤时间线 + 终端 + 报告）。
  * 不再使用 WorldEngine/GroupChat——改为 Worker 原生执行。
  */
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useAgents } from "../api/agents";
 import { useTeams, useCreateTeam, useDeleteTeam, useSuggestRoles, useExecuteTeam, useTeamPlan, useEvaluateTeam } from "../api/teams";
 import { usePublishTeam } from "../api/market";
