@@ -4,9 +4,26 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useAgents } from "../api/agents";
+import { getRequestedPipelineId } from "./pipeline/runNavigation";
+import {
+  describeLoopFinish,
+  describeLoopProgress,
+  isPreviewablePipelineFile,
+  type LoopProgress,
+} from "./pipeline/runPresentation";
 
 interface PNode { id: string; title: string; agent_id: string; task: string; depends_on: string[]; }
 interface Pipeline { id?: string; name: string; description: string; nodes: PNode[]; }
+interface LoopTimelineItem extends LoopProgress { id: string; text: string; kind: "loop" | "done"; }
+interface FileVersion {
+  id: string;
+  path: string;
+  content: string;
+  size: number;
+  label: string;
+  iteration: number;
+  capturedAt: string;
+}
 
 export default function PipelinePage() {
   const { data: agents = [] } = useAgents();
@@ -22,6 +39,16 @@ export default function PipelinePage() {
   const [completedRuns, setCompletedRuns] = useState<Set<string>>(new Set());
   const [runFiles, setRunFiles] = useState<Array<{path:string;size:number;content?:string}>>([]);
   const [viewingFile, setViewingFile] = useState<{path:string;content:string}|null>(null);
+  const [loopTimeline, setLoopTimeline] = useState<LoopTimelineItem[]>([]);
+  const [nodeAttempts, setNodeAttempts] = useState<Record<string, number>>({});
+  const [currentStage, setCurrentStage] = useState("等待运行");
+  const [fileVersions, setFileVersions] = useState<FileVersion[]>([]);
+  const [viewingVersion, setViewingVersion] = useState<FileVersion | null>(null);
+  const versionCounterRef = useRef(0);
+  const captureQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const requestedPipelineIdRef = useRef<string | null>(
+    getRequestedPipelineId(window.location.search),
+  );
 
   const load = useCallback(async () => {
     try {
@@ -29,6 +56,15 @@ export default function PipelinePage() {
       if(r.ok) {
         const list = await r.json();
         setTemplates(list);
+        const requestedPipelineId = requestedPipelineIdRef.current;
+        if (requestedPipelineId) {
+          requestedPipelineIdRef.current = null;
+          if (list.some((pipeline: Pipeline) => pipeline.id === requestedPipelineId)) {
+            setSelected(requestedPipelineId);
+          } else {
+            setMsg("未找到从编辑器打开的管道，请确认它仍然存在");
+          }
+        }
         // 恢复已完成的管线
         const done = new Set<string>();
         for (const t of list) {
@@ -129,10 +165,62 @@ export default function PipelinePage() {
   };
 
   // 运行
+  const captureFileVersions = useCallback(async (
+    pipelineId: string,
+    iteration: number,
+    label: string,
+  ) => {
+    try {
+      const listResponse = await fetch(`/api/pipelines/${pipelineId}/files`, { cache: "no-store" });
+      if (!listResponse.ok) return;
+      const listData = await listResponse.json();
+      const previewable = (listData.files || []).filter((file: {path:string}) =>
+        isPreviewablePipelineFile(file.path),
+      );
+      const captured = await Promise.all(previewable.map(async (file: {path:string;size:number}) => {
+        const response = await fetch(
+          `/api/pipelines/${pipelineId}/files/${encodeURIComponent(file.path)}`,
+          { cache: "no-store" },
+        );
+        if (!response.ok) return null;
+        const detail = await response.json();
+        return {
+          id: `${iteration}-${file.path}-${versionCounterRef.current++}`,
+          path: file.path,
+          content: detail.content || "",
+          size: detail.size ?? file.size ?? 0,
+          label,
+          iteration,
+          capturedAt: new Date().toLocaleTimeString(),
+        } satisfies FileVersion;
+      }));
+      setFileVersions((previous) => [
+        ...previous,
+        ...captured.filter((version): version is FileVersion => version !== null),
+      ]);
+    } catch {
+      // 实时版本抓取失败不应中断管道执行；最终文件仍由现有区域展示。
+    }
+  }, []);
+
+  const queueVersionCapture = useCallback((pipelineId: string, iteration: number, label: string) => {
+    captureQueueRef.current = captureQueueRef.current.then(
+      () => captureFileVersions(pipelineId, iteration, label),
+    );
+  }, [captureFileVersions]);
+
   const exec = async () => {
     if (!selected) return;
     const ctrl = new AbortController(); abortRef.current = ctrl;
     setRun({running:true,events:[],nodes:{},finished:false});
+    setLoopTimeline([]);
+    setNodeAttempts({});
+    setCurrentStage("正在启动管道…");
+    setFileVersions([]);
+    setViewingVersion(null);
+    versionCounterRef.current = 0;
+    captureQueueRef.current = Promise.resolve();
+    let lastLoopProgress: LoopProgress | null = null;
     try {
       const r = await fetch(`/api/pipelines/${selected}/execute`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({workspace_type:"local"}),signal:ctrl.signal});
       if (!r.ok) { setMsg(`执行失败 (${r.status})`); setRun(p=>({...p,running:false})); return; }
@@ -145,6 +233,52 @@ export default function PipelinePage() {
           if (line.startsWith("data: ")) try {
             const ev = JSON.parse(line.slice(6));
             const isDone = ev.type==="pipeline.done";
+            if (ev.type === "pipeline.started") {
+              setCurrentStage("管道已启动，等待第一个节点");
+            }
+            if (ev.type === "pipeline.node_status" && ev.data?.status === "running") {
+              const nodeId = ev.data.node_id;
+              setNodeAttempts((previous) => ({
+                ...previous,
+                [nodeId]: (previous[nodeId] || 0) + 1,
+              }));
+              setCurrentStage(`正在执行：${selectedPipe?.nodes.find((node) => node.id === nodeId)?.title || nodeId}`);
+            }
+            if (ev.type === "pipeline.loop_triggered") {
+              lastLoopProgress = {
+                iteration: ev.data.iteration,
+                maxIterations: ev.data.max_iterations,
+              };
+              const text = describeLoopProgress(lastLoopProgress);
+              setLoopTimeline((previous) => [...previous, {
+                ...lastLoopProgress!,
+                id: `loop-${ev.data.edge_id}-${ev.data.iteration}`,
+                text,
+                kind: "loop",
+              }]);
+              setCurrentStage(text);
+              queueVersionCapture(
+                selected,
+                ev.data.iteration,
+                ev.data.iteration === 1 ? "初始版本（触发第 1 次回放）" : `第 ${ev.data.iteration - 1} 次修改后`,
+              );
+            }
+            if (isDone) {
+              const finishText = describeLoopFinish(lastLoopProgress);
+              setCurrentStage(finishText);
+              setLoopTimeline((previous) => [...previous, {
+                iteration: lastLoopProgress?.iteration || 0,
+                maxIterations: lastLoopProgress?.maxIterations || 0,
+                id: `done-${Date.now()}`,
+                text: finishText,
+                kind: "done",
+              }]);
+              queueVersionCapture(
+                selected,
+                (lastLoopProgress?.iteration || 0) + 1,
+                lastLoopProgress ? "最终版本" : "初始即最终版本",
+              );
+            }
             setRun(prev => ({...prev, events:[...prev.events,ev], nodes:ev.type==="pipeline.node_status"?{...prev.nodes,[ev.data.node_id]:ev.data.status}:prev.nodes, running:!isDone, finished:isDone}));
             if (isDone && selected) {
               setCompletedRuns(prev => new Set(prev).add(selected));
@@ -174,7 +308,9 @@ export default function PipelinePage() {
         </div>
         <div className="flex items-center gap-2">
           <button onClick={newBlank} className="px-3 py-1 text-xs font-mono rounded border border-border text-text-secondary hover:text-cyan-400">+ 新建</button>
-          {selected && !run.running && !completedRuns.has(selected) && <button onClick={exec} className="px-3 py-1 bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-mono rounded">▶ 运行</button>}
+          {selected && !run.running && <button onClick={exec} className="px-3 py-1 bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-mono rounded">
+            {completedRuns.has(selected) ? "↻ 重新运行" : "▶ 运行"}
+          </button>}
           {run.running ? (
         <button onClick={()=>abortRef.current?.abort()} className="px-3 py-1 bg-rose-800 hover:bg-rose-700 text-white text-xs font-mono rounded">⏹ 停止</button>
       ) : null}
@@ -334,6 +470,74 @@ export default function PipelinePage() {
               {/* 运行结果 */}
               {(run.running||run.events.length>0) && (
                 <div className="space-y-3">
+                  <div className="p-3 border border-cyan-800/40 rounded bg-cyan-950/10">
+                    <div className="flex items-center justify-between gap-3">
+                      <h4 className="text-xs font-mono text-cyan-400">⚙️ 生产过程</h4>
+                      <span className="text-[10px] font-mono text-text-muted">
+                        详细过程仅保留于本次实时会话
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs font-mono text-text-primary">{currentStage}</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {selectedPipe.nodes.map((node) => (
+                        <span key={node.id} className="px-2 py-1 rounded border border-border bg-bg-primary text-[10px] font-mono text-text-secondary">
+                          {node.title}：启动 {nodeAttempts[node.id] || 0} 次
+                        </span>
+                      ))}
+                    </div>
+                    {loopTimeline.length > 0 && (
+                      <ol className="mt-3 space-y-1.5 border-l border-border pl-3">
+                        {loopTimeline.map((item) => (
+                          <li key={item.id} className={`text-xs font-mono ${item.kind === "done" ? "text-emerald-400" : "text-amber-400"}`}>
+                            {item.kind === "loop" ? "🔄" : "🏁"} {item.text}
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </div>
+
+                  {fileVersions.length > 0 && (
+                    <div className="p-3 border border-border rounded bg-bg-primary">
+                      <div className="flex items-center justify-between gap-3 mb-2">
+                        <h4 className="text-xs font-mono text-text-secondary">🗂️ 本次文档演化</h4>
+                        <span className="text-[10px] font-mono text-text-muted">刷新后仅保留最终文件</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {fileVersions.map((version) => (
+                          <button key={version.id} type="button" onClick={() => setViewingVersion(version)}
+                            className={`px-2 py-1 rounded border text-[10px] font-mono transition-colors ${viewingVersion?.id === version.id ? "border-cyan-500 text-cyan-400 bg-cyan-950/30" : "border-border text-text-secondary hover:border-cyan-700/50"}`}>
+                            {version.path} · {version.label}
+                          </button>
+                        ))}
+                      </div>
+                      {viewingVersion && (() => {
+                        const sameFileVersions = fileVersions.filter((version) => version.path === viewingVersion.path);
+                        const index = sameFileVersions.findIndex((version) => version.id === viewingVersion.id);
+                        const previousVersion = index > 0 ? sameFileVersions[index - 1] : null;
+                        return (
+                          <div className="mt-3">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-xs font-mono text-cyan-400">{viewingVersion.path} · {viewingVersion.label}</span>
+                              <span className="text-[10px] font-mono text-text-muted">抓取于 {viewingVersion.capturedAt}</span>
+                            </div>
+                            <div className={`grid gap-2 ${previousVersion ? "grid-cols-2" : "grid-cols-1"}`}>
+                              {previousVersion && (
+                                <div>
+                                  <p className="mb-1 text-[10px] font-mono text-text-muted">上一版本：{previousVersion.label}</p>
+                                  <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded border border-border bg-bg-secondary p-2 text-xs font-mono text-text-muted">{previousVersion.content}</pre>
+                                </div>
+                              )}
+                              <div>
+                                <p className="mb-1 text-[10px] font-mono text-text-muted">当前版本：{viewingVersion.label}</p>
+                                <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded border border-border bg-bg-secondary p-2 text-xs font-mono text-text-secondary">{viewingVersion.content}</pre>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+
                   <div className="p-3 border border-border rounded bg-bg-primary">
                     <h4 className="text-xs font-mono text-text-secondary mb-2">节点状态</h4>
                     {Object.entries(run.nodes).map(([nid,status])=>(

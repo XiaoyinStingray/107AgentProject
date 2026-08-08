@@ -51,6 +51,12 @@ class PipelineRun:
             n.id: NodeStatus.PENDING for n in pipeline.nodes
         }
         self.node_workers: dict[str, object] = {}  # node_id → AgentWorker
+        self.node_outputs: dict[str, list[str]] = {
+            n.id: [] for n in pipeline.nodes
+        }
+        self.node_output_files: dict[str, set[str]] = {
+            n.id: set() for n in pipeline.nodes
+        }
         self.start_time: float = 0
         self._cancel_requested = False
         self._errors: list[dict] = []
@@ -177,6 +183,9 @@ class PipelineEngine:
                         return
 
                     run.node_statuses[node.id] = NodeStatus.RUNNING
+                    # 回边重放时只允许本轮结果参与条件判断，避免旧的 FAILED 污染新结果。
+                    run.node_outputs[node.id] = []
+                    run.node_output_files[node.id] = set()
                     yield _pipeline_event("pipeline.node_status", {
                         "node_id": node.id,
                         "status": "running",
@@ -195,6 +204,7 @@ class PipelineEngine:
                         async for sse_event in worker.execute(
                             node.task, extra_tools=node.extra_tools,
                         ):
+                            _record_node_output(run, node.id, sse_event)
                             # 转发节点事件（加上 node_id 前缀）
                             yield _pipeline_event("pipeline.node_event", {
                                 "node_id": node.id,
@@ -264,7 +274,7 @@ class PipelineEngine:
                         logger.warning(f"[Pipeline] Loop {loop_id}: max_iter={loop_edge.max_iterations} reached, skipping")
                         continue
 
-                    if _eval_condition(loop_edge, run):
+                    if await _eval_condition(loop_edge, run, workspace):
                         iteration_counts[loop_id] = current_iter + 1
                         logger.info(f"[Pipeline] Loop {loop_id}: condition met, iteration {iteration_counts[loop_id]}/{loop_edge.max_iterations}")
                         nodes_to_replay.extend(
@@ -280,7 +290,7 @@ class PipelineEngine:
                 for branch_edge in get_branch_edges(pipeline.edges, node.id):
                     if branch_edge.id in branch_taken:
                         continue
-                    if _eval_condition(branch_edge, run):
+                    if await _eval_condition(branch_edge, run, workspace):
                         branch_taken.add(branch_edge.id)
                         logger.info(f"[Pipeline] Branch {branch_edge.id}: condition met → {branch_edge.to_node}")
                         # 标记被 branch 绕过的节点为 SKIPPED
@@ -363,7 +373,7 @@ def _pipeline_event(event_type: str, data: dict) -> str:
 # ── Step 104: Loop/Branch 辅助函数 ──
 
 
-def _eval_condition(edge: PipelineEdge, run, workspace=None) -> bool:
+async def _eval_condition(edge: PipelineEdge, run, workspace=None) -> bool:
     """评估边的触发条件。
 
     从已完成节点的输出 + workspace 文件中检查条件:
@@ -376,12 +386,17 @@ def _eval_condition(edge: PipelineEdge, run, workspace=None) -> bool:
         return True
 
     cond = edge.condition.strip()
+    output = await _get_node_output(
+        run,
+        edge.from_node,
+        workspace,
+        condition_field=edge.condition_field,
+    )
 
     # 正则模式: /pattern/
     if cond.startswith("/") and cond.endswith("/"):
         import re
         pattern = cond[1:-1]
-        output = _get_node_output(run, edge.from_node, workspace)
         return bool(re.search(pattern, output))
 
     # 数值模式: field op value
@@ -391,7 +406,7 @@ def _eval_condition(edge: PipelineEdge, run, workspace=None) -> bool:
         field = num_match.group(1)
         op = num_match.group(2)
         target = float(num_match.group(3))
-        actual = _extract_field_value(run, edge.from_node, field, workspace)
+        actual = _extract_field_value(output, field)
         if actual is None:
             return False
         if op == '<': return actual < target
@@ -402,39 +417,69 @@ def _eval_condition(edge: PipelineEdge, run, workspace=None) -> bool:
         if op == '!=': return actual != target
 
     # 简单模式: 检查输出 + workspace 文件是否包含关键词
-    output = _get_node_output(run, edge.from_node, workspace)
     return cond.lower() in output.lower()
 
 
-def _get_node_output(run, node_id: str, workspace=None) -> str:
-    """收集节点的文本输出（从 events/errors + workspace 文件拼合）。"""
+def _record_node_output(run, node_id: str, sse_event: str) -> None:
+    """记录本轮 Worker 事件，并提取事件中声明的产出文件。"""
+    run.node_outputs.setdefault(node_id, []).append(sse_event)
+    try:
+        event = json.loads(sse_event)
+        data = event.get("data") or {}
+        files = data.get("files") or []
+        for item in files:
+            path = item.get("path") if isinstance(item, dict) else item
+            if isinstance(path, str) and path.strip():
+                run.node_output_files.setdefault(node_id, set()).add(path.strip())
+    except (TypeError, ValueError, json.JSONDecodeError):
+        # 非 JSON 事件仍作为文本参与判断，但不会用于发现文件。
+        pass
+
+
+async def _get_node_output(
+    run,
+    node_id: str,
+    workspace=None,
+    condition_field: str | None = None,
+) -> str:
+    """收集本轮真实事件和产出文件；不读取任务描述，避免条件误触发。"""
     parts = []
-    for err in run._errors:
-        if err.get("node_id") == node_id:
-            parts.append(err.get("error", ""))
-    summaries = _collect_node_summaries(run)
-    s = summaries.get(node_id, {})
-    parts.append(s.get("task", ""))
-    # Fix: 读取节点产出的 workspace 文件内容（用于条件评估）
+    # 显式指定结果文件时只信该文件；否则才回退到错误与 Worker 事件。
+    if not condition_field:
+        for err in run._errors:
+            if err.get("node_id") == node_id:
+                parts.append(err.get("error", ""))
+        parts.extend(run.node_outputs.get(node_id, []))
+
+    # condition_field 是显式结果文件；未设置时读取节点声明和事件报告的产物。
     if workspace:
         try:
             node = next((n for n in run.pipeline.nodes if n.id == node_id), None)
-            if node and node.produces:
-                for filename in node.produces[:3]:  # 最多读 3 个文件
-                    try:
-                        content = workspace.read_file_sync(filename) if hasattr(workspace, 'read_file_sync') else None
-                        if content:
-                            parts.append(str(content)[:2000])
-                    except Exception:
-                        pass
+            filenames = [condition_field] if condition_field else [
+                *(node.produces if node else []),
+                *sorted(run.node_output_files.get(node_id, set())),
+            ]
+            seen: set[str] = set()
+            for filename in filenames:
+                if not filename or filename in seen:
+                    continue
+                seen.add(filename)
+                try:
+                    content = await workspace.read_file(filename)
+                    if content:
+                        parts.append(str(content)[:8000])
+                except Exception as exc:
+                    logger.warning(
+                        f"[Pipeline] condition output unavailable: "
+                        f"node={node_id}, file={filename}, error={exc}"
+                    )
         except Exception:
             pass
     return " ".join(parts)
 
 
-def _extract_field_value(run, node_id: str, field: str, workspace=None) -> float | None:
-    """从节点输出 + workspace 文件中提取数值字段（如 score、count）。"""
-    output = _get_node_output(run, node_id, workspace)
+def _extract_field_value(output: str, field: str) -> float | None:
+    """从已收集的节点输出中提取数值字段（如 score、count）。"""
     import re
     for pat in [rf'{field}["\s:=]+([\d.]+)', rf'{field}\s*=\s*([\d.]+)']:
         m = re.search(pat, output, re.IGNORECASE)

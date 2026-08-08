@@ -11,7 +11,7 @@ import {
 } from "@xyflow/react";
 import {
   Check, ChevronDown, Copy, FolderOpen, MoreHorizontal,
-  Pencil, RefreshCw, Trash2, X,
+  Pencil, Play, RefreshCw, Trash2, X,
 } from "lucide-react";
 import "@xyflow/react/dist/style.css";
 import { useAgents } from "../api/agents";
@@ -25,6 +25,7 @@ import {
   parseLoopMaxIterations,
 } from "./pipeline/controlFlowValidation";
 import { getPipelineFitViewOptions } from "./pipeline/fitView";
+import { buildPipelineRunUrl } from "./pipeline/runNavigation";
 
 /* ── 工具列表 ── */
 const ALL_SPECIAL_TOOLS = [
@@ -405,7 +406,7 @@ export default function PipelineEditor() {
   }, [setEdges]);
 
   // 保存
-  const handleSave = useCallback(async () => {
+  const handleSave = useCallback(async (): Promise<string | null> => {
     setSaving(true); setMsg(null);
     const body = buildPipelineBody(nodes, edges, pipeName, pipeDesc);
     try {
@@ -430,6 +431,7 @@ export default function PipelineEditor() {
         const listReady = await refreshList();
         const savedMsg = `✅ 已保存 (${d.node_count} 节点, ${d.edge_count || body.edges.length} 边)`;
         setMsg(listReady ? savedMsg : `${savedMsg}；但列表刷新失败，请点击刷新按钮重试`);
+        return savedId;
       } else {
         let detail = "";
         try { const err = await r.json(); detail = err.detail || ""; } catch {}
@@ -437,6 +439,7 @@ export default function PipelineEditor() {
         else if (r.status === 404) setMsg(`❌ 管线不存在（请刷新页面）`);
         else if (r.status >= 500) setMsg(`❌ 服务器错误 (${r.status}): ${detail || "请稍后重试"}`);
         else setMsg(`❌ 保存失败 (${r.status}): ${detail || "未知错误"}`);
+        return null;
       }
     } catch (e) {
       const msg = String(e);
@@ -446,9 +449,18 @@ export default function PipelineEditor() {
         setMsg("❌ 请求超时，请检查后端服务状态");
       else
         setMsg(`❌ 网络错误: ${msg}`);
+      return null;
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   }, [nodes, edges, pipeName, pipeDesc, pipeId, refreshList]);
+
+  // 第一阶段运行入口：保证当前内容已保存，再交给现有运行页执行与监控。
+  const handleRun = useCallback(async () => {
+    const savedId = (!pipeId || isDirty) ? await handleSave() : pipeId;
+    if (!savedId) return;
+    window.location.assign(buildPipelineRunUrl(savedId));
+  }, [pipeId, isDirty, handleSave]);
 
   // 自动布局 (dagre)
   const autoLayout = useCallback(() => {
@@ -652,6 +664,12 @@ export default function PipelineEditor() {
         <button onClick={handleSave} disabled={saving}
           className="px-4 py-1.5 text-xs font-mono rounded-lg border border-accent-orange/40 bg-accent-orange/10 text-accent-orange hover:bg-accent-orange/20 transition-all disabled:opacity-40">
           {saving ? "保存中…" : "💾 保存"}
+        </button>
+        <button type="button" onClick={() => { void handleRun(); }} disabled={saving || nodes.length === 0}
+          className="px-4 py-1.5 inline-flex items-center gap-1.5 text-xs font-mono rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 transition-all disabled:cursor-not-allowed disabled:opacity-40"
+          title={isDirty || !pipeId ? "保存当前管线并前往运行页" : "前往运行页"}>
+          <Play size={13} />
+          {saving ? "保存中…" : isDirty || !pipeId ? "保存并运行" : "运行管线"}
         </button>
         {msg && <span className="text-[10px] font-mono text-text-secondary animate-fade-in">{msg}</span>}
       </div>
