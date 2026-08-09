@@ -159,6 +159,19 @@ class TestCreateWorld:
         assert resp.json()["scenario"]["name"] == "社团招新"
         assert resp.json()["scenario"]["environment_params"] == {"location": "广场"}
 
+    def test_solo_world_type_is_persisted(self, client):
+        resp = client.post("/api/worlds", json={
+            "name": "单人剧场",
+            "world_type": "solo",
+            "scenario": {"name": "期末周"},
+            "agent_ids": [],
+        })
+
+        assert resp.status_code == 201
+        world_id = resp.json()["id"]
+        assert resp.json()["world_type"] == "solo"
+        assert client.get(f"/api/worlds/{world_id}").json()["world_type"] == "solo"
+
 
 # =============================================================================
 # GET /api/worlds
@@ -235,6 +248,46 @@ class TestStartWorld:
         ).json()
         assert finished[0]["status"] == "finished"
 
+    def test_running_start_is_idempotent_and_paused_start_resumes(self, client):
+        import api.sse as sse_mod
+
+        agent_id = _create_agent(client)
+        world = client.post("/api/worlds", json={
+            "name": "单人生命周期",
+            "world_type": "solo",
+            "scenario": {"name": "期末周"},
+            "agent_ids": [agent_id],
+        }).json()
+        world_id = world["id"]
+
+        started = client.post(f"/api/worlds/{world_id}/start")
+        repeated = client.post(f"/api/worlds/{world_id}/start")
+
+        runtime_engine = sse_mod._active_worlds[world_id]
+        runtime_engine.current_tick = 4
+        runtime_engine.world.current_tick = 4
+        paused = client.post(f"/api/worlds/{world_id}/pause")
+
+        persisted = client.get(f"/api/worlds/{world_id}").json()
+        assert persisted["status"] == "paused"
+        assert persisted["current_tick"] == 4
+
+        # Simulate a process restart: resume must rebuild from SQLite at T4.
+        sse_mod._active_worlds.pop(world_id)
+        resumed = client.post(f"/api/worlds/{world_id}/start")
+
+        assert started.json()["status"] == "started"
+        assert repeated.json()["status"] == "running"
+        assert paused.json()["status"] == "paused"
+        assert resumed.json()["status"] == "resumed"
+        assert client.get(f"/api/worlds/{world_id}").json()["status"] == "running"
+        assert sse_mod._active_worlds[world_id].current_tick == 4
+        simulations = client.get(
+            f"/api/simulations?world_id={world_id}"
+        ).json()
+        assert len(simulations) == 1
+        assert simulations[0]["status"] == "running"
+
 
 # =============================================================================
 # POST /api/worlds/{id}/pause
@@ -249,6 +302,39 @@ class TestPauseWorld:
         resp = client.post(f"/api/worlds/{wid}/pause")
         assert resp.status_code == 200
         assert resp.json()["status"] == "paused"
+
+
+class TestFinishWorld:
+    def test_finish_marks_world_and_simulation_finished(self, client):
+        import api.sse as sse_mod
+
+        agent_id = _create_agent(client)
+        world = client.post("/api/worlds", json={
+            "name": "待结束单人剧场",
+            "world_type": "solo",
+            "scenario": {"name": "期末周"},
+            "agent_ids": [agent_id],
+        }).json()
+        world_id = world["id"]
+        assert client.post(f"/api/worlds/{world_id}/start").status_code == 200
+
+        runtime_engine = sse_mod._active_worlds[world_id]
+        runtime_engine.current_tick = 6
+        runtime_engine.world.current_tick = 6
+
+        response = client.post(f"/api/worlds/{world_id}/finish")
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "finished"
+        persisted = client.get(f"/api/worlds/{world_id}").json()
+        assert persisted["status"] == "finished"
+        assert persisted["current_tick"] == 6
+        simulations = client.get(
+            f"/api/simulations?world_id={world_id}"
+        ).json()
+        assert len(simulations) == 1
+        assert simulations[0]["status"] == "finished"
+        assert simulations[0]["total_ticks"] == 6
 
 
 class TestRelationships:

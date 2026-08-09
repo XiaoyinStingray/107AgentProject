@@ -162,6 +162,11 @@ async def _world_event_generator(
             if max_ticks and tick_count >= max_ticks:
                 engine.world.status = "finished"
                 await _finish_engine_simulation(engine)
+                # Solo Theater has an automatic eight-tick boundary.  Persist
+                # the runtime clock/status before the stream closes so list
+                # and replay APIs do not fall back to the original T0 row.
+                from api.worlds import _sync_world_to_db
+                await _sync_world_to_db(engine.world)
                 yield _sse_event({
                     "type": "session_end",
                     "world_id": world_id,

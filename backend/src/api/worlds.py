@@ -291,15 +291,19 @@ async def pause_world(
         raise HTTPException(status_code=404, detail=f"World {world_id!r} not found")
 
     world = WorldResponse(**row.to_dict())
-    world.status = "paused"
-    await _sync_world_to_db(world)
     engine = _active_worlds.get(world_id)
     if engine:
         engine.world.status = "paused"
+        # The runtime engine owns the authoritative clock.  Persist it before
+        # a later resume has to rebuild the engine from SQLite.
+        world.current_tick = engine.current_tick
+        engine.world.current_tick = engine.current_tick
         # 取消群组 LLM token 使暂停即时生效（不等 LLM 跑完）
         token = getattr(engine, "_group_cancel_token", None)
         if token:
             token.cancel()
+    world.status = "paused"
+    await _sync_world_to_db(world)
     return {"status": "paused", "world_id": world_id}
 
 
@@ -318,8 +322,13 @@ async def finish_world(
     world = WorldResponse(**row.to_dict())
     engine = _active_worlds.get(world_id)
 
-    if engine and engine.simulation_id:
-        await finish_simulation(engine.simulation_id, engine.current_tick)
+    if engine:
+        # Do not overwrite the final runtime tick with the stale value loaded
+        # from WorldRow.  The engine clock advances in memory during SSE.
+        world.current_tick = engine.current_tick
+        engine.world.current_tick = engine.current_tick
+        if engine.simulation_id:
+            await finish_simulation(engine.simulation_id, engine.current_tick)
 
     # 同步 goal 状态
     await _sync_agent_goals_to_db(world_id)

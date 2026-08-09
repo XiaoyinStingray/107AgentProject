@@ -684,3 +684,31 @@
 - **根因**：`scrollIntoView` 与 `scrollTo` 两个 effect 冲突，先跳下去再弹回来
 - **修复**：`#foundry` 锚点跳过 `scrollIntoView`，只执行 `scrollTo(0)`
 - **修复文件**：`frontend/src/pages/AgentFoundry.tsx`
+
+---
+
+## 2026-08-10：M2 单人剧场 模块测试
+
+> 详细测试记录见 [test-done/m02.md](test-done/m02.md)。
+
+### BUG-M2-001：暂停继续及结束后 Tick 回到 T0
+
+- **状态**：✅ 已修复并人工验收（2026-08-10）
+- **优先级**：P1
+- **现象**：实验暂停后继续显示 Tick 0；结束后的实验列表同样显示 T0，无法保留最终进度。
+- **根因**：WorldEngine 的 Tick 只在内存中增长，暂停和结束接口从 SQLite 读取旧的 `current_tick=0` 并再次回写。
+- **修复**：暂停和手动结束时以运行时引擎 Tick 为准；单人剧场达到 8 Tick 自动结束时同步 `finished` 和最终 Tick；引擎重建后从持久化 Tick 继续。
+- **修复文件**：`backend/src/api/worlds.py`、`backend/src/api/sse.py`
+- **回归测试**：World API/SSE 聚焦测试 `40 passed`；M2 后端相关回归 `153 passed`。
+- **人工复测**：暂停返回列表、继续、手动结束和最终 Tick 均通过。
+
+### BUG-M2-002：已完成实验没有历史回放入口
+
+- **状态**：✅ 已修复并人工验收（2026-08-10）
+- **优先级**：P2
+- **现象**：已完成实验只能删除，无法进入已保存的事件记录。
+- **根因**：M2 列表仅为 `running/paused` World 提供“继续”，没有衔接 M8 已有的真实 Simulation 回放能力。
+- **修复**：已完成实验增加“查看回放”；携带准确 `world_id` 进入 M8 档案馆，自动定位并展开对应事件，不重新启动 World 或调用 LLM。
+- **修复文件**：`frontend/src/pages/SoloTheater.tsx`、`frontend/src/pages/Archive.tsx`
+- **回归测试**：M2 前端相关测试 `22 passed`；M2 → M8 精确回放聚焦测试通过。
+- **人工复测**：用户确认入口跳转、自动展开和事件查看全部通过。

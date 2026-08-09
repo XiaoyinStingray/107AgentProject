@@ -1,6 +1,6 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import Archive from "../../pages/Archive";
 import { MOCK_AGENTS } from "../../mocks/agents";
@@ -17,6 +17,12 @@ import {
   downloadAsFile,
 } from "../../mocks/archive";
 import { MOCK_SANDBOX_SCENARIOS } from "../../mocks/sandbox";
+
+const { clientGet } = vi.hoisted(() => ({ clientGet: vi.fn() }));
+
+vi.mock("../../api/client", () => ({
+  client: { get: clientGet },
+}));
 
 /* ================================================================
    Step 45 — M8 档案馆组件测试
@@ -94,10 +100,11 @@ const testQueryClient = new QueryClient({
   defaultOptions: { queries: { retry: false } },
 });
 
-function renderArchive() {
+function renderArchive(initialEntry = "/archive") {
   return render(
     <QueryClientProvider client={testQueryClient}>
       <MemoryRouter
+        initialEntries={[initialEntry]}
         future={{
           v7_startTransition: true,
           v7_relativeSplatPath: true,
@@ -108,6 +115,11 @@ function renderArchive() {
     </QueryClientProvider>,
   );
 }
+
+beforeEach(() => {
+  clientGet.mockReset();
+  clientGet.mockResolvedValue([]);
+});
 
 /** 辅助：渲染 Archive 并点击指定 Tab */
 function renderAndClickTab(tabLabel: string) {
@@ -180,6 +192,34 @@ describe("Step 45 Archive — 精彩回放面板", () => {
     renderArchive();
     expect(screen.getByText("⏱ 20 Tick")).toBeInTheDocument();
     expect(screen.getByText("📋 47 事件")).toBeInTheDocument();
+  });
+
+  it("auto-opens the replay requested by M2", async () => {
+    clientGet.mockResolvedValueOnce([
+      {
+        id: "event-1",
+        world_id: "world-2",
+        tick: 3,
+        type: "thought_stream",
+        source_agent_id: "agent-1",
+        target_agent_ids: [],
+        description: "正在复盘期末周的决定",
+        data: { agent_name: "陈墨" },
+        created_at: "2026-08-10T00:00:00Z",
+      },
+    ]);
+
+    renderArchive("/archive?replay=world-2");
+
+    await waitFor(() =>
+      expect(clientGet).toHaveBeenCalledWith(
+        "/worlds/world-2/events?tick_from=0",
+      ),
+    );
+    expect(
+      await screen.findByRole("button", { name: "🔼 收起回放" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("正在复盘期末周的决定")).toBeInTheDocument();
   });
 });
 

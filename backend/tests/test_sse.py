@@ -4,11 +4,11 @@ SSE 桥接 单元测试。
 
 import json
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from db import Base
@@ -155,14 +155,59 @@ class TestSSEConnectionIsolation:
         with pytest.raises(StopAsyncIteration):
             await anext(old_a)
 
-        paused_b = json.loads(
-            (await anext(active_b)).removeprefix("data: ").strip()
-        )
-        assert paused_b["type"] == "paused"
-        assert paused_b["world_id"] == "world-b"
+        # 当前协议在暂停时保持连接但静默，不再周期性发送 paused 事件。
+        # world-a 的旧连接退出后，world-b 的连接注册仍应保持不变。
+        assert _active_connection_ids["world-b"] == "conn-b"
 
         await active_b.aclose()
         _active_connection_ids.clear()
+
+    @pytest.mark.asyncio
+    async def test_solo_auto_finish_persists_runtime_tick(self, monkeypatch):
+        """Eight-tick solo sessions persist their final status before SSE closes."""
+        import api.worlds as worlds_mod
+        from api.sse import _active_connection_ids, _world_event_generator
+
+        class SoloEngine:
+            def __init__(self):
+                self.agents = {
+                    "agent-1": SimpleNamespace(
+                        persona=SimpleNamespace(name="测试 Agent"),
+                    ),
+                }
+                self.current_tick = 0
+                self.simulation_id = None
+                self.world = SimpleNamespace(
+                    id="solo-auto",
+                    status="running",
+                    current_tick=0,
+                )
+
+            async def tick_stream(self):
+                self.current_tick += 1
+                self.world.current_tick = self.current_tick
+                if False:
+                    yield None
+
+        engine = SoloEngine()
+        sync_world = AsyncMock()
+        monkeypatch.setattr(worlds_mod, "_sync_world_to_db", sync_world)
+        _active_connection_ids["solo-auto"] = "conn-auto"
+
+        chunks = [
+            chunk
+            async for chunk in _world_event_generator(
+                "solo-auto",
+                engine,  # type: ignore[arg-type]
+                "conn-auto",
+            )
+        ]
+
+        assert engine.current_tick == 8
+        assert engine.world.current_tick == 8
+        assert engine.world.status == "finished"
+        assert any("session_end" in chunk for chunk in chunks)
+        sync_world.assert_awaited_once_with(engine.world)
 
 
 # =============================================================================
@@ -199,25 +244,37 @@ class TestSSEEndpoint:
 
         return app
 
-    @pytest.fixture
-    def client(self, app_with_sse):
-        return TestClient(app_with_sse)
+    @pytest.mark.asyncio
+    async def test_stream_returns_200(self, app_with_sse):
+        """SSE 端点返回 text/event-stream，且不依赖会挂起的同步流客户端。"""
+        from api.sse import stream_world
 
-    def test_stream_returns_200(self, client):
-        """SSE 端点返回 200 + text/event-stream。"""
-        with client.stream("GET", "/api/worlds/w-sse/stream") as r:
-            assert r.status_code == 200
-            assert "text/event-stream" in r.headers["content-type"]
+        response = await stream_world("w-sse")
 
-    def test_stream_contains_connected_event(self, client):
+        assert response.status_code == 200
+        assert response.media_type == "text/event-stream"
+        await response.body_iterator.aclose()
+
+    @pytest.mark.asyncio
+    async def test_stream_contains_connected_event(self, app_with_sse):
         """第一条消息是 connected 事件。"""
-        with client.stream("GET", "/api/worlds/w-sse/stream") as r:
-            chunk = next(r.iter_text())
-            assert "connected" in chunk
+        from api.sse import stream_world
 
-    def test_missing_world_returns_404(self, client):
-        response = client.get("/api/worlds/nonexistent/stream")
-        assert response.status_code == 404
+        response = await stream_world("w-sse")
+        chunk = await anext(response.body_iterator)
+
+        assert "connected" in chunk
+        await response.body_iterator.aclose()
+
+    @pytest.mark.asyncio
+    async def test_missing_world_returns_404(self, app_with_sse):
+        from fastapi import HTTPException
+        from api.sse import stream_world
+
+        with pytest.raises(HTTPException) as error:
+            await stream_world("nonexistent")
+
+        assert error.value.status_code == 404
 
 
 # =============================================================================

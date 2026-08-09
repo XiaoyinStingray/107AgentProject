@@ -33,6 +33,7 @@ import { client } from "../api/client";
 export default function Archive() {
   const location = useLocation();
   const [activeTab, setActiveTab] = useState<ArchiveTab>("highlights");
+  const requestedReplayId = new URLSearchParams(location.search).get("replay");
 
   // 72: hash → tab
   useEffect(() => {
@@ -79,7 +80,9 @@ export default function Archive() {
       </div>
 
       {/* 面板内容 */}
-      {activeTab === "highlights" && <HighlightsPanel />}
+      {activeTab === "highlights" && (
+        <HighlightsPanel requestedReplayId={requestedReplayId} />
+      )}
       {activeTab === "templates" && <TemplatesPanel />}
       {activeTab === "achievements" && <AchievementsPanel />}
       {activeTab === "export" && <ExportPanel />}
@@ -92,7 +95,11 @@ export default function Archive() {
    点击查看回放 → 展开卡片在线展示事件（不导航沙盒，不创建新内容）
    ================================================================ */
 
-function HighlightsPanel() {
+function HighlightsPanel({
+  requestedReplayId,
+}: {
+  requestedReplayId: string | null;
+}) {
   const { data: simulations = [], isLoading } = useSimulations();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [events, setEvents] = useState<SSEEvent[]>([]);
@@ -100,6 +107,7 @@ function HighlightsPanel() {
   const [eventsError, setEventsError] = useState<string | null>(null);
   const lastTickRef = useRef(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const handledReplayRef = useRef<string | null>(null);
 
   /** 拉取 worldId 的事件（传 tickFrom 做增量刷新）。返回映射后的 SSEEvent[]。 */
   const fetchAndMapEvents = useCallback(async (worldId: string, tickFrom: number) => {
@@ -136,6 +144,12 @@ function HighlightsPanel() {
       return;
     }
     setExpandedId(worldId);
+    requestAnimationFrame(() => {
+      document.getElementById(`archive-replay-${worldId}`)?.scrollIntoView?.({
+        behavior: "smooth",
+        block: "center",
+      });
+    });
     setEventsLoading(true);
     setEventsError(null);
     lastTickRef.current = 0;
@@ -149,6 +163,16 @@ function HighlightsPanel() {
       setEventsLoading(false);
     }
   }, [expandedId, fetchAndMapEvents]);
+
+  // M2 已完成实验可携带 world id 进入档案馆，直接展开对应回放。
+  useEffect(() => {
+    if (!requestedReplayId || isLoading) return;
+    if (handledReplayRef.current === requestedReplayId) return;
+    if (!simulations.some((sim) => sim.world_id === requestedReplayId)) return;
+
+    handledReplayRef.current = requestedReplayId;
+    void handleToggleReplay(requestedReplayId);
+  }, [requestedReplayId, isLoading, simulations, handleToggleReplay]);
 
   /** 手动刷新（增量拉取新事件） */
   const handleRefresh = useCallback(async () => {
@@ -202,7 +226,8 @@ function HighlightsPanel() {
             sim.status === "finished" ? "completed" : sim.status === "paused" ? "paused" : "running";
           const isExpanded = expandedId === sim.world_id;
           return (
-            <Card key={sim.id} hover className="group">
+            <div key={sim.id} id={`archive-replay-${sim.world_id}`}>
+            <Card hover className="group">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-lg font-mono text-text-primary">
                   {sim.world_name || "未命名模拟"}
@@ -287,6 +312,7 @@ function HighlightsPanel() {
                 </div>
               )}
             </Card>
+            </div>
           );
         })}
       </div>

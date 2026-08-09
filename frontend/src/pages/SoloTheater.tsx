@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAgents } from "../api/agents";
 import type { GoalStatus } from "../types/agent";
 import {
@@ -31,6 +31,7 @@ import StatusDot from "../components/shared/StatusDot";
 
 export default function SoloTheater() {
   const location = useLocation();
+  const navigate = useNavigate();
   const initialScenario = (location.state as { scenario?: string } | null)?.scenario;
   // Agent 列表：从后端拉取（铸造厂创建的真 Agent）
   const { data: agents = [], isLoading: agentsLoading } = useAgents();
@@ -277,6 +278,15 @@ export default function SoloTheater() {
                         className="text-xs font-mono px-2 py-0.5 rounded bg-accent-green/10 border border-accent-green/30 text-accent-green hover:bg-accent-green/20 transition-colors"
                       >
                         继续
+                      </button>
+                    )}
+                    {world.status === "finished" && (
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/archive?replay=${encodeURIComponent(world.id)}`)}
+                        className="text-xs font-mono px-2 py-0.5 rounded bg-accent-blue/10 border border-accent-blue/30 text-accent-blue hover:bg-accent-blue/20 transition-colors"
+                      >
+                        查看回放
                       </button>
                     )}
                     <button
