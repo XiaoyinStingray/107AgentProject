@@ -54,12 +54,14 @@ _REMIX_SYSTEM_PROMPT = """\
       "id": "g1",
       "description": "目标",
       "priority": 1,
-      "deadline": null,
+      "deadline": "YYYY-MM-DD",
       "status": "active"
     }
   ],
   "summary": "本次最小修改的简短说明"
-}"""
+}
+
+关于目标 deadline：必须根据角色背景和人生阶段设定合理的截止时间（ISO 日期格式 YYYY-MM-DD），不要使用过去的日期，终身目标可设为 null。"""
 
 _RETRY_NOTE = "\n上次输出无法通过 JSON/Pydantic 校验，请严格返回完整纯 JSON。"
 

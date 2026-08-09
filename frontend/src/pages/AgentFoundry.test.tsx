@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 
 import AgentFoundry from "./AgentFoundry";
 
@@ -22,13 +23,16 @@ vi.mock("../api/worlds", () => ({
 }));
 
 describe("Step 39 AgentFoundry template prefill", () => {
+  const renderInRouter = (ui: React.ReactElement) =>
+    render(<MemoryRouter>{ui}</MemoryRouter>);
+
   it("starts empty for the existing default route", () => {
-    render(<AgentFoundry />);
+    renderInRouter(<AgentFoundry />);
     expect(screen.getByPlaceholderText(/描述你的 Agent/)).toHaveValue("");
   });
 
   it("prefills the natural-language input without creating automatically", () => {
-    render(<AgentFoundry initialDescription="来自模板的可编辑角色描述" />);
+    renderInRouter(<AgentFoundry initialDescription="来自模板的可编辑角色描述" />);
 
     expect(screen.getByPlaceholderText(/描述你的 Agent/)).toHaveValue(
       "来自模板的可编辑角色描述",

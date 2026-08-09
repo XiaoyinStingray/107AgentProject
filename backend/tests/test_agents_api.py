@@ -171,6 +171,63 @@ class TestListAgents:
         assert len(resp.json()) >= 1
 
 
+class TestDuplicateNames:
+    """BUG-M1-004：不同 Agent 重名时让 LLM 重新取名，LLM 失败则从名字池挑选。"""
+
+    def test_duplicate_name_gets_new_name(self, client):
+        """Mock LLM 始终返回 '小明'，regenerate_name 从名字池挑选 '叶舟'，
+        第二次创建应得到完全不同的名字而非 '小明 (2)'."""
+        resp1 = client.post("/api/agents/", json={"description": "角色A"})
+        assert resp1.status_code == 201
+        name1 = resp1.json()["name"]
+        assert name1 == "小明"
+
+        resp2 = client.post("/api/agents/", json={"description": "角色B"})
+        assert resp2.status_code == 201
+        name2 = resp2.json()["name"]
+        # 名字池第一个候选是 "林风"，不在排除列表中
+        assert name2 in ["林风", "苏晴", "叶舟", "陆远", "沈墨", "顾言", "白羽", "江潮", "程诺", "许晨"]
+        assert name1 != name2
+
+    def test_triple_duplicate_gets_unique_names(self, client):
+        """三次创建相同描述的 Agent，应得到三个完全不同的名字。"""
+        r1 = client.post("/api/agents/", json={"description": "角色甲"})
+        assert r1.status_code == 201, f"first create failed: {r1.status_code} {r1.text}"
+        r2 = client.post("/api/agents/", json={"description": "角色乙"})
+        assert r2.status_code == 201, f"second create failed: {r2.status_code} {r2.text}"
+        resp3 = client.post("/api/agents/", json={"description": "角色丙"})
+        assert resp3.status_code == 201, f"third create failed: {resp3.status_code} {resp3.text}"
+        name1 = r1.json()["name"]
+        name2 = r2.json()["name"]
+        name3 = resp3.json()["name"]
+        # 三个名字互不相同
+        assert len({name1, name2, name3}) == 3
+
+    def test_llm_renames_on_duplicate(self):
+        """当 regenerate_name 返回不同名字时，应使用 LLM 新名字而非序号。"""
+        from unittest.mock import AsyncMock
+        from engines.agent_factory.factory import AgentFactory
+
+        # 创建一个会返回不同名字的 mock builder
+        factory = AgentFactory(MockModelClient())
+        factory.persona_builder.regenerate_name = AsyncMock(return_value="小红")
+
+        def override_factory():
+            return factory
+
+        test_app = FastAPI()
+        test_app.include_router(router)
+        test_app.dependency_overrides[get_agent_factory] = override_factory
+
+        with TestClient(test_app) as c:
+            r1 = c.post("/api/agents/", json={"description": "角色A"})
+            assert r1.json()["name"] == "小明"
+            r2 = c.post("/api/agents/", json={"description": "角色B"})
+            # 应该使用 LLM 返回的 "小红" 而非 "小明 (2)"
+            assert r2.json()["name"] == "小红"
+            factory.persona_builder.regenerate_name.assert_called_once()
+
+
 # =============================================================================
 # GET /api/agents/{id}
 # =============================================================================

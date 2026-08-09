@@ -33,7 +33,7 @@ const MODULES: ModuleGuide[] = [
     features: [
       { emoji: "🎭", label: "创建 Agent", desc: "输入角色描述（如「来自小镇的计算机系新生，内向但野心大」），LLM 自动生成完整人格——MBTI 类型、五大人格特质、背景故事、核心价值观和决策偏好。", id: 1, anchor: "foundry" },
       { emoji: "🔄", label: "Agent Remix", desc: "选择一个已有 Agent，调整性格参数（更外向/更激进），生成变体版本。适合做 A/B 对比实验。", id: 6, anchor: "item-6" },
-      { emoji: "🎯", label: "目标系统", desc: "为 Agent 设定短期和长期目标。Agent 的每一步决策都会受到目标的驱动，完成度影响情绪和能量。", id: 4, anchor: "foundry" },
+      { emoji: "🎯", label: "目标系统", desc: "为 Agent 设定短期和长期目标。Agent 的每一步决策都会受到目标的驱动，完成度影响情绪和能量。", id: 4, anchor: "goals" },
       { emoji: "📦", label: "模板库", desc: "预设角色模板（哲学家、创业者、艺术家…），一键创建，无需从零描述。也可以保存自己的模板供复用。", id: 7, anchor: "item-7" },
     ],
   },

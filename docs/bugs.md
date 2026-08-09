@@ -606,3 +606,81 @@
 - **修复**：独立识别“移动/移位/靠近/前往某人旁边”等意图，由场景确定 B 身边的安全格；Brain 开关两种模式走同一条确定性移动路径。
 - **边界反馈**：已相邻、暂停排队、目标不存在、周围无空位均返回明确提示；“去和 B 说话”仍走原对话链路。
 - **回归测试**：M11 定向回归 `45 passed`；前端全量 `351 passed, 7 个既有 NarrativeFactory 测试失败`。
+
+---
+
+## 2026-08-09：M1 Agent 铸造厂 模块测试
+
+> 详细测试记录见 [test-done/m01.md](test-done/m01.md)。
+
+### BUG-M1-001：Loading 圆圈错位
+
+- **状态**：✅ 已修复 (2026-08-09)
+- **优先级**：P2
+- **根因**：LoadingSpinner 未用 Card 包裹，样式脱离预期
+- **修复**：改为内联 flex 横向布局（圆圈在左、文字在右），移除 LoadingSpinner 组件
+- **修复文件**：`frontend/src/pages/AgentFoundry.tsx`
+
+### BUG-M1-002：过短输入显示代码报错
+
+- **状态**：✅ 已修复 (2026-08-09)
+- **优先级**：P1
+- **根因**：缺少客户端输入长度校验
+- **修复**：输入 ≤3 字符时禁用按钮 + 橙色提示
+- **修复文件**：`frontend/src/pages/AgentFoundry.tsx`
+
+### BUG-M1-003：背景故事标题换行/间距不当
+
+- **状态**：✅ 已修复 (2026-08-09)
+- **优先级**：P2
+- **根因**：`dt` 元素未设置 `whitespace-nowrap`
+- **修复**：添加 `whitespace-nowrap` 样式
+- **修复文件**：`frontend/src/pages/AgentFoundry.tsx`
+
+### BUG-M1-004：不同 Agent 重名
+
+- **状态**：✅ 已修复 (2026-08-09)
+- **优先级**：P1
+- **根因**：后端无重名检测，LLM 多次返回相同名字
+- **修复**：三级降级策略——LLM 重新取名 → 本地名字池（25 个中文名）→ 随机后缀
+- **修复文件**：`backend/src/api/agents.py`、`backend/src/engines/persona/builder.py`
+
+### BUG-M1-005：模板创建后不滚动到顶部
+
+- **状态**：✅ 已修复 (2026-08-09)
+- **优先级**：P1
+- **根因**：创建成功后缺少 `scrollTo` 逻辑
+- **修复**：`AgentFoundry` 监听 `createdName` 变化滚动到顶部；`TemplateBrowser.handleCreate` 添加 `scrollTo`
+- **修复文件**：`frontend/src/pages/AgentFoundry.tsx`、`frontend/src/pages/agent-foundry/TemplateBrowser.tsx`
+
+### BUG-M1-006：侧边栏"目标系统"跳错位置
+
+- **状态**：✅ 已修复 (2026-08-09)
+- **优先级**：P1
+- **根因**：anchor 指向 `foundry` 而非 `goals`
+- **修复**：menuData / GuidePage 中 anchor 从 `foundry` 改为 `goals`
+- **修复文件**：`frontend/src/data/menuData.ts`、`frontend/src/pages/GuidePage.tsx`
+
+### BUG-M1-007：侧边栏点"创建 Agent"不回到顶部
+
+- **状态**：✅ 已修复 (2026-08-09)
+- **优先级**：P1
+- **根因**：输入区缺少 `id="foundry"` 锚点，无专用滚动 effect
+- **修复**：包裹 `<div id="foundry">` + `useEffect` 监听 hash 变化执行 `scrollTo(0)`
+- **修复文件**：`frontend/src/pages/AgentFoundry.tsx`
+
+### BUG-M1-008：目标截止时间不合理
+
+- **状态**：✅ 已修复 (2026-08-09)
+- **优先级**：P2
+- **根因**：Prompt 示例 `deadline: null`，LLM 倾向生成 null 或过去日期
+- **修复**：Prompt 新增 deadline 生成指导规则；Mock 数据改为 `"2027-06-30"`
+- **修复文件**：`backend/src/engines/persona/builder.py`、`backend/src/engines/persona/remixer.py`
+
+### BUG-M1-009：点击"创建 Agent"后页面滚动过头
+
+- **状态**：✅ 已修复 (2026-08-09)
+- **优先级**：P1
+- **根因**：`scrollIntoView` 与 `scrollTo` 两个 effect 冲突，先跳下去再弹回来
+- **修复**：`#foundry` 锚点跳过 `scrollIntoView`，只执行 `scrollTo(0)`
+- **修复文件**：`frontend/src/pages/AgentFoundry.tsx`

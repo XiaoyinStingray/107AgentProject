@@ -361,8 +361,7 @@ AI 提供的手测指南必须包含：
 【角色】你是本项目的测试 AI。请严格遵循 docs/test-plan.md。
 
 【READ】
-完整阅读 test-plan、STEP、蓝图与 development plan 中 M{NN} 的章节、
-所有后续 State Plan 增强、相关 DONE、bugs、用户文档、生产代码、Mock、测试和上游记录。
+完整阅读 test-plan、STEP、蓝图与 development plan 中 M{NN} 的章节、所有后续 State Plan 增强、相关 DONE、bugs、用户文档、生产代码、Mock、测试和上游记录。
 输出计划功能、实际功能、差异、依赖、历史 Bug 和环境要求。
 
 【DESIGN】

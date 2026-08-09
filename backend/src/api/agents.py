@@ -14,6 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from loguru import logger
+
 from config import settings
 from db import get_db
 from engines.agent_factory.factory import AgentFactory, LifeAgent
@@ -99,6 +101,31 @@ async def _ensure_agent_capacity(db: AsyncSession) -> None:
         )
 
 
+async def _ensure_unique_name(db: AsyncSession, name: str, factory) -> str:
+    """BUG-M1-004 修复：检查并重名 Agent 重新取名。
+
+    查询数据库中已有的 Agent 名称集合，若 name 已存在则
+    调用 LLM 重新生成一个完全不同的名字。
+    """
+    result = await db.execute(select(AgentRow.name))
+    existing_names = set(result.scalars().all())
+    if name not in existing_names:
+        return name
+    # 重名——让 LLM 重新取名
+    logger.info(f"Agent 重名检测: {name!r} 已存在，正在重新取名...")
+    try:
+        new_name = await factory.persona_builder.regenerate_name(list(existing_names))
+        logger.info(f"Agent 重名检测: {name!r} → {new_name!r}")
+        return new_name
+    except Exception as e:
+        logger.warning(f"重新取名失败，回退到序号模式: {e}")
+        # 回退方案：追加序号
+        suffix = 2
+        while f"{name} ({suffix})" in existing_names:
+            suffix += 1
+        return f"{name} ({suffix})"
+
+
 # =============================================================================
 # 路由
 # =============================================================================
@@ -118,12 +145,18 @@ async def create_agent(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    # BUG-M1-004：重名检测——让 LLM 重新取名
+    unique_name = await _ensure_unique_name(db, agent.persona.name, factory)
+    if unique_name != agent.persona.name:
+        agent.persona.name = unique_name
+
     # 持久化到 SQLite
-    row = AgentRow.from_response(agent.to_response().model_dump())
+    response = agent.to_response()
+    row = AgentRow.from_response(response.model_dump())
     db.add(row)
     await db.commit()
 
-    return agent.to_response()
+    return response
 
 
 @router.post("/{agent_id}/remix", response_model=RemixResponse)
@@ -171,6 +204,10 @@ async def remix_agent(
         background=draft.background,
         goals=draft.goals,
     )
+    # BUG-M1-004：Remix 创建同样需要重名检测
+    unique_name = await _ensure_unique_name(db, agent.persona.name, factory)
+    if unique_name != agent.persona.name:
+        agent.persona.name = unique_name
     response = agent.to_response()
     db.add(AgentRow.from_response(response.model_dump()))
     await db.commit()

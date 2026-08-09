@@ -76,9 +76,15 @@ _BUILD_SYSTEM_PROMPT = """\
     "key_events": ["人生关键事件1", "关键事件2"]
   },
   "goals": [
-    {"id": "g1", "description": "目标描述", "priority": 1, "deadline": null, "status": "active"}
+    {"id": "g1", "description": "目标描述", "priority": 1, "deadline": "YYYY-MM-DD", "status": "active"}
   ]
-}"""
+}
+
+关于目标 deadline 的要求：
+- 必须根据角色的背景、年龄、人生阶段设定合理的截止时间（ISO 日期格式 YYYY-MM-DD）
+- 例如：大学生的学业目标应设在毕业前 1-3 年内；职场目标应设在 1-5 年内；终身目标可设为 null
+- 不要使用过去的日期，也不要设定过于遥远（>10年）的截止日期
+- 优先级高（priority=1）的目标应有更紧迫的截止时间"""
 
 _RETRY_SUFFIX = "\n\n⚠️ 上次返回的 JSON 格式不正确。请只返回纯 JSON，不要用 ``` 包装。"
 
@@ -120,7 +126,7 @@ MOCK_PERSONA_JSON: dict[str, Any] = {
             "id": "g1",
             "description": "保研清华",
             "priority": 1,
-            "deadline": None,
+            "deadline": "2027-06-30",
             "status": "active",
         }
     ],
@@ -199,6 +205,67 @@ class PersonaBuilder:
             f"PersonaBuilder: 两次尝试后仍无法解析 LLM 返回。"
             f"最后一次原始返回: {last_raw[:200]}..."
         )
+
+    async def regenerate_name(self, exclude_names: list[str]) -> str:
+        """重名时让 LLM 重新取一个完全不同的名字。
+
+        策略：先尝试 LLM 取名；若 LLM 返回的名字仍在排除列表中，
+        则从本地备用名字池中挑选一个不重复的名字。
+
+        Args:
+            exclude_names: 已存在的名字列表，新名字不得与其中任何一个相同。
+
+        Returns:
+            str: 新的 2-3 字中文名
+        """
+        import re
+        exclude_set = set(exclude_names)
+
+        # 1) 先尝试 LLM 取名
+        exclude_str = "、".join(exclude_names) if exclude_names else "无"
+        system = (
+            "你是一个取名助手。请只返回一个 2-3 字的中文名字（不要任何标点或解释）。"
+            "绝对不要返回以下任何名字：" + exclude_str
+        )
+        user = "请给一个全新的名字，与以上所有名字完全不同。"
+
+        messages = [
+            SystemMessage(content=system),
+            UserMessage(content=user, source="persona_builder"),
+        ]
+
+        for attempt in range(2):
+            try:
+                response = await self._client.create(messages=messages)
+                name = response.content.strip().strip('"\'').strip()
+                match = re.search(r'[\u4e00-\u9fff]{2,3}', name)
+                if match:
+                    new_name = match.group()
+                    if new_name not in exclude_set:
+                        logger.info(f"PersonaBuilder.regenerate_name (LLM): {new_name!r}")
+                        return new_name
+            except Exception as e:
+                logger.warning(f"PersonaBuilder.regenerate_name LLM attempt {attempt + 1} failed: {e}")
+
+        # 2) LLM 取名失败或返回重复名字——从本地备用池挑选
+        _NAME_POOL = [
+            "林风", "苏晴", "叶舟", "陆远", "沈墨",
+            "顾言", "白羽", "江潮", "程诺", "许晨",
+            "方旭", "温雅", "韩冰", "唐宁", "宋微",
+            "何夕", "高朗", "罗星", "梁羽", "谢云",
+            "钟灵", "邓川", "萧然", "潘溪", "袁野",
+        ]
+        for candidate in _NAME_POOL:
+            if candidate not in exclude_set:
+                logger.info(f"PersonaBuilder.regenerate_name (pool): {candidate!r}")
+                return candidate
+
+        # 3) 极端情况：池中名字全部用完——追加随机后缀
+        import random, string
+        suffix = "".join(random.choices(string.ascii_lowercase, k=3))
+        fallback = exclude_names[0] + suffix if exclude_names else "无名"
+        logger.warning(f"PersonaBuilder.regenerate_name (fallback): {fallback!r}")
+        return fallback
 
     # -------------------------------------------------------------------------
     # 内部方法

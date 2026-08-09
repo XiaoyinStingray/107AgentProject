@@ -28,6 +28,8 @@ export default function TemplateBrowser() {
     try {
       const agent = await createAgent.mutateAsync(seedPrompt);
       setCreatedName(agent.name);
+      // BUG-M1-005 修复：创建成功后滚动到顶部展示成功提示
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch {
       // React Query 保留 error，交给统一错误块展示。
     } finally {
