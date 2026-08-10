@@ -5,6 +5,7 @@ import { useAgents } from "../api/agents";
 import {
   useCreateWorld,
   useDeleteWorld,
+  useFinishWorld,
   usePauseWorld,
   useResetWorld,
   useStartWorld,
@@ -53,6 +54,7 @@ export default function GroupSandbox() {
   const startWorld = useStartWorld();
   const pauseWorld = usePauseWorld();
   const resetWorld = useResetWorld();
+  const finishWorld = useFinishWorld();
   const deleteWorld = useDeleteWorld();
   const relationshipQuery = useWorldRelationships(worldId);
   const {
@@ -217,6 +219,23 @@ export default function GroupSandbox() {
     setPhase("setup");
   }, [worldId, disconnect, pauseWorld, queryClient, setActiveWorld]);
 
+  const handleFinish = async () => {
+    if (!worldId || pending) return;
+    setError(null);
+    try {
+      await finishWorld.mutateAsync(worldId);
+      disconnect();
+      clear();
+      setWorldId(null);
+      setActiveWorld(null);
+      setSelectedTick(null);
+      setIsPaused(false);
+      setPhase("setup");
+    } catch (cause) {
+      setError(getErrorMessage(cause, "模拟结束失败"));
+    }
+  };
+
   const handleReset = async () => {
     if (!worldId || pending) return;
     setError(null);
@@ -296,7 +315,7 @@ export default function GroupSandbox() {
         onToggleSpeed={() => setSpeed((value) => value === 1 ? 2 : 1)}
         onToggleRunning={handleToggleRunning}
         onBack={handleBack}
-        onReset={handleReset}
+        onReset={handleFinish}
       />
       {error && <p role="alert" className="px-4 py-2 text-sm text-accent-red">{error}</p>}
       <SandboxRuntime
