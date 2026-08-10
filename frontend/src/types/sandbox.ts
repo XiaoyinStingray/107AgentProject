@@ -1,4 +1,5 @@
 import type { SSEEvent } from "./events";
+import type { AgentResponse } from "./agent";
 
 /** 群体沙盒页面当前所处的阶段。 */
 export type SandboxPhase = "setup" | "running";
@@ -35,5 +36,8 @@ export interface TimelineProps {
 export interface EventFeedProps {
   events: SSEEvent[];
   selectedTick?: number | null;
+  agents?: AgentResponse[];
+  feedFilterIds?: string[];
+  onToggleFeedAgent?: (agentId: string) => void;
   className?: string;
 }

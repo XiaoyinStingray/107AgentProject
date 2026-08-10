@@ -83,7 +83,7 @@ class TestGroupIdentityProtocol:
                 self.cancelled = True
 
         active_token = ActiveGroupToken()
-        world_engine._group_cancel_token = active_token
+        world_engine._group_cancel_token = active_token  # type: ignore[assignment]
         world_engine.inject_event(
             "请主动去和陈默讨论复习计划",
             event_type="agent_action",
@@ -233,7 +233,9 @@ class TestGroupIdentityProtocol:
 
         assert world_engine._convert_message_to_event(own_as_other) is None
         assert world_engine._convert_message_to_event(other_as_self) is None
-        assert world_engine._convert_message_to_event(valid).source_agent_id == "a1"
+        result = world_engine._convert_message_to_event(valid)
+        assert result is not None
+        assert result.source_agent_id == "a1"
 
     def test_stream_identity_conflict_is_rejected(self, db_session):
         from autogen_agentchat.messages import TextMessage
@@ -283,8 +285,8 @@ class TestGroupIdentityProtocol:
 
         client = RoutingClient()
         for agent in agents:
-            agent._model_client = client
-            agent._agent._model_client = client
+            agent._model_client = client  # type: ignore[assignment]
+            agent._agent._model_client = client  # type: ignore[assignment]
 
         world_engine = WorldEngine(make_world(), agents, db_session)
         events = [event async for event in world_engine.tick_stream()]
@@ -292,6 +294,7 @@ class TestGroupIdentityProtocol:
 
         assert [event.source_agent_id for event in messages] == [
             "a1", "a2", "a3", "a1", "a2", "a3", "a1", "a2", "a3",
+            "a1", "a2", "a3",
         ]
 
 

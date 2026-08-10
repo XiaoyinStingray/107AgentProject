@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgents } from "../api/agents";
 import {
   useCreateWorld,
+  useFinishWorld,
   usePauseWorld,
   useResetWorld,
   useStartWorld,
@@ -18,6 +19,7 @@ vi.mock("../api/agents", () => ({ useAgents: vi.fn() }));
 vi.mock("../api/worlds", () => ({
   useCreateWorld: vi.fn(),
   useDeleteWorld: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useFinishWorld: vi.fn(),
   usePauseWorld: vi.fn(),
   useResetWorld: vi.fn(),
   useStartWorld: vi.fn(),
@@ -33,6 +35,7 @@ const create = vi.fn();
 const start = vi.fn();
 const pause = vi.fn();
 const reset = vi.fn();
+const finish = vi.fn();
 const clear = vi.fn();
 const disconnect = vi.fn();
 const hydrateRelationships = vi.fn();
@@ -49,6 +52,7 @@ describe("Step 33 GroupSandbox", () => {
     start.mockResolvedValue({ status: "started", world_id: "world-33" });
     pause.mockResolvedValue({ status: "paused", world_id: "world-33" });
     reset.mockResolvedValue({ status: "reset", world_id: "world-33" });
+    finish.mockResolvedValue({ status: "finished", world_id: "world-33" });
     vi.mocked(useAgents).mockReturnValue({
       data: MOCK_AGENTS,
       isLoading: false,
@@ -58,11 +62,13 @@ describe("Step 33 GroupSandbox", () => {
     vi.mocked(useStartWorld).mockReturnValue(mutation(start) as never);
     vi.mocked(usePauseWorld).mockReturnValue(mutation(pause) as never);
     vi.mocked(useResetWorld).mockReturnValue(mutation(reset) as never);
+    vi.mocked(useFinishWorld).mockReturnValue(mutation(finish) as never);
     vi.mocked(useWorldRelationships).mockReturnValue({
       data: relationshipSnapshot,
     } as unknown as ReturnType<typeof useWorldRelationships>);
     vi.mocked(useSSE).mockReturnValue({
       events: [],
+      totalEventCount: 0,
       connected: true,
       relationships: {},
       lastRelationshipKey: null,
@@ -92,6 +98,7 @@ describe("Step 33 GroupSandbox", () => {
   it("pauses, resumes, and resets the active World", async () => {
     vi.mocked(useSSE).mockReturnValue({
       events: [{ type: "paused", tick: 0, status: "paused" }],
+      totalEventCount: 1,
       connected: true,
       relationships: {},
       lastRelationshipKey: null,
@@ -110,7 +117,7 @@ describe("Step 33 GroupSandbox", () => {
     await waitFor(() => expect(start).toHaveBeenCalledTimes(2));
 
     fireEvent.click(screen.getByRole("button", { name: /结束/ }));
-    await waitFor(() => expect(reset).toHaveBeenCalledWith("world-33"));
+    await waitFor(() => expect(finish).toHaveBeenCalledWith("world-33"));
     expect(disconnect).toHaveBeenCalled();
     expect(screen.getByRole("button", { name: /3 Agents/ })).toBeInTheDocument();
   });

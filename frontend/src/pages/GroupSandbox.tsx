@@ -6,6 +6,7 @@ import { useScenarios } from "../api/scenarios";
 import {
   useCreateWorld,
   useDeleteWorld,
+  useFinishWorld,
   usePauseWorld,
   useResetWorld,
   useStartWorld,
@@ -46,6 +47,7 @@ export default function GroupSandbox() {
   const [error, setError] = useState<string | null>(null);
   const [replayEvent, setReplayEvent] = useState<SSEEvent | null>(null);
   const [startGen, setStartGen] = useState(0); // 递增以重置节流器（仅新启动时）
+  const [feedFilterIds, setFeedFilterIds] = useState<string[]>([]);
   const { activeWorldId, setActiveWorld } = useSandboxStore();
   const queryClient = useQueryClient();
   const { data: allWorlds = [] } = useWorlds();
@@ -54,10 +56,12 @@ export default function GroupSandbox() {
   const startWorld = useStartWorld();
   const pauseWorld = usePauseWorld();
   const resetWorld = useResetWorld();
+  const finishWorld = useFinishWorld();
   const deleteWorld = useDeleteWorld();
   const relationshipQuery = useWorldRelationships(worldId);
   const {
     events,
+    totalEventCount,
     connected,
     relationships,
     lastRelationshipKey,
@@ -65,7 +69,7 @@ export default function GroupSandbox() {
     disconnect,
     clear,
   } = useSSE(worldId);
-  const displayedEvents = useThrottledEvents(events, speed, isPaused, String(startGen));
+  const displayedEvents = useThrottledEvents(events, speed, String(startGen));
 
   const [restoring, setRestoring] = useState(false);
   const restoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -96,9 +100,8 @@ export default function GroupSandbox() {
     if (relationshipQuery.data) hydrateRelationships(relationshipQuery.data);
   }, [hydrateRelationships, relationshipQuery.data]);
 
-  // 暂停状态只由按钮和首次 connected 事件控制，tick_boundary/paused 不干预
+  // 暂停状态只由按钮和首次 connected 事件控制
   const didSyncRef = useRef(false);
-  const [pauseCooldown, setPauseCooldown] = useState(false);
   useEffect(() => {
     const streamError = [...events].reverse().find((event) => event.type === "error");
     if (streamError) {
@@ -112,12 +115,7 @@ export default function GroupSandbox() {
         setIsPaused(ce.status === "paused");
       }
     }
-    // 暂停冷却：收到 paused 事件 → 冷却结束，按钮可点
-    if (pauseCooldown) {
-      const pe = [...events].reverse().find((event) => event.type === "paused");
-      if (pe) setPauseCooldown(false);
-    }
-  }, [events, pauseCooldown]);
+  }, [events]);
 
   // 新 World 启动或 resume 时允许重新同步
   useEffect(() => {
@@ -129,17 +127,16 @@ export default function GroupSandbox() {
     [agents, selectedAgentIds],
   );
   const visibleEvents = useMemo(() => {
-    // 暂停或恢复中 → 直接展示全部事件，绕过节流器
-    const source = (restoring || isPaused) ? events : displayedEvents;
-    const result = source.filter((event) => {
+    // 恢复模式：直接展示全量事件，绕过节流器
+    const source = restoring ? events : displayedEvents;
+    return source.filter((event) => {
       if (INFRASTRUCTURE_EVENT_TYPES.has(event.type)) return false;
-      // 恢复模式：不过滤 Agent（selectedAgentIds 可能尚未同步到 World 的 agents）
+      // 恢复模式：不过滤 Agent
       if (restoring) return true;
       // 正常运行 / 暂停：只显示选中 Agent 的事件
       return !event.agent_id || selectedAgentIds.includes(event.agent_id);
     });
-    return result;
-  }, [restoring, isPaused, events, displayedEvents, selectedAgentIds]);
+  }, [restoring, events, displayedEvents, selectedAgentIds]);
 
   const relationshipValues = useMemo(
     () => Object.values(relationships),
@@ -160,6 +157,12 @@ export default function GroupSandbox() {
     return found ?? { name: selectedScenario };
   }, [scenarios, selectedScenario]);
 
+  const handleToggleFeedAgent = useCallback((agentId: string) => {
+    setFeedFilterIds((current) => current.includes(agentId)
+      ? current.filter((id) => id !== agentId)
+      : [...current, agentId]);
+  }, []);
+
   const handleStart = async () => {
     if (selectedAgentIds.length < 2 || pending) return;
     setError(null);
@@ -178,6 +181,7 @@ export default function GroupSandbox() {
       setStartGen((n) => n + 1); // 重置节流器
       setSelectedTick(null);
       setIsPaused(false);
+      setFeedFilterIds(selectedAgentIds);
       setPhase("running");
     } catch (cause) {
       setError(getErrorMessage(cause, "群体模拟启动失败"));
@@ -196,7 +200,6 @@ export default function GroupSandbox() {
       } else {
         await pauseWorld.mutateAsync(worldId);
         setIsPaused(true);
-        setPauseCooldown(true); // 冷却——等 paused 事件确认后才允许继续
       }
     } catch (cause) {
       setError(getErrorMessage(cause, "模拟状态切换失败"));
@@ -224,6 +227,23 @@ export default function GroupSandbox() {
     queryClient.invalidateQueries({ queryKey: ["worlds"] });
     setPhase("setup");
   }, [worldId, disconnect, pauseWorld, queryClient, setActiveWorld]);
+
+  const handleFinish = async () => {
+    if (!worldId || pending) return;
+    setError(null);
+    try {
+      await finishWorld.mutateAsync(worldId);
+      disconnect();
+      clear();
+      setWorldId(null);
+      setActiveWorld(null);
+      setSelectedTick(null);
+      setIsPaused(false);
+      setPhase("setup");
+    } catch (cause) {
+      setError(getErrorMessage(cause, "模拟结束失败"));
+    }
+  };
 
   const handleReset = async () => {
     if (!worldId || pending) return;
@@ -254,6 +274,7 @@ export default function GroupSandbox() {
       setIsPaused(world.status === "paused");
       setSelectedScenario(world.scenario?.name ?? selectedScenario);
       setSelectedAgentIds(world.agent_ids ?? []);
+      setFeedFilterIds(world.agent_ids ?? []);
     }
     didSyncRef.current = false; // 允许下次 connected 同步
     setRestoring(true);
@@ -311,12 +332,11 @@ export default function GroupSandbox() {
         connected={connected}
         isPaused={isPaused}
         isPending={pending}
-        pauseCooldown={pauseCooldown}
         speed={speed}
         onToggleSpeed={() => setSpeed((value) => value === 1 ? 2 : 1)}
         onToggleRunning={handleToggleRunning}
         onBack={handleBack}
-        onReset={handleReset}
+        onReset={handleFinish}
       />
       {error && <p role="alert" className="px-4 py-2 text-sm text-accent-red">{error}</p>}
       <SandboxRuntime
@@ -327,10 +347,12 @@ export default function GroupSandbox() {
         selectedTick={selectedTick}
         onSelectTick={setSelectedTick}
         onEventClick={setReplayEvent}
+        feedFilterIds={feedFilterIds}
+        onToggleFeedAgent={handleToggleFeedAgent}
       />
       <SandboxFooter
         selectedTick={selectedTick}
-        eventCount={visibleEvents.length}
+        eventCount={totalEventCount}
         agentCount={selectedAgents.length}
         onClearTick={() => setSelectedTick(null)}
       />
@@ -376,6 +398,8 @@ interface SandboxRuntimeProps {
   selectedTick: number | null;
   onSelectTick: (tick: number | null) => void;
   onEventClick?: (event: SSEEvent) => void;
+  feedFilterIds: string[];
+  onToggleFeedAgent: (agentId: string) => void;
 }
 
 function SandboxRuntime(props: SandboxRuntimeProps) {
@@ -387,10 +411,10 @@ function SandboxRuntime(props: SandboxRuntimeProps) {
       <main className="col-span-6 min-h-0 min-w-0 overflow-hidden">
         <div className="h-full flex flex-col gap-3">
           <div className="shrink-0 grid grid-cols-2 gap-3">
-            <Card><Timeline events={props.events} selectedTick={props.selectedTick} onSelectTick={props.onSelectTick} /></Card>
+            <Card className="flex flex-col"><Timeline events={props.events} selectedTick={props.selectedTick} onSelectTick={props.onSelectTick} /></Card>
             <RelationshipGraph agents={props.agents} relationships={props.relationships} lastRelationshipKey={props.lastRelationshipKey} />
           </div>
-          <Card className="flex-1 min-h-0 overflow-hidden flex flex-col"><EventFeed events={props.events} selectedTick={props.selectedTick} /></Card>
+          <Card className="flex-1 min-h-0 overflow-hidden flex flex-col"><EventFeed events={props.events} selectedTick={props.selectedTick} agents={props.agents} feedFilterIds={props.feedFilterIds} onToggleFeedAgent={props.onToggleFeedAgent} /></Card>
         </div>
       </main>
       <aside className="col-span-3 min-h-0 min-w-0 overflow-hidden">

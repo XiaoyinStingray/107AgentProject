@@ -52,9 +52,9 @@ class WorldStateMixin:
     relationships: dict[tuple[str, str], float]
     _name_to_id: dict[str, str]
     _db: Any  # sqlalchemy.ext.asyncio.AsyncSession
-    # Tool 副作用基础设施
-    _pending_agent_instructions: Any
-    _pending_instruction_routes: Any
+    # Tool 副作用基础设施（stubs: engine.py __init__ 覆盖）
+    _pending_agent_instructions: Any  # dict[str, list[AgentInstruction]]
+    _pending_instruction_routes: Any  # list[list[str]]
     _instruction_preempt_requested: Any
     _group_cancel_token: Any
     # LLM 客户端引用
@@ -377,12 +377,31 @@ class WorldStateMixin:
             pass  # LLM 评估失败不影响主流程
 
     async def _persist_events(self, events: list[SimEvent]):
-        """Persist a list of simulation events to SQLite."""
+        """Persist a list of simulation events to SQLite (idempotent).
+
+        Uses INSERT OR IGNORE semantics — duplicate event IDs are silently
+        skipped instead of crashing the transaction.
+        """
         if not events:
             return
+
         for event in events:
-            self._db.add(Event.from_sim_event(event))
-        await self._db.commit()
+            orm = Event.from_sim_event(event)
+            try:
+                self._db.add(orm)
+                await self._db.flush()
+            except Exception:
+                # 重复 ID 或约束冲突 → 跳过，不中断后续事件
+                await self._db.rollback()
+                logger.warning(
+                    f"_persist_events: skipped duplicate event {event.id[:8]} "
+                    f"(tick={event.tick}, type={event.type})"
+                )
+        # 全部成功后统一提交（避免 rollback 后再 commit 导致事务状态冲突）
+        try:
+            await self._db.commit()
+        except Exception:
+            await self._db.rollback()
 
     def inject_event(
         self,

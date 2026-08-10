@@ -67,6 +67,7 @@ class WorldMessageMixin:
     current_tick: int
     _name_to_id: dict[str, str]
     _act_model_client: Any
+    _pending_speaker_ids: list[str]
 
     def build_group_chat(self):
         """Create a target-aware AutoGen SelectorGroupChat for World Agents。"""
@@ -82,7 +83,7 @@ class WorldMessageMixin:
             selector_func=self._select_addressed_speaker,
             allow_repeated_speaker=False,
             termination_condition=TextMentionTermination(END_TICK_TOKEN),
-            max_turns=len(self.agents) * 3,
+            max_turns=max(12, len(self.agents) * 4),  # 至少 12 轮，保证充分互动
         )
 
     def _select_addressed_speaker(self, messages) -> str | None:

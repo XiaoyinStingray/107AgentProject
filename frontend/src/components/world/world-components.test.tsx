@@ -68,14 +68,14 @@ describe("Step 20 world components", () => {
   });
 
   it("filters thought events and renders relationship metadata", () => {
-    const { rerender } = render(<EventFeed events={events} />);
+    const { rerender } = render(<EventFeed events={events} feedFilterIds={["agent-1", "agent-2"]} />);
 
     expect(screen.getByText("MESSAGE")).toBeInTheDocument();
     expect(screen.getByText("RELATION")).toBeInTheDocument();
     expect(screen.queryByText("THOUGHT")).not.toBeInTheDocument();
     expect(screen.getByText(/-0\.05/)).toBeInTheDocument();
 
-    rerender(<EventFeed events={events} selectedTick={2} />);
+    rerender(<EventFeed events={events} selectedTick={2} feedFilterIds={["agent-1", "agent-2"]} />);
     expect(screen.queryByText("MESSAGE")).not.toBeInTheDocument();
     expect(screen.getByText("RELATION")).toBeInTheDocument();
   });

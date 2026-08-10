@@ -125,8 +125,25 @@ class MemoryRetriever:
         )
 
         self._session.add(memory)
-        await self._session.commit()
-        await self._session.refresh(memory)
+        try:
+            await self._session.commit()
+            await self._session.refresh(memory)
+        except Exception:
+            # 重复 ID 或事务状态异常 → 回滚并跳过
+            await self._session.rollback()
+            logger.warning(
+                f"MemoryRetriever.add: skipped duplicate memory for agent={agent_id[:8]}"
+            )
+            # 返回一个虚拟响应，避免调用方崩溃
+            return MemoryResponse(
+                id=memory.id,
+                agent_id=agent_id,
+                type=type_,
+                content=content,
+                importance=importance,
+                keywords=keywords,
+                created_at=memory.created_at,
+            )
 
         logger.debug(f"MemoryRetriever.add: agent={agent_id}, type={type_}, "
                       f"importance={importance}, keywords={keywords[:50]}")
