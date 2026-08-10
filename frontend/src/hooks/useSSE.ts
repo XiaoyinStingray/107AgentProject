@@ -17,6 +17,7 @@ export function useSSE(worldId: string | null) {
   const prevWorldIdRef = useRef<string | null>(null);
   const {
     events,
+    totalEventCount,
     appendEvent,
     clear,
     setConnected,
@@ -148,6 +149,7 @@ export function useSSE(worldId: string | null) {
 
   return {
     events,
+    totalEventCount,
     connected,
     relationships,
     lastRelationshipKey,

@@ -63,6 +63,7 @@ describe("Step 33 GroupSandbox", () => {
     } as unknown as ReturnType<typeof useWorldRelationships>);
     vi.mocked(useSSE).mockReturnValue({
       events: [],
+      totalEventCount: 0,
       connected: true,
       relationships: {},
       lastRelationshipKey: null,
@@ -92,6 +93,7 @@ describe("Step 33 GroupSandbox", () => {
   it("pauses, resumes, and resets the active World", async () => {
     vi.mocked(useSSE).mockReturnValue({
       events: [{ type: "paused", tick: 0, status: "paused" }],
+      totalEventCount: 1,
       connected: true,
       relationships: {},
       lastRelationshipKey: null,

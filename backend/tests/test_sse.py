@@ -94,7 +94,10 @@ class TestSSEFormatting:
 
         result = _sse_event({"type": "agent_message", "content": "你好"})
         assert "data:" in result
-        assert "你好" in result
+        # ensure_ascii=True escapes CJK to \uXXXX; verify via JSON parse
+        import json
+        parsed = json.loads(result.lstrip("data: ").rstrip("\n"))
+        assert parsed["content"] == "你好"
         assert "agent_message" in result
         assert result.endswith("\n\n")
 
@@ -249,22 +252,22 @@ class TestSSEEndpoint:
         """SSE 端点返回 text/event-stream，且不依赖会挂起的同步流客户端。"""
         from api.sse import stream_world
 
-        response = await stream_world("w-sse")
+        response = await stream_world("w-sse")  # type: ignore[misc]
 
         assert response.status_code == 200
         assert response.media_type == "text/event-stream"
-        await response.body_iterator.aclose()
+        await response.body_iterator.aclose()  # type: ignore[attr-defined]
 
     @pytest.mark.asyncio
     async def test_stream_contains_connected_event(self, app_with_sse):
         """第一条消息是 connected 事件。"""
         from api.sse import stream_world
 
-        response = await stream_world("w-sse")
-        chunk = await anext(response.body_iterator)
+        response = await stream_world("w-sse")  # type: ignore[misc]
+        chunk = await anext(response.body_iterator)  # type: ignore[arg-type]
 
         assert "connected" in chunk
-        await response.body_iterator.aclose()
+        await response.body_iterator.aclose()  # type: ignore[attr-defined]
 
     @pytest.mark.asyncio
     async def test_missing_world_returns_404(self, app_with_sse):
@@ -404,7 +407,10 @@ class TestPlanRevisedEventFormat:
 
         assert "data:" in result
         assert "plan_revised" in result
-        assert "快速竞品扫描" in result
+        # ensure_ascii=True escapes CJK to \uXXXX; verify via JSON parse
+        import json
+        parsed = json.loads(result.lstrip("data: ").rstrip("\n"))
+        assert parsed["data"]["new_title"] == "快速竞品扫描"
         assert result.endswith("\n\n")
 
     def test_plan_revised_event_to_dict(self):

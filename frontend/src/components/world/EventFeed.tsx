@@ -9,23 +9,38 @@ import type { EventFeedProps } from "../../types/sandbox";
 export default function EventFeed({
   events,
   selectedTick = null,
+  agents = [],
+  feedFilterIds = [],
+  onToggleFeedAgent,
   className = "",
 }: EventFeedProps) {
   const feedEvents = events.filter(
     (event) =>
       event.type !== "thought_stream" &&
       !INFRASTRUCTURE_EVENTS.has(event.type) &&
-      (selectedTick === null || event.tick === selectedTick),
+      (selectedTick === null || event.tick === selectedTick) &&
+      (feedFilterIds.length === 0 || !event.agent_id || feedFilterIds.includes(event.agent_id)),
   );
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [userScrolledUp, setUserScrolledUp] = useState(false);
 
-  const isAtBottom = () => {
+  // 用 wheel/touchstart 检测用户真实滚动交互（程序化滚动不触发这些事件）
+  useEffect(() => {
     const el = containerRef.current;
-    if (!el) return true;
-    return el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-  };
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) setUserScrolledUp(true);
+      else setUserScrolledUp(false);
+    };
+    const onTouch = () => setUserScrolledUp(true);
+    el.addEventListener("wheel", onWheel, { passive: true });
+    el.addEventListener("touchstart", onTouch, { passive: true });
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("touchstart", onTouch);
+    };
+  }, []);
 
   // 新事件到达 → 自动滚底
   useEffect(() => {
@@ -36,10 +51,6 @@ export default function EventFeed({
     }
   }, [events, userScrolledUp]);
 
-  const handleScroll = () => {
-    setUserScrolledUp(!isAtBottom());
-  };
-
   return (
     <>
       <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
@@ -49,9 +60,31 @@ export default function EventFeed({
         </span>
       </div>
 
+      {agents.length > 0 && onToggleFeedAgent && (
+        <div className="flex items-center gap-2 px-4 py-2 border-b border-border shrink-0 overflow-x-auto">
+          <span className="text-xs font-mono text-text-secondary/60 shrink-0">Agent:</span>
+          {agents.map((agent) => {
+            const isActive = feedFilterIds.length === 0 || feedFilterIds.includes(agent.id);
+            return (
+              <button
+                key={agent.id}
+                type="button"
+                onClick={() => onToggleFeedAgent(agent.id)}
+                className={`text-xs font-mono px-2 py-0.5 rounded border transition-colors shrink-0 ${
+                  isActive
+                    ? "border-accent-blue/60 bg-accent-blue/10 text-accent-blue"
+                    : "border-border bg-bg-secondary/40 text-text-secondary/60 hover:text-text-secondary"
+                }`}
+              >
+                {agent.name || agent.id.slice(0, 8)}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <div
         ref={containerRef}
-        onScroll={handleScroll}
         className={`flex-1 min-h-0 overflow-y-auto p-4 ${className}`}
       >
         {feedEvents.length === 0 ? (
@@ -213,6 +246,7 @@ const EVENT_VISUALS: Record<
   session_end: { label: "", border: "", text: "" },
   goal_update: { label: "", border: "", text: "" },
   plan_updated: { label: "", border: "", text: "" },
+  plan_revised: { label: "", border: "", text: "" },
   coordinator_nudge: { label: "", border: "", text: "" },
   report_ready: { label: "", border: "", text: "" },
   debate_update: { label: "", border: "", text: "" },

@@ -174,8 +174,13 @@ async def _world_event_generator(
                 })
                 break
             if engine.world.status == "paused":
-                # 暂停：不发送事件（前端已知 paused），静默等待恢复
-                await asyncio.sleep(0.5)
+                # 暂停：发送 paused 事件通知前端，静默等待恢复
+                yield _sse_event({
+                    "type": "paused",
+                    "world_id": world_id,
+                    "tick": engine.current_tick,
+                })
+                await asyncio.sleep(1)
                 continue
 
             if engine.world.status == "running":
@@ -185,13 +190,8 @@ async def _world_event_generator(
                     d = _event_to_dict(event, name_map)
                     yield _sse_event(d)
                 tick_count += 1
-            elif engine.world.status == "paused":
-                yield _sse_event({
-                    "type": "paused",
-                    "world_id": world_id,
-                    "tick": engine.current_tick,
-                })
-                await asyncio.sleep(1)
+                # Tick 间隔：保证前端有足够时间展示事件，避免 tick 猛涨
+                await asyncio.sleep(2)
     except Exception as error:
         logger.error(f"SSE stream error for world {world_id}: {error}")
         yield _sse_event({
@@ -221,7 +221,7 @@ def _sse_event(data: dict) -> str:
 
         （空行表示一条消息结束）
     """
-    payload = json.dumps(data, ensure_ascii=False)
+    payload = json.dumps(data, ensure_ascii=True)
     return f"data: {payload}\n\n"
 
 

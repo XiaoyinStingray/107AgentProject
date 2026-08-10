@@ -50,12 +50,22 @@ export default function ThoughtStream({
   const hasEarlier = windowStart > 0;
   const followsLatest = boundedEnd >= events.length;
 
-  // 判断是否在底部
-  const isAtBottom = () => {
+  // 用 wheel/touchstart 检测用户真实滚动交互（程序化滚动不触发这些事件）
+  useEffect(() => {
     const el = containerRef.current;
-    if (!el) return true;
-    return el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-  };
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) setUserScrolledUp(true);
+      else setUserScrolledUp(false);
+    };
+    const onTouch = () => setUserScrolledUp(true);
+    el.addEventListener("wheel", onWheel, { passive: true });
+    el.addEventListener("touchstart", onTouch, { passive: true });
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("touchstart", onTouch);
+    };
+  }, []);
 
   // 新事件到达 → 自动滚底
   useEffect(() => {
@@ -65,11 +75,6 @@ export default function ThoughtStream({
       el.scrollTop = el.scrollHeight;
     }
   }, [events.length, autoScroll, userScrolledUp, followsLatest]);
-
-  // 检测用户手动滚动
-  const handleScroll = () => {
-    setUserScrolledUp(!isAtBottom());
-  };
 
   // 连续同一 Agent 的消息合并显示（compact 模式）
   const renderEvents = () => {
@@ -116,7 +121,6 @@ export default function ThoughtStream({
   return (
     <div
       ref={containerRef}
-      onScroll={handleScroll}
       className={`
         overflow-y-auto p-4
         ${events.length === 0 ? "flex items-center justify-center" : ""}

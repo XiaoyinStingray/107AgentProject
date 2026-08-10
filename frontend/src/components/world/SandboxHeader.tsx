@@ -7,7 +7,6 @@ interface SandboxHeaderProps {
   connected: boolean;
   isPaused: boolean;
   isPending: boolean;
-  pauseCooldown?: boolean;
   speed: SandboxSpeed;
   onToggleSpeed: () => void;
   onToggleRunning: () => void;
@@ -22,14 +21,13 @@ export default function SandboxHeader({
   connected,
   isPaused,
   isPending,
-  pauseCooldown,
   speed,
   onToggleSpeed,
   onToggleRunning,
   onBack,
   onReset,
 }: SandboxHeaderProps) {
-  const statusLabel = pauseCooldown ? "⏳ 暂停中…" : isPaused ? "⏸ 已暂停" : connected ? "🟢 运行中" : "⏳ 连接中";
+  const statusLabel = isPaused ? "⏸ 已暂停" : connected ? "🟢 运行中" : "⏳ 连接中";
   const statusColor = isPaused ? "text-accent-orange" : connected ? "text-accent-green" : "text-text-secondary";
 
   return (
@@ -48,14 +46,13 @@ export default function SandboxHeader({
       <button
         type="button"
         onClick={onToggleRunning}
-        disabled={isPending || pauseCooldown}
+        disabled={isPending}
         className={`text-xs font-mono transition-colors ${
-          pauseCooldown ? "text-text-secondary/60" :
           isPaused ? "text-accent-green hover:text-accent-green/80" :
           "text-accent-orange hover:text-accent-orange/80"
         }`}
       >
-        {pauseCooldown ? "⏳ 暂停中…" : isPaused ? "▶ 继续" : "⏸ 暂停"}
+        {isPaused ? "▶ 继续" : "⏸ 暂停"}
       </button>
       <button
         type="button"

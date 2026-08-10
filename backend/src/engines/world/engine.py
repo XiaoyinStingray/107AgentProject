@@ -63,6 +63,9 @@ class WorldEngine(
         self._instruction_preempt_requested = False
         self._goal_check_pending = False
 
+        # === 冲突去重：记录已报告的 (agent_a_id, agent_b_id) 对 ===
+        self._reported_conflicts: set[tuple[str, str]] = set()
+
         # === State 4: SceneBridge 注入点（scenes.py start_scene 赋值）===
         self.scene_bridge: "SceneBridge | None" = None
 
@@ -366,7 +369,10 @@ class WorldEngine(
         return events
 
     def _detect_conflict(self) -> list[SimEvent]:
-        """检测 Agent 间的目标冲突，生成 conflict_detected 事件。"""
+        """检测 Agent 间的目标冲突，生成 conflict_detected 事件。
+
+        已报告的冲突对会被跳过，避免每个 tick 重复生成相同冲突事件。
+        """
         from engines.world.conflict import (
             build_conflict_events,
             detect_goal_conflicts,
@@ -379,8 +385,17 @@ class WorldEngine(
             for aid, agent in self.agents.items()
         }
         conflicts = detect_goal_conflicts(self.agents)
+
+        # 过滤已报告的冲突对（双向去重）
+        new_conflicts = []
+        for a_id, b_id, goal_a, goal_b in conflicts:
+            pair = (min(a_id, b_id), max(a_id, b_id))
+            if pair not in self._reported_conflicts:
+                self._reported_conflicts.add(pair)
+                new_conflicts.append((a_id, b_id, goal_a, goal_b))
+
         return build_conflict_events(
-            conflicts, self.world.id, self.current_tick, agent_names,
+            new_conflicts, self.world.id, self.current_tick, agent_names,
         )
 
     async def _finish_tick(self, tick_events: list[SimEvent]) -> None:

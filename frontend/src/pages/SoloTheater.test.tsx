@@ -111,6 +111,7 @@ describe("M2 SoloTheater lifecycle", () => {
     vi.mocked(useDeleteWorld).mockReturnValue(mutation(deleteWorld) as never);
     vi.mocked(useSSE).mockReturnValue({
       events: [],
+      totalEventCount: 0,
       connected: true,
       relationships: {},
       lastRelationshipKey: null,

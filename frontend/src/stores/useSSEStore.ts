@@ -8,6 +8,7 @@ import type {
 
 interface SSEStore {
   events: SSEEvent[];
+  totalEventCount: number;
   connected: boolean;
   relationships: Record<string, RelationshipState>;
   lastRelationshipKey: string | null;
@@ -44,6 +45,7 @@ function parseRelationshipEvent(event: SSEEvent): RelationshipState | null {
 
 export const useSSEStore = create<SSEStore>((set) => ({
   events: [],
+  totalEventCount: 0,
   connected: false,
   relationships: {},
   lastRelationshipKey: null,
@@ -56,6 +58,7 @@ export const useSSEStore = create<SSEStore>((set) => ({
       return {
         // 最多保留 500 条，防止 DOM 积压
         events: [...state.events.slice(-499), event],
+        totalEventCount: state.totalEventCount + 1,
         relationships: relationship && key
           ? { ...state.relationships, [key]: relationship }
           : state.relationships,
@@ -74,6 +77,6 @@ export const useSSEStore = create<SSEStore>((set) => ({
       return { relationships: { ...seeded, ...state.relationships } };
     }),
   clear: () =>
-    set({ events: [], relationships: {}, lastRelationshipKey: null }),
+    set({ events: [], totalEventCount: 0, relationships: {}, lastRelationshipKey: null }),
   setConnected: (c) => set({ connected: c }),
 }));
