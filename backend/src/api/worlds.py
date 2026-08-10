@@ -256,6 +256,10 @@ async def start_world(
         engine = _active_worlds.get(world_id)
         if engine:
             engine.world.status = "running"
+            # 唤醒 SSE generator 的 pause 等待
+            _pe = getattr(engine, "_pause_event", None)
+            if _pe is not None:
+                _pe.set()
         else:
             engine = await _build_world_engine(world)
             engine.world.status = "running"
@@ -294,10 +298,12 @@ async def pause_world(
     engine = _active_worlds.get(world_id)
     if engine:
         engine.world.status = "paused"
-        # The runtime engine owns the authoritative clock.  Persist it before
-        # a later resume has to rebuild the engine from SQLite.
+        # 同步运行时 tick 到 DB（运行时 engine 持有权威时钟）
         world.current_tick = engine.current_tick
         engine.world.current_tick = engine.current_tick
+        # 清除 pause Event——SSE generator 检查 status 后会进入等待
+        if hasattr(engine, "_pause_event") and engine._pause_event is not None:
+            engine._pause_event.clear()
         # 取消群组 LLM token 使暂停即时生效（不等 LLM 跑完）
         token = getattr(engine, "_group_cancel_token", None)
         if token:

@@ -1,5 +1,6 @@
 """WorldEngine orchestration for ticks, streaming, and event dispatch."""
 
+import asyncio
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
@@ -69,6 +70,14 @@ class WorldEngine(
         # === State 4 D2: 行为指纹采集器 ===
         from engines.agent_factory.fingerprint import FingerprintCollector
         self._fingerprint_collector = FingerprintCollector()
+
+        # === State 8: Tick 约束与暂停信号 ===
+        # 0 = 正常运行, 1 = 软约束（催促收束）, 2 = 硬约束临近（强制收束）
+        self.tick_pressure: int = 0
+        # asyncio.Event — SSE generator pause 时使用，替代轮询 sleep
+        self._pause_event: asyncio.Event | None = None
+        # 连续空 tick 计数——供 context builder 注入破冰提示
+        self.consecutive_empty_ticks: int = 0
 
         self._reset_agent_contexts(agents)
         self._name_to_id = self._build_name_map(agents)

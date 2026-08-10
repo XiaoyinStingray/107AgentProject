@@ -1,6 +1,13 @@
 """
 SSE 桥接 — WorldEngine.tick_stream() → Server-Sent Events → 前端实时事件流。
 
+Tick 约束体系（State 8 M3 重构）:
+  - 解析 scenario.time_range 提取 tick 上限（如 "1-30" → 30）
+  - 软约束（100%）：达到上限后注入收束上下文，催促 Agent 结束对话
+  - 硬约束（200%）：达到 2x 上限后强制结束，发送 session_end
+  - 空 tick 检测：无有意义事件（agent_message/agent_action/thought_stream）的 tick 不计入配额
+  - 连续空 tick 上限：连续 3 个空 tick 视为对话枯竭，提前结束
+
 用法（Phase 5 挂载到 FastAPI router）:
     from api.sse import sse_router
     app.include_router(sse_router)
@@ -22,6 +29,62 @@ from engines.world.engine import WorldEngine
 from models.event import SimEvent
 
 sse_router = APIRouter(prefix="/api/worlds", tags=["sse"])
+
+# =============================================================================
+# Tick 约束常量
+# =============================================================================
+
+# 有意义的事件类型——用于判定一个 tick 是否"空"
+_MEANINGFUL_EVENT_TYPES = frozenset({
+    "agent_message",
+    "agent_action",
+    "thought_stream",
+    "relationship_change",
+    "goal_update",
+    "conflict_detected",
+    "world_event",  # LLM 错误/超时也算产出——不算空 tick
+})
+
+# 软约束 = 场景 time_range 上限 × 1.0（100%）
+# 硬约束 = 场景 time_range 上限 × 2.0（200%）
+HARD_LIMIT_MULTIPLIER = 2.0
+
+# 连续空 tick 上限——超过此数视为对话枯竭，提前结束
+MAX_CONSECUTIVE_EMPTY_TICKS = 3
+
+# 单人剧场固定 tick 数（无 time_range 时回退）
+SOLO_DEFAULT_MAX_TICKS = 8
+
+
+def _parse_tick_limit(time_range: str) -> int:
+    """解析 time_range 字符串中的 tick 上限。
+
+    Args:
+        time_range: 如 "1-30"、"1-20"、"1-12"
+
+    Returns:
+        tick 上限（整数），解析失败返回 0
+    """
+    if not time_range or not isinstance(time_range, str):
+        return 0
+    try:
+        parts = time_range.split("-")
+        if len(parts) == 2:
+            upper = int(parts[1].strip())
+            if upper > 0:
+                return upper
+    except (ValueError, IndexError, AttributeError):
+        pass
+    return 0
+
+
+def _has_meaningful_events(events: list[SimEvent]) -> bool:
+    """判断一个 tick 是否包含有意义的事件。
+
+    排除纯基础设施事件（tick_boundary/connected/paused/error/world_event 等）。
+    """
+    return any(e.type in _MEANINGFUL_EVENT_TYPES for e in events)
+
 
 # =============================================================================
 # 内存 World 注册表（Phase 5 替换为 DB-backed）
@@ -144,54 +207,148 @@ async def _world_event_generator(
     每次循环前检查 conn_id 是否仍为活跃连接——若不是则退出，
     防止 EventSource 重连后多个 generator 同时运行。
     connected 事件中包含 world.status，前端可用于校准暂停状态。
+
+    Tick 约束（State 8）:
+      - 软约束：tick_count >= soft_limit → 注入 wind-down pressure
+      - 硬约束：tick_count >= hard_limit → 强制结束
+      - 空 tick：无有意义事件的 tick 不计入 soft/hard 计数
+      - 连续空 tick：≥ MAX_CONSECUTIVE_EMPTY_TICKS → 对话枯竭，提前结束
     """
     name_map = {agent_id: agent.persona.name for agent_id, agent in engine.agents.items()}
+
+    # ── 解析 tick 约束 ──
+    # 单人模式：固定 8 tick（与旧行为一致），忽略 time_range
+    if len(engine.agents) == 1:
+        soft_limit = SOLO_DEFAULT_MAX_TICKS
+        hard_limit = SOLO_DEFAULT_MAX_TICKS
+    else:
+        # 多人模式：从 time_range 解析上限，fallback 30/60
+        scenario = getattr(engine.world, "scenario", None)
+        time_range = getattr(scenario, "time_range", "") if scenario else ""
+        parsed_limit = _parse_tick_limit(time_range)
+        if parsed_limit > 0:
+            soft_limit = parsed_limit
+            hard_limit = max(soft_limit + 5, int(soft_limit * HARD_LIMIT_MULTIPLIER))
+        else:
+            soft_limit = 30
+            hard_limit = 60
+
+    logger.info(
+        f"SSE tick constraints: world={world_id}, "
+        f"soft={soft_limit}, hard={hard_limit}, agents={len(engine.agents)}"
+    )
+
     yield _sse_event({
         "type": "connected",
         "world_id": world_id,
         "tick": engine.current_tick,
-        "status": engine.world.status,  # 前端重连时校验 isPaused
+        "status": engine.world.status,
     })
-    max_ticks = 8 if len(engine.agents) == 1 else 0
-    tick_count = 0
+
+    tick_count = 0           # 有意义 tick 计数（用于软/硬约束判定）
+    total_ticks = 0          # 总 tick 数（含空 tick，用于日志）
+    consecutive_empty = 0    # 连续空 tick 计数
+
     try:
         while engine.world.status not in ("finished", "idle"):
+            # 连接去重检查
             if _active_connection_ids.get(world_id) != conn_id:
                 logger.info(f"SSE: generator {conn_id[:8]} superseded for world {world_id}")
                 break
-            if max_ticks and tick_count >= max_ticks:
+
+            # 硬约束：强制结束
+            if tick_count >= hard_limit:
+                logger.info(
+                    f"SSE: hard limit reached for world {world_id} "
+                    f"(tick_count={tick_count}, hard_limit={hard_limit})"
+                )
                 engine.world.status = "finished"
                 await _finish_engine_simulation(engine)
-                # Solo Theater has an automatic eight-tick boundary.  Persist
-                # the runtime clock/status before the stream closes so list
-                # and replay APIs do not fall back to the original T0 row.
                 from api.worlds import _sync_world_to_db
                 await _sync_world_to_db(engine.world)
                 yield _sse_event({
                     "type": "session_end",
                     "world_id": world_id,
                     "tick": engine.current_tick,
+                    "reason": "hard_limit",
                 })
                 break
-            if engine.world.status == "paused":
-                # 暂停：不发送事件（前端已知 paused），静默等待恢复
-                await asyncio.sleep(0.5)
-                continue
 
-            if engine.world.status == "running":
-                async for event in engine.tick_stream():
-                    if engine.world.status != "running":
-                        continue
-                    d = _event_to_dict(event, name_map)
-                    yield _sse_event(d)
-                tick_count += 1
-            elif engine.world.status == "paused":
+            # 连续空 tick 检查（仅多人剧场——单人模式有固定 8 tick 上限）
+            if len(engine.agents) > 1 and consecutive_empty >= MAX_CONSECUTIVE_EMPTY_TICKS:
+                logger.info(
+                    f"SSE: conversation stalled for world {world_id} "
+                    f"(consecutive_empty={consecutive_empty})"
+                )
+                engine.world.status = "finished"
+                await _finish_engine_simulation(engine)
+                from api.worlds import _sync_world_to_db
+                await _sync_world_to_db(engine.world)
+                yield _sse_event({
+                    "type": "session_end",
+                    "world_id": world_id,
+                    "tick": engine.current_tick,
+                    "reason": "conversation_stalled",
+                })
+                break
+
+            # 暂停等待
+            if engine.world.status == "paused":
                 yield _sse_event({
                     "type": "paused",
                     "world_id": world_id,
                     "tick": engine.current_tick,
                 })
-                await asyncio.sleep(1)
+                # 使用 Event 等待而非轮询 sleep
+                pause_event = getattr(engine, "_pause_event", None)
+                if pause_event is None:
+                    engine._pause_event = asyncio.Event()
+                    pause_event = engine._pause_event
+                if pause_event is not None:
+                    try:
+                        await asyncio.wait_for(pause_event.wait(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        pass  # 每秒检查一次连接状态
+                continue
+
+            if engine.world.status == "running":
+                # ── 设置 tick 压力级别 ──
+                if tick_count >= soft_limit:
+                    engine.tick_pressure = 1  # 软约束：催促收束
+                if tick_count >= hard_limit - 3:
+                    engine.tick_pressure = 2  # 硬约束临近：强制收束
+
+                # ── 执行一个 tick ──
+                tick_events: list[SimEvent] = []
+                async for event in engine.tick_stream():
+                    tick_events.append(event)
+                    # 暂停时：tick_stream 内部已完成收尾（post_process + persist），
+                    # 已生成的事件照常推送到前端，状态变更后的事件静默丢弃
+                    if engine.world.status == "running":
+                        d = _event_to_dict(event, name_map)
+                        yield _sse_event(d)
+
+                total_ticks += 1
+
+                # ── 空 tick 检测 ──
+                # 单人模式：无事件也计数（固定上限控制节奏）
+                # 多人模式：空 tick 不计入软/硬约束配额，但追踪连续空tick
+                if len(engine.agents) == 1:
+                    tick_count += 1
+                    consecutive_empty = 0
+                elif _has_meaningful_events(tick_events):
+                    tick_count += 1
+                    consecutive_empty = 0
+                else:
+                    consecutive_empty += 1
+                    logger.debug(
+                        f"SSE: empty tick for world {world_id} "
+                        f"(total={total_ticks}, meaningful={tick_count}, "
+                        f"consecutive_empty={consecutive_empty})"
+                    )
+                # 同步空 tick 计数到 engine——供 context builder 注入破冰提示
+                engine.consecutive_empty_ticks = consecutive_empty
+
     except Exception as error:
         logger.error(f"SSE stream error for world {world_id}: {error}")
         yield _sse_event({
@@ -203,6 +360,14 @@ async def _world_event_generator(
         # 仅当本连接仍为活跃连接时才清理
         if _active_connection_ids.get(world_id) == conn_id:
             _active_connection_ids.pop(world_id, None)
+        # 清理 pause Event——唤醒任何等待者
+        _pe = getattr(engine, "_pause_event", None)
+        if _pe is not None:
+            _pe.set()
+        logger.info(
+            f"SSE: generator {conn_id[:8]} ended for world {world_id} "
+            f"(meaningful_ticks={tick_count}, total_ticks={total_ticks})"
+        )
 
 
 # =============================================================================

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAgents } from "../api/agents";
+import { useScenarios } from "../api/scenarios";
 import {
   useCreateWorld,
   useDeleteWorld,
@@ -33,6 +34,7 @@ export default function GroupSandbox() {
   const initialScenario = (location.state as { scenario?: string; agentCount?: number } | null)?.scenario;
   const initialAgentCount = (location.state as { scenario?: string; agentCount?: number } | null)?.agentCount;
   const { data: agents = [], isLoading: agentsLoading, error: agentsError } = useAgents();
+  const { data: scenarios = [] } = useScenarios();
   const initializedAgents = useRef(false);
   const [phase, setPhase] = useState<"setup" | "running">("setup");
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);
@@ -152,15 +154,22 @@ export default function GroupSandbox() {
       : [...current, agentId]);
   }, []);
 
+  /** 按名称查找完整场景数据（含 time_range/description 等自定义字段） */
+  const resolveScenario = useCallback(() => {
+    const found = scenarios.find((s) => s.name === selectedScenario);
+    return found ?? { name: selectedScenario };
+  }, [scenarios, selectedScenario]);
+
   const handleStart = async () => {
     if (selectedAgentIds.length < 2 || pending) return;
     setError(null);
     clear();
     try {
+      const fullScenario = resolveScenario();
       const world = await createWorld.mutateAsync({
         name: `群体沙盒 - ${selectedScenario}`,
         world_type: "group",
-        scenario: { name: selectedScenario },
+        scenario: fullScenario,
         agent_ids: selectedAgentIds,
       });
       await startWorld.mutateAsync(world.id);
@@ -248,10 +257,22 @@ export default function GroupSandbox() {
     }
     didSyncRef.current = false; // 允许下次 connected 同步
     setRestoring(true);
+    // 安全网：最多等 8 秒（如果是 100+ tick 的长时间运行，需要更多加载时间）
     if (restoreTimerRef.current) clearTimeout(restoreTimerRef.current);
-    restoreTimerRef.current = setTimeout(() => setRestoring(false), 2000);
+    restoreTimerRef.current = setTimeout(() => setRestoring(false), 8000);
     setPhase("running");
   }, [clear, setActiveWorld, allWorlds, selectedScenario]);
+
+  // 事件到达后自动结束 restoring 模式（事件驱动 > 固定超时）
+  useEffect(() => {
+    if (restoring && events.length > 0) {
+      // 收到第一批事件后，给节流器一点时间追赶
+      const timer = setTimeout(() => setRestoring(false), 600);
+      if (restoreTimerRef.current) clearTimeout(restoreTimerRef.current);
+      restoreTimerRef.current = timer;
+      return () => clearTimeout(timer);
+    }
+  }, [restoring, events.length]);
 
   /** 从 World 列表删除实验 */
   const handleDeleteWorld = useCallback(async (id: string) => {

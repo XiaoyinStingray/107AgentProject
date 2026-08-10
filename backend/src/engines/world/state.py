@@ -9,6 +9,7 @@ from loguru import logger
 from engines.world.relationships import (
     apply_relationship_changes,
     extract_relationship_changes,
+    assess_tick_relationships_llm,
 )
 from engines.world.instructions import resolve_agent_instruction
 from engines.world.resources import build_resource_context
@@ -51,6 +52,16 @@ class WorldStateMixin:
     relationships: dict[tuple[str, str], float]
     _name_to_id: dict[str, str]
     _db: Any  # sqlalchemy.ext.asyncio.AsyncSession
+    # Tool 副作用基础设施
+    _pending_agent_instructions: Any
+    _pending_instruction_routes: Any
+    _instruction_preempt_requested: Any
+    _group_cancel_token: Any
+    # LLM 客户端引用
+    _act_model_client: Any
+    # State 8: LLM 关系评估延迟结果
+    _pending_llm_relationships: Any
+    _llm_relation_task: Any
 
     def _build_world_context(self) -> str:
         """Build the current tick context injected into every Agent."""
@@ -75,7 +86,70 @@ class WorldStateMixin:
         goal_hints = self._build_goal_context()
         if goal_hints:
             context += goal_hints
+        # State 8: Tick 压力——软约束/硬约束的收束提示 + 空 tick 破冰
+        pressure = self._build_tick_pressure_context()
+        if pressure:
+            context += pressure
+        icebreaker = self._build_icebreaker_context()
+        if icebreaker:
+            context += icebreaker
         return context
+
+    def _build_tick_pressure_context(self) -> str:
+        """根据当前 tick_pressure 级别生成收束提示。
+
+        pressure=1（软约束）：催促 Agent 开始收束对话。
+        pressure=2（硬约束临近）：强制要求立即结束。
+        """
+        pressure = getattr(self, "tick_pressure", 0)
+        if pressure <= 0:
+            return ""
+
+        if pressure >= 2:
+            return (
+                "\n⚠️ 本场景即将结束——这是最后的时间段。\n"
+                "请立即做一次简短的告别或总结（10-20字），"
+                "表达你对当前互动的最终想法。\n"
+                "不要再开启新话题或提出新问题。\n"
+                "请在你的回复末尾加上结束标记，通知系统本轮对话已完成。\n"
+            )
+
+        # pressure == 1: 软约束
+        return (
+            "\n⏳ 本场景已进入尾声阶段。\n"
+            "请在接下来的对话中自然地收束话题——"
+            "可以做一次简短的总结、告别或对未来的展望。\n"
+            "避免展开新的长篇讨论。\n"
+        )
+
+    def _build_icebreaker_context(self) -> str:
+        """当对话停滞（连续空 tick）时注入破冰提示。
+
+        只对多人剧场生效——单人模式有自己的节奏控制。
+        """
+        empty_count = getattr(self, "consecutive_empty_ticks", 0)
+        if empty_count <= 0 or len(self.agents) < 2:
+            return ""
+
+        if empty_count == 1:
+            # 首次空 tick——温和提醒
+            names = ", ".join(
+                agent.persona.name or agent.id for agent in self.agents.values()
+            )
+            return (
+                "\n💬 上一个时间段没有人说话。\n"
+                f"在场的人物有：{names}。\n"
+                "请根据你的角色和当前场景，主动发起一段对话——"
+                "可以是对当前处境的感受、对他人的观察，或者一个简单的问候。\n"
+            )
+        # 连续 2+ 空 tick——更强的破冰 + 外部事件暗示
+        return (
+            "\n🔔 已经沉默了一段时间。\n"
+            "请立即发起互动——对在场的人说点什么。\n"
+            "如果实在无话可说，可以描述你此刻的内心感受（用 think_aloud），"
+            "或者观察周围环境（用 observe）。\n"
+            "不要让对话中断。\n"
+        )
 
     def _build_goal_context(self) -> str:
         """Build goal status hints for each agent with recently achieved goals."""
@@ -229,8 +303,47 @@ class WorldStateMixin:
         )
 
     def _update_relationships(self, events: list[SimEvent]) -> list[SimEvent]:
-        """Apply interaction signals and return relationship_change events."""
-        changes = extract_relationship_changes(events, set(self.agents.keys()))
+        """Apply interaction signals and return relationship_change events。
+
+        State 8: 每 3 tick 触发 LLM 深度关系评估（fire-and-forget），
+        结果在后续 tick 的 post-processing 中通过 _pending_llm_relationships 合并。
+        关键词检测在每个 tick 即时生效。
+        """
+        # 关键词检测（快速路径——所有 tick）
+        kw_changes = extract_relationship_changes(events, set(self.agents.keys()))
+
+        # 合并上一轮 LLM 评估的延迟结果
+        pending_llm = getattr(self, "_pending_llm_relationships", None) or []
+        if pending_llm:
+            self._pending_llm_relationships = []
+
+        # 合并去重（LLM 结果优先级更高）
+        all_changes: dict[tuple[str, str], tuple[str, str, str, float]] = {}
+        for c in kw_changes:
+            all_changes[(c[0], c[1])] = c
+        for c in pending_llm:
+            all_changes[(c[0], c[1])] = c
+
+        # 触发本轮 LLM 评估（fire-and-forget，结果下一 tick 生效）
+        if self.current_tick > 0 and self.current_tick % 3 == 0:
+            agent_names = {
+                aid: agent.persona.name or aid
+                for aid, agent in self.agents.items()
+            }
+            model_client = getattr(self, "_act_model_client", None)
+            if model_client and len(agent_names) >= 2:
+                import asyncio as _asyncio
+                # 如果上一轮评估还在跑就先取消（避免重叠写 _pending_llm_relationships）
+                prev_task = getattr(self, "_llm_relation_task", None)
+                if prev_task and not prev_task.done():
+                    prev_task.cancel()
+                self._llm_relation_task = _asyncio.ensure_future(
+                    self._run_llm_relationship_assessment(
+                        events, agent_names, model_client
+                    )
+                )
+
+        changes = list(all_changes.values())
         if not changes:
             return []
         relationship_events = apply_relationship_changes(self.relationships, changes)
@@ -240,9 +353,28 @@ class WorldStateMixin:
             event.created_at = datetime.now(timezone.utc).isoformat()
         logger.info(
             f"WorldEngine._update_relationships: tick={self.current_tick}, "
-            f"{len(changes)} changes, {len(relationship_events)} rel_events"
+            f"kw={len(kw_changes)}, pending_llm={len(pending_llm)}, "
+            f"merged={len(changes)}, rel_events={len(relationship_events)}"
         )
         return relationship_events
+
+    async def _run_llm_relationship_assessment(
+        self,
+        events: list[SimEvent],
+        agent_names: dict[str, str],
+        model_client: Any,
+    ) -> None:
+        """Fire-and-forget: 运行 LLM 关系评估，结果存入 _pending_llm_relationships。"""
+        try:
+            llm_changes = await assess_tick_relationships_llm(
+                events, agent_names, model_client,
+                self.world.id, self.current_tick,
+            )
+            if not hasattr(self, "_pending_llm_relationships"):
+                self._pending_llm_relationships = []
+            self._pending_llm_relationships = llm_changes
+        except Exception:
+            pass  # LLM 评估失败不影响主流程
 
     async def _persist_events(self, events: list[SimEvent]):
         """Persist a list of simulation events to SQLite."""
