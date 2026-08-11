@@ -10,7 +10,7 @@ export const ARENA_JUDGE_REPLAY_MS = 900;
 export const MIN_BATTLE_ROYALE_AGENTS = 6;
 export const MAX_BATTLE_ROYALE_AGENTS = 8;
 
-/** 三种 1v1 模式的用户可见配置。 */
+/** 四种 1v1 模式的用户可见配置（含盲测）。 */
 export const ARENA_MODE_OPTIONS: ArenaModeOption[] = [
   {
     value: "debate",
@@ -30,7 +30,18 @@ export const ARENA_MODE_OPTIONS: ArenaModeOption[] = [
     description: "陈述同一创业方向，比较洞察、方案与落地能力。",
     default_topic: "面向大学生的 AI 学习伙伴",
   },
+  {
+    value: "blind_test",
+    label: "盲测模式",
+    description: "裁判评分时隐藏选手身份，仅根据内容质量评判。",
+    default_topic: "数据驱动决策是否优于直觉经验？",
+  },
 ];
+
+/** DuelArena 专用模式选项（不含盲测，盲测有独立入口）。 */
+export const DUEL_MODE_OPTIONS: ArenaModeOption[] = ARENA_MODE_OPTIONS.filter(
+  (opt) => opt.value !== "blind_test",
+);
 
 /** 各 1v1 模式的可编辑主题预设。 */
 export const ARENA_TOPICS: Record<DuelArenaMode, string[]> = {
@@ -48,6 +59,11 @@ export const ARENA_TOPICS: Record<DuelArenaMode, string[]> = {
     "面向大学生的 AI 学习伙伴",
     "帮助新生适应校园生活的智能服务",
     "低成本校园心理支持平台",
+  ],
+  blind_test: [
+    "数据驱动决策是否优于直觉经验？",
+    "团队合作比个人能力更重要吗？",
+    "短期利益与长期价值如何取舍？",
   ],
 };
 

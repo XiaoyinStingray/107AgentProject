@@ -202,11 +202,19 @@ describe("Step 46 Arena hash routing", () => {
     ).toBeInTheDocument();
   });
 
-  it("keeps the remaining P3 item as a placeholder", () => {
-    renderArena("/arena#item-25");
-    expect(screen.getByText(/盲测模式/)).toBeInTheDocument();
-    expect(screen.getByText("该功能保留入口，将在后续版本继续开发。"))
-      .toBeInTheDocument();
+  it.each([
+    [25, "盲测模式"],
+    [27, "竞技场排行榜"],
+  ])("renders item-%i as %s page", async (itemId, heading) => {
+    renderArena(`/arena#item-${itemId}`);
+    expect(
+      await screen.findByRole("heading", { name: heading }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders item-28 (A/B 测试) with agent requirement notice", () => {
+    renderArena("/arena#item-28");
+    expect(screen.getByText("至少需要四个 Agent")).toBeInTheDocument();
   });
 
   it("rejects a foreign feature hash", () => {

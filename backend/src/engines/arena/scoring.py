@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from loguru import logger
 
@@ -60,6 +61,39 @@ class ArenaScorer:
         except Exception as error:
             logger.error(
                 f"ArenaScorer.score_duel failed: {type(error).__name__}: {error}"
+            )
+            return self._duel_fallback(agent_a.id, agent_b.id, error)
+
+    async def score_blind_duel(
+        self,
+        topic: str,
+        agent_a,
+        agent_b,
+        transcript: list[ArenaTranscriptEntry],
+    ) -> dict:
+        """盲测评分：裁判看不到发言者身份，仅根据内容质量评判。"""
+        anonymized = "\n".join(
+            f"[R{entry.round} 选手{'A' if entry.speaker_id == agent_a.id else 'B'}]: {entry.content}"
+            for entry in transcript
+        )
+        prompt = (
+            f"你是一位公正的竞技裁判。两位匿名选手（选手A 和 选手B）就以下主题进行了辩论。\n"
+            f"你无法知道他们的真实身份，请仅根据发言内容的质量进行评分。\n\n"
+            f"主题：{topic}\n\n"
+            f"请从四个维度（论证质量、表达力、应变力、角色一致性）为每位选手打分（1-10分），\n"
+            f"并给出获胜者和理由。以 JSON 格式返回：\n"
+            f'{{"scores": {{"A": {{"argument_quality": N, "expression": N, "adaptability": N, "character_consistency": N}}, "B": {{...}}}}, '
+            f'"winner": "A" 或 "B", "reasoning": "..."}}\n\n'
+            f"辩论记录：\n{anonymized}"
+        )
+        try:
+            raw = await self._call_model(prompt, source="arena_blind_judge")
+            return self.parse_duel_result(raw, agent_a.id, agent_b.id)
+        except asyncio.TimeoutError:
+            raise
+        except Exception as error:
+            logger.error(
+                f"ArenaScorer.score_blind_duel failed: {type(error).__name__}: {error}"
             )
             return self._duel_fallback(agent_a.id, agent_b.id, error)
 
@@ -263,7 +297,7 @@ class ArenaScorer:
         return {key: quarter for key in SCORE_KEYS}
 
     @staticmethod
-    def _total_score(value: object) -> float:
+    def _total_score(value: Any) -> float:
         """把裁判总分限制在 4–40。"""
         try:
             return min(40.0, max(4.0, float(value)))

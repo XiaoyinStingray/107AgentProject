@@ -7,24 +7,28 @@ _MODE_LABELS = {
     ArenaMode.DEBATE: "辩论",
     ArenaMode.INTERVIEW: "面试竞争",
     ArenaMode.PITCH: "创业路演",
+    ArenaMode.BLIND_TEST: "盲测",
 }
 
 _MODE_ROLES = {
     ArenaMode.DEBATE: ("正方，支持该观点", "反方，反对该观点"),
     ArenaMode.INTERVIEW: ("候选人 A", "候选人 B"),
     ArenaMode.PITCH: ("方案 A 提案者", "方案 B 提案者"),
+    ArenaMode.BLIND_TEST: ("选手 A", "选手 B"),
 }
 
 _MODE_TASKS = {
     ArenaMode.DEBATE: "提出明确论点，并回应对方上一轮观点。",
     ArenaMode.INTERVIEW: "用具体经历证明岗位匹配度，并回应对方提出的质疑。",
     ArenaMode.PITCH: "说明洞察、方案、落地路径和竞争优势，并回应对方质疑。",
+    ArenaMode.BLIND_TEST: "提出明确论点，并回应对方上一轮观点。裁判不知道你的身份，请用内容质量取胜。",
 }
 
 _MODE_QUALITY = {
     ArenaMode.DEBATE: "论据是否充分、逻辑是否严密",
     ArenaMode.INTERVIEW: "经历与能力是否真实匹配岗位",
     ArenaMode.PITCH: "问题洞察、方案价值和落地路径是否完整",
+    ArenaMode.BLIND_TEST: "论据是否充分、逻辑是否严密",
 }
 
 
@@ -71,6 +75,7 @@ def build_duel_task(
         f"A: {agent_a_name}（{role_a}）\n"
         f"B: {agent_b_name}（{role_b}）\n"
         f"共 {rounds} 轮，每轮 A 先、B 后。\n\n"
+        "重要：你必须积极发言！不要说「等待对方回应」或「准备回应」——直接提出你的论点。\n"
         "每次发言前确认自己的姓名和角色；每条 50-200 字。\n"
         f"{_MODE_TASKS[mode]}\n"
         "禁止内心独白、动作旁白和元分析。现在由 A 开始第 1 轮。"
@@ -89,13 +94,13 @@ def build_judge_system_prompt(mode: ArenaMode, topic: str) -> str:
         "- adaptability：是否有效回应对方\n"
         "- character_consistency：是否保持角色身份与行为风格\n"
         "总分为四项之和。\n"
-        "只输出一行纯 JSON："
+        "只输出一行纯 JSON，reasoning 字段必须包含 50 字以上的详细评判分析："
         '{"scores":{"A":0,"B":0},'
         '"score_breakdown":{"A":{"argument_quality":0,"expression":0,'
         '"adaptability":0,"character_consistency":0},'
         '"B":{"argument_quality":0,"expression":0,"adaptability":0,'
         '"character_consistency":0}},'
-        '"winner":"A或B","reasoning":"理由"}'
+        '"winner":"A或B","reasoning":"详细分析双方表现，说明获胜原因..."}'
     )
 
 
@@ -160,9 +165,9 @@ def build_battle_judge_prompt(
         "总分为四项之和；ranking 必须按总分降序，"
         "只有同分时才根据整体表现决定先后。"
         f"只保留前 {survivor_count} 人。\n"
-        "只输出一行纯 JSON："
+        "只输出一行纯 JSON，reasoning 字段必须包含详细的淘汰分析："
         '{"ranking":["P1","P2"],"scores":{"P1":0},'
         '"score_breakdown":{"P1":{"argument_quality":0,"expression":0,'
         '"adaptability":0,"character_consistency":0}},'
-        '"reasoning":"淘汰理由"}'
+        '"reasoning":"详细说明每位参赛者的表现和淘汰原因..."}'
     )

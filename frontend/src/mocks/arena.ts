@@ -180,6 +180,48 @@ export const MOCK_ARENA_SCRIPTS: Record<DuelArenaMode, MockArenaScript> = {
     judge_reasoning:
       "{agent_a}对问题、产品闭环和验证指标的说明更完整，落地路径也更清晰；{agent_b}的获客方案具体，但产品差异化不足。",
   },
+  blind_test: {
+    transcript: [
+      {
+        round: 1,
+        speaker: "agent_a",
+        content: "我认为核心在于建立可验证的假设，而非依赖直觉。面对「{topic}」，数据驱动的决策能降低不确定性。",
+      },
+      {
+        round: 1,
+        speaker: "agent_b",
+        content: "直觉和经验同样重要。面对「{topic}」，过度依赖数据可能忽略人的真实需求和情感因素。",
+      },
+      {
+        round: 2,
+        speaker: "agent_a",
+        content: "数据不是万能的，但它是纠偏的基础。我们可以用定性研究补充定量分析，而不是二选一。",
+      },
+      {
+        round: 2,
+        speaker: "agent_b",
+        content: "我同意两者结合，但优先级应该是先理解人，再用数据验证。顺序错了，结论就会偏。",
+      },
+      {
+        round: 3,
+        speaker: "agent_a",
+        content: "我的结论是：先建立数据基线，再用用户研究解释异常值，形成闭环决策。",
+      },
+      {
+        round: 3,
+        speaker: "agent_b",
+        content: "我的结论是：先从用户场景出发定义问题，再用数据衡量方案效果，以人为本。",
+      },
+    ],
+    scores: { agent_a: 34, agent_b: 36 },
+    score_breakdowns: {
+      agent_a: scoreBreakdown(9, 8, 8, 9),
+      agent_b: scoreBreakdown(9, 9, 9, 9),
+    },
+    winner: "agent_b",
+    judge_reasoning:
+      "匿名评审下，选手B 的论证更注重人文关怀与逻辑平衡，在不知道身份的情况下，其内容质量略胜一筹。",
+  },
 };
 
 /** 使用所选 Agent 和竞技配置生成可独立播放的完整 Mock 结果。 */

@@ -147,6 +147,36 @@ async def run_pitch(
     )
 
 
+@router.post("/blind_test", response_model=ArenaResultResponse, status_code=201)
+async def run_blind_test(
+    req: ArenaCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    engine: ArenaEngine = Depends(get_arena_engine),
+):
+    """运行并保存一场盲测：裁判评分时隐藏发言者身份。"""
+    if req.mode != ArenaMode.BLIND_TEST:
+        raise HTTPException(
+            status_code=422,
+            detail=f"该端点只接受 mode={ArenaMode.BLIND_TEST.value}",
+        )
+    agent_a, agent_b = await _load_agents(
+        db,
+        [req.agent_a_id, req.agent_b_id],
+    )
+    try:
+        result = await engine.run_blind_test(agent_a, agent_b, req.topic, req.rounds)
+    except asyncio.TimeoutError as error:
+        logger.warning("Arena blind_test timed out")
+        raise HTTPException(status_code=504, detail="盲测运行超时，请稍后重试") from error
+    except Exception as error:
+        logger.exception("Arena blind_test failed")
+        raise HTTPException(
+            status_code=500,
+            detail=f"盲测运行失败: {str(error)}",
+        ) from error
+    return await _persist_result(db, result)
+
+
 @router.post(
     "/battle_royale",
     response_model=ArenaResultResponse,

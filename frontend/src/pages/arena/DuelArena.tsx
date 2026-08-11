@@ -8,10 +8,10 @@ import EmptyState from "../../components/shared/EmptyState";
 import LoadingSpinner from "../../components/shared/LoadingSpinner";
 import {
   ARENA_JUDGE_REPLAY_MS,
-  ARENA_MODE_OPTIONS,
   ARENA_REPLAY_INTERVAL_MS,
   ARENA_TOPICS,
   DUEL_ARENA_ROUNDS,
+  DUEL_MODE_OPTIONS,
 } from "../../constants/arena";
 import type {
   ArenaConfig,
@@ -28,7 +28,7 @@ export default function DuelArena() {
   const [selectedAgentBId, setSelectedAgentBId] = useState("");
   const [selectedMode, setSelectedMode] = useState<DuelArenaMode>("debate");
   const [topic, setTopic] = useState(
-    ARENA_MODE_OPTIONS[0]?.default_topic ?? "",
+    DUEL_MODE_OPTIONS[0]?.default_topic ?? "",
   );
   const [result, setResult] = useState<ArenaPresentationResult | null>(null);
   const [phase, setPhase] = useState<ArenaPhase>("setup");
@@ -88,7 +88,7 @@ export default function DuelArena() {
 
   const handleModeChange = (mode: DuelArenaMode) => {
     setSelectedMode(mode);
-    const option = ARENA_MODE_OPTIONS.find((item) => item.value === mode);
+    const option = DUEL_MODE_OPTIONS.find((item) => item.value === mode);
     if (option) setTopic(option.default_topic);
   };
 
@@ -131,7 +131,7 @@ export default function DuelArena() {
     return (
       <LoadingSpinner
         icon="⚔️"
-        title={`${ARENA_MODE_OPTIONS.find((item) => item.value === selectedMode)?.label ?? "竞技"}进行中…`}
+        title={`${DUEL_MODE_OPTIONS.find((item) => item.value === selectedMode)?.label ?? "竞技"}进行中…`}
         detail={`${agentA?.name} vs ${agentB?.name} · ${topic}`}
         fullscreen
       />
@@ -177,7 +177,7 @@ export default function DuelArena() {
         selectedAgentBId={selectedAgentBId}
         selectedMode={selectedMode}
         topic={topic}
-        modeOptions={ARENA_MODE_OPTIONS}
+        modeOptions={DUEL_MODE_OPTIONS}
         topicPresets={ARENA_TOPICS[selectedMode]}
         canStart={canStart}
         onSelectAgentA={setSelectedAgentAId}

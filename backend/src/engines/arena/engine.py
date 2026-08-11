@@ -89,6 +89,22 @@ class ArenaEngine:
             raise ValueError("大乱斗不能重复选择同一个 Agent")
         return await self.battle_runner.run(agents, topic)
 
+    async def run_blind_test(
+        self,
+        agent_a,
+        agent_b,
+        topic: str,
+        rounds: int = 3,
+    ) -> ArenaResult:
+        """运行盲测：辩论流程与普通模式相同，但裁判评分时隐藏身份。"""
+        return await self._run_duel_with_timeout(
+            ArenaMode.BLIND_TEST,
+            agent_a,
+            agent_b,
+            topic,
+            rounds,
+        )
+
     async def _run_duel_with_timeout(
         self,
         mode: ArenaMode,
@@ -140,13 +156,18 @@ class ArenaEngine:
         )
         if not transcript:
             raise RuntimeError("竞技未生成任何有效发言")
-        scoring = await self.scorer.score_duel(
-            mode,
-            topic,
-            agent_a,
-            agent_b,
-            transcript,
-        )
+        if mode == ArenaMode.BLIND_TEST:
+            scoring = await self.scorer.score_blind_duel(
+                topic, agent_a, agent_b, transcript,
+            )
+        else:
+            scoring = await self.scorer.score_duel(
+                mode,
+                topic,
+                agent_a,
+                agent_b,
+                transcript,
+            )
         return self._build_duel_result(
             mode,
             topic,
@@ -197,7 +218,11 @@ class ArenaEngine:
         agents: list,
         messages: list,
     ) -> list[ArenaTranscriptEntry]:
-        """把 AutoGen 内部名称稳定映射为 Agent ID 和显示姓名。"""
+        """把 AutoGen 内部名称稳定映射为 Agent ID 和显示姓名。
+
+        仅保留 TextMessage（纯文本发言），跳过 FunctionCall / FunctionExecutionResult
+        等工具调用消息，并清理 TextMessage 中可能残留的 DSML 工具调用标记。
+        """
         source_map: dict[str, tuple[str, str]] = {}
         for agent in agents:
             identity = (agent.id, agent.persona.name)
@@ -207,17 +232,62 @@ class ArenaEngine:
         for message in messages:
             source = getattr(message, "source", "")
             content = getattr(message, "content", "")
+            # 跳过 FunctionCall / FunctionExecutionResult 等工具调用消息
+            msg_type = type(message).__name__
+            if msg_type in ("FunctionCall", "FunctionExecutionResult"):
+                continue
+            if not isinstance(content, str) or not content:
+                continue
+            # 清理 DSML 工具调用标记
+            content = ArenaEngine._clean_dsml_content(content)
+            if not content:
+                continue
             identity = source_map.get(source)
-            if not identity or not content:
+            if not identity:
                 continue
             entries.append(ArenaTranscriptEntry(
                 turn=len(entries),
                 round=len(entries) // 2 + 1,
                 speaker_id=identity[0],
                 speaker=identity[1],
-                content=str(content),
+                content=content,
             ))
         return entries
+
+    @staticmethod
+    def _clean_dsml_content(content: str) -> str:
+        """从 TextMessage 内容中提取纯文本，去除 DSML 工具调用标记。"""
+        import re
+
+        if "DSML" not in content:
+            return content
+
+        # 尝试多种可能的 DSML 闭合标签格式
+        patterns = [
+            r'parameter\s+name="content"\s+string="true">(.*?)</\|\s*\|\s*DSML\s*\|\s*\|\s*parameter>',
+            r'parameter\s+name="content"\s+string="true">(.*?)</\|\|\s*DSML\s*\|\|\s*parameter>',
+            r'parameter\s+name="content"\s+string="true">(.*?)</[^>]*DSML[^>]*parameter>',
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, content, re.DOTALL)
+            if matches:
+                cleaned = " ".join(m.strip() for m in matches if m.strip())
+                if cleaned:
+                    return cleaned
+
+        # 如果有 DSML 标记但无法提取，尝试去除所有 DSML 标签
+        dsml_tags = [
+            r'<\|\s*\|\s*DSML\s*\|\s*\|[^>]*>',
+            r'<\|\|\s*DSML\s*\|\|[^>]*>',
+            r'</\|\s*\|\s*DSML\s*\|\s*\|[^>]*>',
+            r'</\|\|\s*DSML\s*\|\|[^>]*>',
+            r'<[^>]*DSML[^>]*>',
+        ]
+        cleaned = content
+        for tag_pattern in dsml_tags:
+            cleaned = re.sub(tag_pattern, '', cleaned)
+        return cleaned.strip() if cleaned.strip() else content
 
     @staticmethod
     def _reset_agent_contexts(agents: list) -> None:

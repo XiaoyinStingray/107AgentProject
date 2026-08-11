@@ -3,7 +3,8 @@ export type ArenaMode =
   | "debate"
   | "interview"
   | "pitch"
-  | "battle_royale";
+  | "battle_royale"
+  | "blind_test";
 
 /** 1v1 页面允许选择的模式。 */
 export type DuelArenaMode = Exclude<ArenaMode, "battle_royale">;

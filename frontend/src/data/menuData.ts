@@ -46,10 +46,10 @@ export const MENU_SECTIONS: MenuSection[] = [
       { id: 22, emoji: "🥊", label: "1v1 对抗", priority: "P1", anchor: "duel" },
       { id: 23, emoji: "🏟️", label: "大乱斗", priority: "P2", anchor: "battle" },
       { id: 24, emoji: "📋", label: "战报生成", priority: "P2", anchor: "report" },
-      { id: 25, emoji: "🎯", label: "盲测模式", priority: "P2", redirect: "/bench#compare" },
+      { id: 25, emoji: "🎯", label: "盲测模式", priority: "P2", anchor: "blind" },
       { id: 26, emoji: "🔄", label: "复盘对比", priority: "P2", anchor: "review" },
-      { id: 27, emoji: "🏆", label: "排行榜", priority: "P2", redirect: "/bench#leaderboard" },
-      { id: 28, emoji: "🧪", label: "A/B 测试", priority: "P2", redirect: "/bench#compare" },
+      { id: 27, emoji: "🏆", label: "排行榜", priority: "P2", anchor: "leaderboard" },
+      { id: 28, emoji: "🧪", label: "A/B 测试", priority: "P2", anchor: "abtest" },
     ],
   },
   {

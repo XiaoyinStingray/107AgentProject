@@ -18,6 +18,7 @@ class ArenaMode(str, Enum):
     INTERVIEW = "interview"
     PITCH = "pitch"
     BATTLE_ROYALE = "battle_royale"
+    BLIND_TEST = "blind_test"
 
 
 class ArenaTranscriptEntry(BaseModel):

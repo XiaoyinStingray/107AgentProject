@@ -104,3 +104,64 @@ async def test_battle_royale_rejects_invalid_agent_count(count):
     engine = ArenaEngine(MockModelClient())
     with pytest.raises(ValueError, match="6–8"):
         await engine.run_battle_royale(agents, "测试主题")
+
+
+class FunctionCall:
+    """模拟 AutoGen FunctionCall 消息。"""
+    def __init__(self, name: str, arguments: str):
+        self.name = name
+        self.arguments = arguments
+        self.source = "agent_0"
+
+
+class FunctionExecutionResult:
+    """模拟 AutoGen FunctionExecutionResult 消息。"""
+    def __init__(self, content: str, name: str):
+        self.content = content
+        self.name = name
+        self.source = "agent_0"
+
+
+@pytest.mark.asyncio
+async def test_battle_royale_filters_tool_call_messages(monkeypatch):
+    """FunctionCall / FunctionExecutionResult 不应出现在 transcript 中。"""
+    from autogen_agentchat import teams as teams_module
+    from engines.arena.engine import ArenaEngine
+
+    agents = [
+        make_agent(f"agent-{index}", f"参赛者{index}")
+        for index in range(6)
+    ]
+    engine = ArenaEngine(MockModelClient())
+
+    async def rank_battle(topic, survivors, transcript, survivor_count):
+        scores = {agent.id: float(40 - index) for index, agent in enumerate(survivors)}
+        return BattleRanking(
+            ranked_ids=[agent.id for agent in survivors],
+            scores=scores,
+            score_breakdown={agent.id: {"argument_quality": 8, "expression": 8, "adaptability": 8, "character_consistency": 8} for agent in survivors},
+            reasoning="保留前 3 人",
+        )
+
+    class MixedGroupChat:
+        def __init__(self, participants, max_turns):
+            self.participants = participants
+
+        async def run(self, task=None, cancellation_token=None):
+            # 混合文本消息和工具调用消息
+            mixed = []
+            for p in self.participants:
+                mixed.append(FakeMessage(f"{p.name} 的方案", p.name))
+                mixed.append(FunctionCall("send_message", '{"target": "x"}'))
+                mixed.append(FunctionExecutionResult("已发送", "send_message"))
+            return FakeRunResult(mixed)
+
+    monkeypatch.setattr(teams_module, "RoundRobinGroupChat", MixedGroupChat)
+    monkeypatch.setattr(engine.scorer, "rank_battle", rank_battle)
+
+    result = await engine.run_battle_royale(agents, "测试主题")
+
+    # 6→3→2→1 三个阶段，每阶段仅保留文本消息
+    assert len(result.transcript) == 11  # 6 + 3 + 2
+    assert all("FunctionCall" not in entry.content for entry in result.transcript)
+    assert all("FunctionExecutionResult" not in entry.content for entry in result.transcript)

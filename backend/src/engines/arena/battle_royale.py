@@ -2,6 +2,7 @@
 
 import asyncio
 import math
+from collections.abc import Sequence
 
 from loguru import logger
 
@@ -152,11 +153,15 @@ class BattleRoyaleRunner:
     @staticmethod
     def _collect_stage_entries(
         agents: list,
-        messages: list,
+        messages: Sequence,
         stage: int,
         turn_offset: int,
     ) -> list[ArenaTranscriptEntry]:
-        """把 AutoGen 消息转换为包含 Agent ID 的阶段记录。"""
+        """把 AutoGen 消息转换为包含 Agent ID 的阶段记录。
+
+        仅保留 TextMessage（纯文本发言），跳过 FunctionCall / FunctionExecutionResult
+        等工具调用消息，并清理 TextMessage 中可能残留的 DSML 工具调用标记。
+        """
         source_map = {
             agent.autogen_agent.name: (agent.id, agent.persona.name)
             for agent in agents
@@ -165,14 +170,69 @@ class BattleRoyaleRunner:
         for message in messages:
             source = getattr(message, "source", "")
             content = getattr(message, "content", "")
+            # 跳过 FunctionCall / FunctionExecutionResult 等工具调用消息
+            msg_type = type(message).__name__
+            if msg_type in ("FunctionCall", "FunctionExecutionResult"):
+                continue
+            if not isinstance(content, str) or not content:
+                continue
+            # 清理 DSML 工具调用标记，提取纯文本内容
+            content = BattleRoyaleRunner._clean_dsml_content(content)
+            if not content:
+                continue
             identity = source_map.get(source)
-            if not identity or not content:
+            if not identity:
                 continue
             entries.append(ArenaTranscriptEntry(
                 turn=turn_offset + len(entries),
                 round=stage,
                 speaker_id=identity[0],
                 speaker=identity[1],
-                content=str(content),
+                content=content,
             ))
         return entries
+
+    @staticmethod
+    def _clean_dsml_content(content: str) -> str:
+        """从 TextMessage 内容中提取纯文本，去除 DSML 工具调用标记。
+
+        DSML 格式示例：
+        <| | DSML | | parameter name="content" string="true">实际文本</| | DSML | | parameter>
+        如果内容包含 DSML 标记，提取所有 parameter name="content" 中的文本；
+        否则原样返回。
+        """
+        import re
+
+        # 检测是否包含 DSML 标记
+        if "DSML" not in content:
+            return content
+
+        # 尝试多种可能的 DSML 闭合标签格式
+        # 格式1: </| | DSML | | parameter>
+        # 格式2: </||DSML||parameter>
+        patterns = [
+            r'parameter\s+name="content"\s+string="true">(.*?)</\|\s*\|\s*DSML\s*\|\s*\|\s*parameter>',
+            r'parameter\s+name="content"\s+string="true">(.*?)</\|\|\s*DSML\s*\|\|\s*parameter>',
+            r'parameter\s+name="content"\s+string="true">(.*?)</[^>]*DSML[^>]*parameter>',
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, content, re.DOTALL)
+            if matches:
+                cleaned = " ".join(m.strip() for m in matches if m.strip())
+                if cleaned:
+                    return cleaned
+
+        # 如果有 DSML 标记但无法提取，尝试去除所有 DSML 标签
+        # 使用更宽松的匹配模式
+        dsml_tags = [
+            r'<\|\s*\|\s*DSML\s*\|\s*\|[^>]*>',
+            r'<\|\|\s*DSML\s*\|\|[^>]*>',
+            r'</\|\s*\|\s*DSML\s*\|\s*\|[^>]*>',
+            r'</\|\|\s*DSML\s*\|\|[^>]*>',
+            r'<[^>]*DSML[^>]*>',
+        ]
+        cleaned = content
+        for tag_pattern in dsml_tags:
+            cleaned = re.sub(tag_pattern, '', cleaned)
+        return cleaned.strip() if cleaned.strip() else content
