@@ -70,6 +70,7 @@ coverage/
 # ===== Project Data (keep .gitkeep) =====
 backend/data/*.db
 backend/data/*.sqlite
+backend/data/backups/
 
 # ===== Misc =====
 *.tmp

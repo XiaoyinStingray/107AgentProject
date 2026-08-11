@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
-from config import ensure_dirs
+from config import DATABASE_PATH, SEED_DATABASE_PATH, ensure_dirs, settings
 from db import async_session, init_db
 from api.agents import router as agents_router
 from api.arenas import router as arenas_router
@@ -36,6 +36,7 @@ async def lifespan(app: FastAPI):
     """应用启动/关闭时的生命周期管理"""
     logger.info("Starting Life Lab...")
     ensure_dirs()
+    logger.info(f"Database: {settings.database_url}")
     await init_db()
     async with async_session() as db:
         await recover_interrupted_bench_runs(db)
@@ -93,10 +94,9 @@ app.include_router(settings_router)
 @app.get("/api/export-db")
 async def export_database():
     """导出当前数据库文件供下载。"""
-    from pathlib import Path
     from fastapi.responses import FileResponse
     from fastapi import HTTPException
-    db_path = Path("backend/data/lifelab.db")
+    db_path = DATABASE_PATH
     if not db_path.exists():
         raise HTTPException(status_code=404, detail="数据库文件不存在")
     return FileResponse(db_path, media_type="application/octet-stream", filename="lifelab-backup.db")
@@ -105,9 +105,7 @@ async def export_database():
 @app.post("/api/reset-db")
 async def reset_database():
     """清空数据库——删除 lifelab.db，创建全新空白数据库。"""
-    import shutil
-    from pathlib import Path
-    target = Path("backend/data/lifelab.db")
+    target = DATABASE_PATH
     try:
         if target.exists():
             target.unlink()
@@ -235,10 +233,9 @@ async def seed_database(keep_existing: bool = False):
     keep_existing=false → 清空后替换为种子。
     """
     import shutil
-    from pathlib import Path
 
-    seed_path = Path("backend/data/seed.db")
-    target_path = Path("backend/data/lifelab.db")
+    seed_path = SEED_DATABASE_PATH
+    target_path = DATABASE_PATH
 
     if not seed_path.exists():
         return {"ok": False, "error": "种子数据库不存在，请联系开发者"}

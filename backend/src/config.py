@@ -6,6 +6,30 @@ from pathlib import Path
 from pydantic_settings import BaseSettings
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DATA_DIR = PROJECT_ROOT / "backend" / "data"
+DATABASE_PATH = DATA_DIR / "lifelab.db"
+SEED_DATABASE_PATH = DATA_DIR / "seed.db"
+USER_SETTINGS_PATH = DATA_DIR / "user_settings.json"
+DEFAULT_DATABASE_URL = f"sqlite+aiosqlite:///{DATABASE_PATH.as_posix()}"
+
+
+def _resolve_relative_sqlite_url(url: str) -> str:
+    """Resolve local SQLite URLs from the project root, never the launch directory."""
+    prefixes = ("sqlite+aiosqlite:///", "sqlite:///")
+    for prefix in prefixes:
+        if not url.startswith(prefix):
+            continue
+        raw_path = url[len(prefix):]
+        if raw_path == ":memory:":
+            return url
+        path = Path(raw_path)
+        if not path.is_absolute():
+            path = (PROJECT_ROOT / path).resolve()
+        return f"{prefix}{path.as_posix()}"
+    return url
+
+
 class Settings(BaseSettings):
     model_config = {
         "env_file": str(Path(__file__).parents[2] / ".env"),
@@ -28,7 +52,7 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 4096
 
     # === 数据库 ===
-    database_url: str = "sqlite+aiosqlite:///./backend/data/lifelab.db"
+    database_url: str = DEFAULT_DATABASE_URL
 
     # === Agent 限制 ===
     max_ticks_per_simulation: int = 100
@@ -39,15 +63,15 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+settings.database_url = _resolve_relative_sqlite_url(settings.database_url)
 
 
 # ── Step 103: 用户可调参数 ──
 
 from pydantic import BaseModel, Field
 import json as _json
-from pathlib import Path as _Path
 
-_USER_SETTINGS_PATH = _Path("backend/data/user_settings.json")
+_USER_SETTINGS_PATH = USER_SETTINGS_PATH
 
 
 class UserSettings(BaseModel):
@@ -110,5 +134,4 @@ def _load_user_settings() -> UserSettings:
 
 def ensure_dirs() -> None:
     """确保运行时需要的目录存在。在应用启动时调用，不在 import 时执行。"""
-    _data_dir = Path("backend/data")
-    _data_dir.mkdir(parents=True, exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
