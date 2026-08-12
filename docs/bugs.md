@@ -785,3 +785,45 @@
 - **修复**：两个模板均添加「标题必须包含/反映主题，不得偏离」「内容必须围绕主题展开」指令；同时补充标题格式返回指令
 - **关联位置**：backend/src/engines/narrative/templates.py — PODCAST_PROMPT, PARALLEL_PROMPT
 - **回归测试**：后端 narrative engine 10 passed
+
+---
+
+## 2026-08-12: M6 观察者控制台模块测试
+
+> 详细测试记录见 [test-done/m06.md](test-done/m06.md)。
+
+### BUG-M6-001：M2 单人剧场 `[END_TICK]` 泄漏到显示内容 ✅
+
+- **状态**：✅ 已修复 (2026-08-12)
+- **优先级**：P1
+- **现象**：对话气泡中出现 `[END_TICK]` 文字
+- **根因**：`_clean_group_content()` 只在 group chat 路径调用，solo theater 的 `_inner_message_to_event` 和 `_final_message_to_event` 未清理
+- **修复**：后端两个方法添加 `_clean_group_content()` + 空内容守卫；前端 `ThoughtBubble.tsx` 和 `EventFeed.tsx` 加 `stripInternalMarkers` 防御性过滤
+- **修复文件**：`backend/src/engines/world/messages.py`、`frontend/src/components/agent/ThoughtBubble.tsx`、`frontend/src/components/world/EventFeed.tsx`
+
+### BUG-M6-002：仪表盘 Agent 精力全部显示 100% ✅
+
+- **状态**：✅ 已修复 (2026-08-12)
+- **优先级**：P2
+- **现象**：所有 Agent 精力条满格，实际应低于 100%
+- **根因**：`computeAgentStats` 直接取 `agent.energy`（数据库值始终 100.0），未应用衰减公式
+- **修复**：添加与 `AgentStatusPanel` 一致的衰减公式 `Math.max(10, agent.energy - Math.floor(events.length / 5) * 2)`
+- **修复文件**：`frontend/src/mocks/control.ts`
+
+### BUG-M6-003：搜索/决策模式 Tab 受 World 过滤影响 ✅
+
+- **状态**：✅ 已修复 (2026-08-12)
+- **优先级**：P1
+- **现象**：Agent 搜索和决策模式只显示选中 World 的 Agent，应展示全部
+- **根因**：`ControlPanel.tsx` 将 `filteredAgents` 传给了所有 Tab
+- **修复**：`AgentSearch` 和 `DecisionPatterns` 改回使用 `agents`（全部 Agent）
+- **修复文件**：`frontend/src/pages/ControlPanel.tsx`
+
+### BUG-M6-004：单人剧场行动事件（agent_action）不渲染 ✅
+
+- **状态**：✅ 已修复 (2026-08-12)
+- **优先级**：P1
+- **现象**：单人剧场只显示对话气泡，思考和行动气泡全部消失
+- **根因**：`ThoughtBubble.tsx` 的 `resolveBodyText` 处理 `agent_action` 时只从 `event.data` 提取，但后端把可读描述放在 `event.description`，导致 `bodyText` 为空被跳过
+- **修复**：`agent_action` 分支在 `data` 字段提取失败后回退到 `event.description`
+- **修复文件**：`frontend/src/components/agent/ThoughtBubble.tsx`

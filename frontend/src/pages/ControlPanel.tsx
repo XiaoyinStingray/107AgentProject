@@ -13,11 +13,14 @@ import DecisionPatterns from "../components/control/DecisionPatterns";
 import GroupDynamics from "../components/control/GroupDynamics";
 
 /* ================================================================
-   Step 24 → 36 → 43 — M6 控制台
+   Step 24 → 36 → 43 → M6-fix — M6 控制台
    多 Agent 仪表盘 + 事件热力图 + Agent 搜索 + 决策模式识别。
-   Agent 数据源：useAgents()（React Query 真实 API）。
+   Agent 数据源：useAgents()（React Query 真实 API），按 World 过滤。
    Events 数据源：useWorldEvents()（Step 43 切真实数据）。
    ================================================================ */
+
+/** 不需要 World 选择器的 Tab（自身有选择器或与 World 无关） */
+const TABS_WITHOUT_WORLD_SELECTOR: ControlTab[] = ["search", "patterns", "dynamics"];
 
 export default function ControlPanel() {
   const location = useLocation();
@@ -47,7 +50,17 @@ export default function ControlPanel() {
   // World 列表变化时自动选中第一个
   const worldIdForSelect = effectiveWorldId ?? "";
 
+  // 按 World 过滤 Agent（只显示该 World 中包含的 Agent）
+  const selectedWorld = worlds.find((w) => w.id === effectiveWorldId);
+  const filteredAgents = useMemo(() => {
+    if (!selectedWorld?.agent_ids || selectedWorld.agent_ids.length === 0) {
+      return agents;
+    }
+    return agents.filter((a) => selectedWorld.agent_ids!.includes(a.id));
+  }, [agents, selectedWorld]);
+
   const activeMeta = CONTROL_TABS.find((t) => t.key === activeTab);
+  const showWorldSelector = !TABS_WITHOUT_WORLD_SELECTOR.includes(activeTab);
 
   return (
     <div className="h-full overflow-y-auto p-6 animate-fade-in">
@@ -57,24 +70,8 @@ export default function ControlPanel() {
         多 Agent 仪表盘 · 事件热力图 · Agent 搜索 · 决策模式识别
       </p>
 
-      {/* World 选择器 + Tab 栏 */}
-      <div className="flex flex-wrap items-center gap-3 mb-4">
-        <label className="text-xs font-mono text-text-secondary">World:</label>
-        <select
-          value={worldIdForSelect}
-          onChange={(e) => setSelectedWorldId(e.target.value || null)}
-          className="bg-bg-secondary border border-border rounded px-2 py-1 text-xs font-mono text-text-primary focus:outline-none focus:border-accent-green"
-        >
-          {worlds.length === 0 && <option value="">暂无 World</option>}
-          {worlds.map((w) => (
-            <option key={w.id} value={w.id}>
-              {w.name} ({w.status} · tick {w.current_tick})
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="flex flex-wrap gap-2 mb-6">
+      {/* Tab 栏 */}
+      <div className="flex flex-wrap gap-2 mb-4">
         {CONTROL_TABS.map((tab) => {
           const isActive = tab.available && tab.key === activeTab;
           return (
@@ -103,6 +100,25 @@ export default function ControlPanel() {
         })}
       </div>
 
+      {/* World 选择器（仅 dashboard / heatmap 显示） */}
+      {showWorldSelector && (
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <label className="text-xs font-mono text-text-secondary">World:</label>
+          <select
+            value={worldIdForSelect}
+            onChange={(e) => setSelectedWorldId(e.target.value || null)}
+            className="bg-bg-secondary border border-border rounded px-2 py-1 text-xs font-mono text-text-primary focus:outline-none focus:border-accent-green"
+          >
+            {worlds.length === 0 && <option value="">暂无 World</option>}
+            {worlds.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name} ({w.status} · tick {w.current_tick})
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* 当前 Tab 描述 */}
       {activeMeta && (
         <p className="text-xs text-text-secondary/60 font-mono mb-4">
@@ -113,10 +129,10 @@ export default function ControlPanel() {
       {/* Tab 内容 */}
       <div className="animate-fade-in">
         {activeTab === "dashboard" && (
-          <AgentDashboard agents={agents} events={events} />
+          <AgentDashboard agents={filteredAgents} events={events} />
         )}
         {activeTab === "heatmap" && (
-          <EventHeatmap agents={agents} events={events} />
+          <EventHeatmap agents={filteredAgents} events={events} />
         )}
         {activeTab === "search" && <AgentSearch agents={agents} />}
         {activeTab === "patterns" && <DecisionPatterns agents={agents} />}

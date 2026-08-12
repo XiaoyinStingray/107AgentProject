@@ -274,7 +274,10 @@ class WorldMessageMixin:
         content = getattr(message, "content", "")
         if not content or not isinstance(message, TextMessage):
             return None
-        return self._make_agent_event("thought_stream", agent_id, str(content))
+        cleaned = self._clean_group_content(str(content))
+        if not cleaned:
+            return None
+        return self._make_agent_event("thought_stream", agent_id, cleaned)
 
     def _final_message_to_event(self, response, agent_id: str) -> SimEvent | None:
         """Convert the final AutoGen response into spoken Agent text."""
@@ -282,7 +285,10 @@ class WorldMessageMixin:
         content = getattr(message, "content", "") if message else ""
         if not content:
             return None
-        return self._make_agent_event("agent_message", agent_id, str(content))
+        cleaned = self._clean_group_content(str(content))
+        if not cleaned:
+            return None
+        return self._make_agent_event("agent_message", agent_id, cleaned)
 
     def _make_agent_event(self, event_type: str, agent_id: str, text: str) -> SimEvent:
         """Build a typed Agent event with current World metadata."""

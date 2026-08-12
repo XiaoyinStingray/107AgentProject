@@ -167,20 +167,21 @@ function resolveBodyText(event: SSEEvent): string {
     const d = event.data ?? {};
     // 优先从 data 中取有意义的字段
     const thought = typeof d.thought === "string" ? d.thought : "";
-    const goalDesc = typeof d.description === "string" ? d.description : "";
     const msg = typeof d.content === "string" ? d.content : "";
-    const target = typeof d.target === "string" ? d.target : "";
-    if (thought) return stripToolCallSyntax(thought);
-    if (goalDesc) return stripToolCallSyntax(goalDesc);
-    if (msg) return stripToolCallSyntax(msg);
-    if (target) return target;
+    if (thought) return stripInternalMarkers(thought);
+    if (msg) return stripInternalMarkers(msg);
+    // 回退到 event.description（后端 _build_action_description 生成的可读描述）
+    const desc = typeof event.description === "string" ? event.description : "";
+    if (desc) return stripInternalMarkers(desc);
     return "";
   }
   const raw = event.content ?? event.message ?? event.description ?? "";
-  return stripToolCallSyntax(raw);
+  return stripInternalMarkers(raw);
 }
 
-/** 清除残留的 "调用工具: xxx({...})" 语法 */
-function stripToolCallSyntax(text: string): string {
-  return text.replace(/^调用工具:\s*\w+\(.*\)\s*$/s, "").trim();
+/** 清除残留的 "调用工具: xxx({...})" 语法 + 内部终止标记 [END_TICK] */
+function stripInternalMarkers(text: string): string {
+  let cleaned = text.replace(/^调用工具:\s*\w+\(.*\)\s*$/s, "").trim();
+  cleaned = cleaned.replace(/\[END_TICK\]/g, "").trim();
+  return cleaned;
 }

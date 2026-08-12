@@ -182,18 +182,19 @@ function ConflictMeta({ event }: { event: SSEEvent }) {
 }
 
 function formatEventDescription(event: SSEEvent): string {
+  const stripMarkers = (t: string) => t.replace(/\[END_TICK\]/g, "").trim();
   if (event.type === "agent_message") {
-    return event.message ?? event.description ?? "Agent 发送了一条消息";
+    const raw = event.message ?? event.description ?? "Agent 发送了一条消息";
+    return stripMarkers(raw);
   }
   if (event.type === "agent_action") {
     const action = event.action ?? "执行行动";
     const target = event.target ? ` → ${event.target}` : "";
-    const message = event.message ? `：${event.message}` : "";
+    const message = event.message ? `：${stripMarkers(event.message)}` : "";
     return `${action}${target}${message}`;
   }
-  return (
-    event.description ?? event.message ?? event.content ?? "未命名事件"
-  );
+  const raw = event.description ?? event.message ?? event.content ?? "未命名事件";
+  return stripMarkers(raw);
 }
 
 function formatSignedNumber(value: number): string {

@@ -354,7 +354,9 @@ describe("Step 24 — control mocks utilities", () => {
     expect(stats.agentId).toBe(agent.id);
     expect(stats.agentName).toBe(agent.name);
     expect(stats.mbti).toBe(agent.persona.mbti);
-    expect(stats.energy).toBe(agent.energy);
+    // 精力应用衰减公式：Math.max(10, agent.energy - Math.floor(events.length / 5) * 2)
+    const expectedEnergy = Math.max(10, agent.energy - Math.floor(EVENTS.length / 5) * 2);
+    expect(stats.energy).toBe(expectedEnergy);
 
     // 计数应为非负数
     expect(stats.actionCount).toBeGreaterThanOrEqual(0);

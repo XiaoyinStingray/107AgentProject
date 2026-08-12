@@ -108,11 +108,14 @@ export function computeAgentStats(
     if (event.tick > lastActiveTick) lastActiveTick = event.tick;
   }
 
+  // 精力模拟衰减（与 AgentStatusPanel 一致：每 5 条事件 -2%，下限 10%）
+  const energyDecay = Math.max(10, agent.energy - Math.floor(events.length / 5) * 2);
+
   return {
     agentId: agent.id,
     agentName: agent.name,
     mbti: agent.persona.mbti,
-    energy: agent.energy,
+    energy: energyDecay,
     emotionLabel: EMOTION_LABELS[agent.emotional_state.label] ?? agent.emotional_state.label,
     actionCount,
     messageCount,
