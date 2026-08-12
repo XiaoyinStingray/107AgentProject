@@ -44,13 +44,6 @@ type NarrativePhase = "setup" | "generating" | "result";
 export default function NarrativeFactory() {
   const { data: agents = [] } = useAgents();
   const { data: allWorlds = [] } = useWorlds();
-  // M5 只读单人/多人世界——不读 Team 和 Scene
-  const worlds = useMemo(
-    () => allWorlds.filter((w: any) =>
-      w.world_type === "solo" || w.world_type === "group" || (!w.world_type && !w.name?.startsWith("Team:") && !w.name?.startsWith("Scene:"))
-    ),
-    [allWorlds],
-  );
 
   // === setup 状态 ===
   const [agentId, setAgentId] = useState<string>("");
@@ -62,6 +55,28 @@ export default function NarrativeFactory() {
   const [phase, setPhase] = useState<NarrativePhase>("setup");
   const [result, setResult] = useState<NarrativeResult | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // M5 只读单人/多人世界——不读 Team 和 Scene
+  // 选了 Agent 后，只显示包含该 Agent 的 World
+  const worlds = useMemo(
+    () => allWorlds.filter((w: any) => {
+      const isSoloOrGroup = w.world_type === "solo" || w.world_type === "group" || (!w.world_type && !w.name?.startsWith("Team:") && !w.name?.startsWith("Scene:"));
+      if (!isSoloOrGroup) return false;
+      // 选了 Agent 后过滤：只显示包含该 Agent 的 World
+      if (agentId && Array.isArray(w.agent_ids)) {
+        return w.agent_ids.includes(agentId);
+      }
+      return true;
+    }),
+    [allWorlds, agentId],
+  );
+
+  // 切换 Agent 后，如果当前 World 不在过滤结果中，清空
+  useEffect(() => {
+    if (worldId && agentId && !worlds.some((w) => w.id === worldId)) {
+      setWorldId("");
+    }
+  }, [agentId, worlds, worldId]);
 
   // 切换风格时清空附加参数，避免残留上一个风格的输入
   useEffect(() => {
@@ -99,7 +114,10 @@ export default function NarrativeFactory() {
     generateDiary.isPending ||
     generateLetter.isPending ||
     generatePodcast.isPending ||
-    generateParallel.isPending;
+    generateParallel.isPending ||
+    generateMicrofilm.isPending ||
+    generateSerial.isPending ||
+    generateSelfportrait.isPending;
 
   const selectedAgent = agents.find((a) => a.id === agentId);
   const selectedStyle = NARRATIVE_STYLES.find(
@@ -136,6 +154,14 @@ export default function NarrativeFactory() {
 
   const handleGenerate = useCallback(async () => {
     if (!canGenerate || !selectedStyle) return;
+    // 校验：Agent 必须在所选 World 中（播客/平行对话除外）
+    if (styleKey !== "podcast" && styleKey !== "parallel") {
+      const selectedWorld = worlds.find((w) => w.id === worldId);
+      if (selectedWorld && Array.isArray(selectedWorld.agent_ids) && !selectedWorld.agent_ids.includes(agentId)) {
+        setErrorMsg("所选 Agent 不在此 World 中，请选择包含该 Agent 的 World");
+        return;
+      }
+    }
     setErrorMsg(null);
     setPhase("generating");
 
@@ -159,6 +185,7 @@ export default function NarrativeFactory() {
         agent_name: selectedAgent?.name ?? apiResult.agent_id,
         generated_at: apiResult.generated_at,
         word_count: apiResult.content.length,
+        events_count: apiResult.events_count,
       });
       setPhase("result");
     } catch (cause) {
@@ -166,7 +193,8 @@ export default function NarrativeFactory() {
       setPhase("setup");
     }
   }, [canGenerate, selectedStyle, styleKey, agentId, buildRequest,
-      generateStory, generateDiary, generateLetter, generatePodcast, generateParallel]);
+      generateStory, generateDiary, generateLetter, generatePodcast, generateParallel,
+      generateMicrofilm, generateSerial, generateSelfportrait]);
 
   const handleReset = useCallback(() => {
     setResult(null);
@@ -203,12 +231,28 @@ export default function NarrativeFactory() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${result.agent_name}-${result.style}-${result.generated_at.slice(0, 10)}.md`;
+    // 文件名：letter/podcast/parallel 追加相关角色名
+    let suffix = "";
+    if (styleKey === "letter") {
+      const recipient = target.trim() || DEFAULT_LETTER_TARGET;
+      suffix = `-${recipient}`;
+    } else if (styleKey === "podcast") {
+      const guestNames = guestAgentIds
+        .map((id) => agents.find((a) => a.id === id)?.name)
+        .filter(Boolean);
+      if (guestNames.length > 0) suffix = `-${guestNames.join(",")}`;
+    } else if (styleKey === "parallel") {
+      const partner = guestAgentIds[0]
+        ? agents.find((a) => a.id === guestAgentIds[0])?.name
+        : target.trim();
+      if (partner) suffix = `-${partner}`;
+    }
+    a.download = `${result.agent_name}${suffix}-${result.style}-${result.generated_at.slice(0, 10)}.md`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }, [result]);
+  }, [result, styleKey, target, guestAgentIds, agents]);
 
 
   // === generating ===
@@ -272,6 +316,13 @@ export default function NarrativeFactory() {
               </div>
             </div>
           </div>
+
+          {/* 无事件提示 */}
+          {result.events_count === 0 && (
+            <div className="mb-4 px-3 py-2 rounded-lg bg-accent-orange/10 border border-accent-orange/30 text-xs font-mono text-accent-orange">
+              ⚠️ 该 World 暂无事件记录（无记录的事件），叙事仅基于 Agent 人格生成，内容可能不够丰富。建议先运行 World 产生事件后再生成。
+            </div>
+          )}
 
           {/* 正文——纯文本保留换行，不使用 prose 避免特殊字符渲染 */}
           <div className="max-w-none">
@@ -422,7 +473,9 @@ export default function NarrativeFactory() {
         {worlds.length === 0 ? (
           <Card>
             <p className="text-xs font-mono text-text-secondary/60 text-center py-4">
-              暂无可用的 World——请先在单人剧场或群体沙盒中创建并运行一个实验
+              {agentId
+                ? "当前 Agent 暂无关联 World——请先在单人剧场或群体沙盒中创建并运行一个包含该 Agent 的实验"
+                : "暂无可用的 World——请先在单人剧场或群体沙盒中创建并运行一个实验"}
             </p>
           </Card>
         ) : (

@@ -27,7 +27,7 @@ vi.mock("../../api/worlds", () => ({
         id: "world-test",
         name: "测试 World",
         scenario: { name: "新生报到" },
-        agent_ids: ["mock-1"],
+        agent_ids: ["mock-1", "mock-2", "mock-3"],
         current_tick: 3,
         status: "finished",
       },

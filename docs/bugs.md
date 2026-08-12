@@ -712,3 +712,76 @@
 - **修复文件**：`frontend/src/pages/SoloTheater.tsx`、`frontend/src/pages/Archive.tsx`
 - **回归测试**：M2 前端相关测试 `22 passed`；M2 → M8 精确回放聚焦测试通过。
 - **人工复测**：用户确认入口跳转、自动展开和事件查看全部通过。
+
+---
+
+## 2026-08-11: M5 叙事工厂模块测试
+
+### BUG-044：P3 叙事端点参数错误——microfilm/serial/selfportrait 全部 500 ✅
+
+- **状态**：✅ 已修复 (2026-08-11)
+- **优先级**：P0（三种叙事风格完全不可用）
+- **发现日期**：2026-08-11
+- **环境**：`POST /api/narratives/microfilm`、`/serial`、`/selfportrait`
+- **复现步骤**：
+  1. 启动后端
+  2. 在前端 M5 叙事工厂选择 microfilm/serial/selfportrait 风格并点击生成
+- **实际结果**：500 Internal Server Error，TypeError: missing required positional arguments
+- **根因**：`narratives.py` L282-297 三个端点调用 `_generate_narrative(req, Style)` 参数顺序错误且缺少 `db`、`engine` 依赖注入
+- **修复**：三个端点改为与 story/diary 等端点相同的模式——添加 `db: AsyncSession = Depends(get_db)` 和 `engine: NarrativeEngine = Depends(get_narrative_engine)`，调用顺序改为 `_generate_narrative(NarrativeStyle.XXX, req, db, engine)`，添加 try/except 错误处理
+- **关联位置**：`backend/src/api/narratives.py` — lines 282-324
+- **回归测试**：后端 narrative engine 10 passed；agents/worlds API 46 passed；前端组件 13 passed
+
+### BUG-045：M5 isPending 和 handleGenerate 依赖不完整 ✅
+
+- **状态**：✅ 已修复并关闭 (2026-08-12)
+- **优先级**：P2（UX 缺陷——P3 风格生成时按钮不显示加载态）
+- **发现日期**：2026-08-11
+- **环境**：前端 M5 叙事工厂页面
+- **复现步骤**：
+  1. 选择 microfilm/serial/selfportrait 风格
+  2. 点击生成叙事
+- **实际结果**：按钮不显示"生成中…"状态，用户可能重复点击
+- **根因**：`isPending` 只检查前 5 种风格的 mutation，`handleGenerate` 依赖数组缺少 P3 mutations
+- **修复**：`isPending` 补充 `generateMicrofilm.isPending || generateSerial.isPending || generateSelfportrait.isPending`；`handleGenerate` 依赖数组补充 `generateMicrofilm, generateSerial, generateSelfportrait`
+- **关联位置**：`frontend/src/pages/NarrativeFactory.tsx` — lines 97-105, 169-172
+- **回归测试**：前端组件 13 passed；TypeScript 零新增错误
+
+### BUG-046：日记风格无独立标题，正文第一行被当作标题 ✅
+
+- **状态**：✅ 已修复并关闭 (2026-08-12)
+- **优先级**：P2（输出质量问题）
+- **发现日期**：2026-08-11
+- **环境**：M5 叙事工厂，日记风格生成
+- **复现步骤**：选择日记风格生成叙事
+- **实际结果**：标题为正文第一句（如「今天下雨了。」），没有独立标题
+- **根因**：DIARY_PROMPT 模板缺少标题格式指令，LLM 不返回标题，_parse_narrative 把正文前 30 字当标题
+- **修复**：模板添加标题格式返回指令；要求改为「标题用日期或主题，正文以今天...开头」
+- **关联位置**：backend/src/engines/narrative/templates.py — DIARY_PROMPT
+- **回归测试**：后端 narrative engine 10 passed
+
+### BUG-047：信件风格标题为称呼语，不是真正标题 ✅
+
+- **状态**：✅ 已修复并关闭 (2026-08-12)
+- **优先级**：P2（输出质量问题）
+- **发现日期**：2026-08-11
+- **环境**：M5 叙事工厂，信件风格生成
+- **复现步骤**：选择信件风格生成叙事
+- **实际结果**：标题为「亲爱的未来的自己：」等称呼语，应放在正文第一行而非标题
+- **根因**：LETTER_PROMPT 模板缺少标题格式指令，LLM 以称呼开头，解析器把称呼当标题
+- **修复**：模板添加标题格式返回指令；明确要求「标题自拟，不要用称呼作标题；称呼和落款放在正文中」
+- **关联位置**：backend/src/engines/narrative/templates.py — LETTER_PROMPT
+- **回归测试**：后端 narrative engine 10 passed
+
+### BUG-048：播客/平行对话生成内容偏离用户输入的主题 ✅
+
+- **状态**：✅ 已修复并关闭 (2026-08-12)
+- **优先级**：P1（核心功能——用户输入的主题被完全忽略）
+- **发现日期**：2026-08-12
+- **环境**：M5 叙事工厂，播客风格生成
+- **复现步骤**：选择播客风格，输入主题「豆腐脑是甜的还是咸的」，点击生成
+- **实际结果**：标题为「《菠萝电台》第7期：独处时，也能种出快乐」，与输入主题完全无关
+- **根因**：PODCAST_PROMPT 和 PARALLEL_PROMPT 模板只把 target 当作「信息」列出，没有强制 LLM 围绕主题写标题和内容
+- **修复**：两个模板均添加「标题必须包含/反映主题，不得偏离」「内容必须围绕主题展开」指令；同时补充标题格式返回指令
+- **关联位置**：backend/src/engines/narrative/templates.py — PODCAST_PROMPT, PARALLEL_PROMPT
+- **回归测试**：后端 narrative engine 10 passed
