@@ -510,7 +510,7 @@ export default function SoloTheater() {
       </div>
 
       {/* 三栏主体 */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 min-h-0 flex overflow-hidden">
         {/* 左栏：Agent 状态面板 + 目标 */}
         <div className="w-[260px] shrink-0 border-r border-border overflow-y-auto p-3 space-y-3">
           {enrichedAgent && (
@@ -527,7 +527,7 @@ export default function SoloTheater() {
         </div>
 
         {/* 中栏：思维流 */}
-        <ThoughtStream events={events} className="flex-1" />
+        <ThoughtStream events={events} className="flex-1 min-h-0" />
 
         {/* 右栏：事件统计 */}
         <div className="w-[200px] shrink-0 border-l border-border overflow-y-auto p-3">

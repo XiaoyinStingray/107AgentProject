@@ -128,6 +128,7 @@ class TestInjectEvent:
         assert event.type == "agent_action"
         assert event.target_agent_ids == ["agent-1"]
         assert event.data == {
+            "injected": True,
             "action": "导演干预",
             "description": "请陈默立即离开图书馆",
         }
@@ -144,3 +145,58 @@ class TestInjectEvent:
         assert streamed[0] is injected
         assert sum(event.id == injected.id for event in streamed) == 1
         assert sum(event.id == injected.id for event in engine.events) == 1
+
+    def test_injected_event_filtered_from_shared_context(self, db_session):
+        """验证注入事件不会出现在共享上下文中（只有目标 Agent 能看到）。"""
+        from engines.world.engine import WorldEngine
+
+        engine = WorldEngine(make_world(), [], db_session)
+        # 注入一个 agent_message 事件，目标为 agent-1
+        engine.inject_event(
+            "这是一条私有消息",
+            event_type="agent_message",
+            target_agent_ids=["agent-1"],
+        )
+        
+        # 获取共享上下文（所有 Agent 都能看到的部分）
+        shared_context = engine._build_world_context()
+        
+        # 注入事件不应该出现在共享上下文中
+        assert "这是一条私有消息" not in shared_context
+        assert "导演干预" not in shared_context
+
+    @pytest.mark.asyncio
+    async def test_injected_event_only_visible_to_target_agent(self, db_session):
+        """验证注入事件只被目标 Agent 看到，其他 Agent 看不到。"""
+        from engines.world.engine import WorldEngine
+
+        engine = WorldEngine(make_world(), [], db_session)
+        # 注入一个 agent_message 事件，目标为 agent-1
+        engine.inject_event(
+            "这是一条私有消息",
+            event_type="agent_message",
+            target_agent_ids=["agent-1"],
+        )
+        
+        # 模拟 _inject_world_context 的逻辑
+        shared_context = engine._build_world_context()
+        
+        # 收集注入事件按目标 Agent 分组
+        injected_by_target = {}
+        for event in engine.events[-10:]:
+            if not event.data.get("injected"):
+                continue
+            for tid in event.target_agent_ids:
+                injected_by_target.setdefault(tid, []).append(
+                    f"[导演干预] {event.description}"
+                )
+        
+        # 验证只有 agent-1 有私有提示
+        assert "agent-1" in injected_by_target
+        assert len(injected_by_target["agent-1"]) == 1
+        assert "这是一条私有消息" in injected_by_target["agent-1"][0]
+        
+        # 验证其他 Agent 没有私有提示
+        for agent_id in engine.agents:
+            if agent_id != "agent-1":
+                assert agent_id not in injected_by_target

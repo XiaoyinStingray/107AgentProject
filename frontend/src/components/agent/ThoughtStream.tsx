@@ -67,11 +67,14 @@ export default function ThoughtStream({
     };
   }, []);
 
-  // 新事件到达 → 自动滚底
+  // 新事件到达 → 自动滚底（仅当用户已在底部附近时触发，避免打断浏览）
   useEffect(() => {
     if (!autoScroll || userScrolledUp || !followsLatest) return;
     const el = containerRef.current;
-    if (el) {
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    // 只有在距离底部 150px 以内时才自动滚动
+    if (distanceFromBottom < 150) {
       el.scrollTop = el.scrollHeight;
     }
   }, [events.length, autoScroll, userScrolledUp, followsLatest]);

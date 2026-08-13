@@ -175,10 +175,16 @@ class WorldStateMixin:
         return hints
 
     def _recent_events_text(self, count: int = RECENT_EVENT_COUNT) -> str:
-        """Return recent event descriptions within a deterministic text budget."""
+        """Return recent event descriptions within a deterministic text budget.
+
+        Injected (director intervention) events are excluded from the shared
+        context so that only the target Agent sees them (via private context
+        in _inject_world_context).
+        """
         lines = [
             f"  - {self._compact_event_description(event.description)}"
             for event in self.events[-count:]
+            if not event.data.get("injected")
         ]
         return "\n".join(lines)[:RECENT_EVENT_CONTEXT_CHAR_LIMIT]
 
@@ -416,7 +422,15 @@ class WorldStateMixin:
         emits it through SSE at the start of the next running tick.
         """
         targets = list(target_agent_ids or [])
-        data: dict[str, Any] = {}
+        data: dict[str, Any] = {"injected": True}
+        # 解析目标 Agent 名称供前端显示
+        target_names: list[str] = []
+        for tid in targets:
+            agent_obj = self.agents.get(tid)
+            if agent_obj is not None:
+                target_names.append(agent_obj.persona.name or tid[:8])
+        if target_names:
+            data["target_names"] = target_names
         if event_type == "agent_message":
             data["message"] = description
         elif event_type == "agent_action":

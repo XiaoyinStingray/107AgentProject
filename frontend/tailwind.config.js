@@ -15,6 +15,7 @@ export default {
         "accent-orange": "#ff8844",
         "accent-red": "#ff4466",
         "accent-purple": "#aa44ff",
+        "accent-cyan": "#00ccff",
         "text-muted": "#666680",
         surface: "#1a1a28",
         "surface-dark": "#12121a",

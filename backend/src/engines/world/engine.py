@@ -238,11 +238,28 @@ class WorldEngine(
 
         State 4: 使用 continuous 模式——Agent 的 system prompt 只在初始化时设置，
         世界状态以 UserMessage 追加到消息历史末尾。Agent 拥有持续的意识流。
+
+        Injected (director intervention) events are excluded from the shared
+        context.  For agent_message / agent_action injections the target agent
+        receives a private hint so that only it reacts to the director message.
         """
         self._activate_pending_instruction_routes()
         shared_context = self._build_world_context()
+        # 收集最近的注入事件，按目标 Agent 分组
+        injected_by_target: dict[str, list[str]] = {}
+        for event in self.events[-10:]:
+            if not event.data.get("injected"):
+                continue
+            for tid in event.target_agent_ids:
+                injected_by_target.setdefault(tid, []).append(
+                    f"[导演干预] {event.description}"
+                )
         for agent in self.agents.values():
-            context = self._build_agent_context(agent, shared_context)
+            extra = ""
+            private_hints = injected_by_target.get(agent.id)
+            if private_hints:
+                extra = "\n🎬 导演悄悄话（仅你可见）:\n" + "\n".join(private_hints)
+            context = self._build_agent_context(agent, shared_context + extra)
             memories = await self._retriever.retrieve(agent.id, context)
             agent.inject_context(context, memories, mode="continuous")
 

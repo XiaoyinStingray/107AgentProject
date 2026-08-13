@@ -72,7 +72,10 @@ export default function ThoughtBubble({ event, compact = false, onClick }: Thoug
 
   // 普通消息气泡
   const config = BUBBLE_CONFIG[event.type] ?? BUBBLE_CONFIG.fallback;
-  const agentName = event.agent_name ?? event.agent_id ?? "Unknown";
+  const isInjected = !!event.data?.injected;
+  // 使用 || 而非 ?? ——空字符串也应回退到默认值
+  const agentName = event.agent_name || event.agent_id || "Unknown";
+  const targetNames: string[] = isInjected ? ((event.data?.target_names as string[]) ?? []) : [];
   const bodyText = resolveBodyText(event);
 
   // 无内容的事件不渲染空泡
@@ -93,6 +96,11 @@ export default function ThoughtBubble({ event, compact = false, onClick }: Thoug
           <span className="text-sm font-mono text-text-secondary/70">
             · {config.icon} {config.label}
           </span>
+          {isInjected && targetNames.length > 0 && (
+            <span className="text-sm font-mono text-accent-orange/80">
+              → {targetNames.join(", ")}
+            </span>
+          )}
         </div>
       )}
 
@@ -112,6 +120,12 @@ export default function ThoughtBubble({ event, compact = false, onClick }: Thoug
             → {event.action ?? ""}
             {event.target ? `(${event.target})` : ""}
             {bodyText ? `: ` : ""}
+          </span>
+        )}
+        {/* 对话类消息展示 target（注入消息的目标 Agent） */}
+        {event.type === "agent_message" && event.target && (
+          <span className="text-accent-purple/70 mr-1">
+            → {event.target}：
           </span>
         )}
         {bodyText}
@@ -137,13 +151,13 @@ const BUBBLE_CONFIG: Record<
     dotColor: "#4488ff",
   },
   agent_message: {
-    icon: "💬",
+    icon: "",
     label: "对话",
     bg: "bg-accent-purple/15 border-accent-purple/30",
     dotColor: "#aa44ff",
   },
   agent_action: {
-    icon: "⚡",
+    icon: "",
     label: "行动",
     bg: "bg-accent-green/15 border-accent-green/30",
     dotColor: "#00ff88",
@@ -179,9 +193,14 @@ function resolveBodyText(event: SSEEvent): string {
   return stripInternalMarkers(raw);
 }
 
-/** 清除残留的 "调用工具: xxx({...})" 语法 + 内部终止标记 [END_TICK] */
+/** 清除残留的 "调用工具：xxx({...})" 语法 + 内部终止标记 [END_TICK] + DSML 标签 */
 function stripInternalMarkers(text: string): string {
   let cleaned = text.replace(/^调用工具:\s*\w+\(.*\)\s*$/s, "").trim();
   cleaned = cleaned.replace(/\[END_TICK\]/g, "").trim();
+  // 清除 DSML 标签：支持 <||DSML||...>、< ||DSML|| ... >、</ ||DSML|| ...> 等格式
+  cleaned = cleaned.replace(/<\/?\s*\|\|DSML\|\|[^>]*>/g, "").trim();
+  cleaned = cleaned.replace(/<\/?\s*\|\|DSML\|\|/g, "").trim();
+  cleaned = cleaned.replace(/\|\|DSML\|\|\s*>/g, "").trim();
+  cleaned = cleaned.replace(/\|\|DSML\|\|/g, "").trim();
   return cleaned;
 }
