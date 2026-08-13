@@ -827,3 +827,70 @@
 - **根因**：`ThoughtBubble.tsx` 的 `resolveBodyText` 处理 `agent_action` 时只从 `event.data` 提取，但后端把可读描述放在 `event.description`，导致 `bodyText` 为空被跳过
 - **修复**：`agent_action` 分支在 `data` 字段提取失败后回退到 `event.description`
 - **修复文件**：`frontend/src/components/agent/ThoughtBubble.tsx`
+
+---
+
+## 2026-08-13: BUG-M8-001 ~ BUG-M8-007 修复
+
+### BUG-M8-001：回放缺少消息类型图例 ✅
+
+- **状态**：✅ 已修复 (2026-08-13)
+- **优先级**：P2
+- **现象**：回放事件列表显示 💬🌍📌 等图标，但没有图例说明每个图标代表什么消息类型
+- **根因**：事件列表渲染区域缺少图例行
+- **修复**：在事件列表上方添加图例行（对话/思考/行动/世界/其他）
+- **修复文件**：`frontend/src/pages/Archive.tsx`
+
+### BUG-M8-002：#highlight URL hash 无法定向到回放 ✅
+
+- **状态**：✅ 已修复 (2026-08-13)
+- **优先级**：P2
+- **现象**：在 M8 其他功能下输入 URL `#highlight` 无法定向到精彩回放 Tab
+- **根因**：`Archive.tsx` 的 hash→tab 映射缺少 `highlights` 键
+- **修复**：在 MAP 中添加 `highlights: "highlights"`
+- **修复文件**：`frontend/src/pages/Archive.tsx`
+
+### BUG-M8-003：World 暂停后回放未立即拉取 ✅
+
+- **状态**：✅ 已修复 (2026-08-13)
+- **优先级**：P2
+- **现象**：从 World 切换到精彩回放后，World 自动暂停，但回放不会立即拉取最新事件
+- **根因**：轮询逻辑只在 `running` 状态下工作，状态变为 `paused` 时直接返回
+- **修复**：检测状态从 `running` 变为 `paused` 时立即执行一次 `handleRefresh()`
+- **修复文件**：`frontend/src/pages/Archive.tsx`
+
+### BUG-M8-004：展开回放后 URL 不变化 ✅
+
+- **状态**：✅ 已修复 (2026-08-13)
+- **优先级**：P2
+- **现象**：点开模拟回放记录后 URL 不会变化，无法分享特定回放链接
+- **根因**：`handleToggleReplay` 未更新 URL search params
+- **修复**：展开时添加 `?replay=world_id`，收起时清除该参数
+- **修复文件**：`frontend/src/pages/Archive.tsx`
+
+### BUG-M8-005：成就进度条和百分比不对应 ✅
+
+- **状态**：✅ 已修复 (2026-08-13)
+- **优先级**：P2
+- **现象**：进度条宽度和显示百分比可能因浮点精度不一致
+- **根因**：进度条用 `Math.min(100, ach.progress * 100)`，百分比用 `Math.round(ach.progress * 100)`
+- **修复**：统一使用 `Math.round(ach.progress * 100)` 计算
+- **修复文件**：`frontend/src/pages/Archive.tsx`
+
+### BUG-M8-006：导出报告命名/Agent 过滤/事件类型中文 ✅
+
+- **状态**：✅ 已修复 (2026-08-13)
+- **优先级**：P2
+- **现象**：(1) 文件名使用 hash 而非 World 名称；(2) 参与 Agent 列出全部 Agent 而非仅参与者；(3) 事件分布使用英文类型名
+- **根因**：`_ascii_slug` 生成 hash 文件名；`_collect_agent_names` 返回全部 Agent；事件类型未映射中文
+- **修复**：(1) 文件名直接使用 World 名称（清理非法字符）；(2) 过滤只保留 events 中出现的 agent_id；(3) 添加 `_TYPE_CN` 映射表；(4) Content-Disposition header 使用 RFC 5987 UTF-8 编码
+- **修复文件**：`backend/src/api/export.py`
+
+### BUG-M8-007：宽度缩小后布局不合理 ✅
+
+- **状态**：✅ 已修复 (2026-08-13)
+- **优先级**：P2
+- **现象**：成就卡片在中等宽度下显示 2 列太窄，布局不合理
+- **根因**：`grid-cols-2 md:grid-cols-5` 断点跳跃太大
+- **修复**：改为 `grid-cols-2 sm:grid-cols-3 lg:grid-cols-5` 更合理的断点
+- **修复文件**：`frontend/src/pages/Archive.tsx`

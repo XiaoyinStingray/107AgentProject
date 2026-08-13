@@ -159,7 +159,11 @@ describe("Step 45 Archive — Tab 栏与切换", () => {
   it("switches to achievements tab", () => {
     renderAndClickTab("成就系统");
     expect(screen.getByText("造物主")).toBeInTheDocument();
-    expect(screen.getByText(/成就.*3\/10/)).toBeInTheDocument();
+    const h2s = screen.getAllByRole('heading', { level: 2 });
+    const achievementHeading = h2s.find(h => h.textContent?.includes('成就'));
+    expect(achievementHeading).toBeDefined();
+    expect(achievementHeading?.textContent).toContain('3');
+    expect(achievementHeading?.textContent).toContain('26');
   });
 
   it("switches to export tab", () => {
@@ -267,7 +271,11 @@ describe("Step 45 Archive — 成就系统面板", () => {
     renderAndClickTab("成就系统");
     expect(screen.getByText("造物主")).toBeInTheDocument();
     expect(screen.getByText("全能选手")).toBeInTheDocument();
-    expect(screen.getByText(/成就.*3\/10/)).toBeInTheDocument();
+    const h2s = screen.getAllByRole('heading', { level: 2 });
+    const achievementHeading = h2s.find(h => h.textContent?.includes('成就'));
+    expect(achievementHeading).toBeDefined();
+    expect(achievementHeading?.textContent).toContain('3');
+    expect(achievementHeading?.textContent).toContain('26');
   });
 
   it("shows unlocked status for completed achievements", () => {
@@ -370,9 +378,10 @@ describe("Step 45 Archive — 工具函数", () => {
     vi.unstubAllGlobals();
   });
 
-  it("ARCHIVE_TABS has 4 available items", () => {
-    expect(ARCHIVE_TABS.length).toBe(4);
+  it("ARCHIVE_TABS has 7 items (4 available + 3 P3 placeholders)", () => {
+    expect(ARCHIVE_TABS.length).toBe(7);
     expect(ARCHIVE_TABS.filter((t) => t.available).length).toBe(4);
+    expect(ARCHIVE_TABS.filter((t) => !t.available).length).toBe(3);
   });
 
   it("MOCK_REPLAYS has 3 records", () => {

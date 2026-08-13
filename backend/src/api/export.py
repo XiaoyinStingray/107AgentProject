@@ -8,6 +8,7 @@
 
 import json
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
@@ -81,15 +82,19 @@ def build_report_markdown(
     if type_counts:
         lines.append("- **事件分布**：")
         for t, c in sorted(type_counts.items(), key=lambda x: -x[1]):
-            lines.append(f"  - {t}：{c}")
+            cn_name = _TYPE_CN.get(t, t)
+            lines.append(f"  - {cn_name}：{c}")
     lines.append("")
 
-    # Agent 列表
+    # Agent 列表（只列出实际参与事件的 Agent）
     lines.append("## 参与 Agent")
     lines.append("")
+    participating_agents = {e.source_agent_id for e in events if e.source_agent_id}
     for aid, name in agent_names.items():
+        if aid not in participating_agents:
+            continue
         agent_events = [e for e in events if e.source_agent_id == aid]
-        lines.append(f"- **{name}** (`{aid[:8]}...`) — {len(agent_events)} 条事件")
+        lines.append(f"- **{name}** — {len(agent_events)} 条事件")
     lines.append("")
 
     # 事件时间线
@@ -139,6 +144,17 @@ def _type_emoji(event_type: str) -> str:
         "tick_boundary": "⏱",
     }
     return mapping.get(event_type, "📋")
+
+
+# 事件类型中文名映射
+_TYPE_CN: dict[str, str] = {
+    "agent_message": "对话",
+    "agent_action": "行动",
+    "thought_stream": "思考",
+    "relationship_change": "关系变化",
+    "world_event": "世界事件",
+    "tick_boundary": "Tick 分隔",
+}
 
 
 def _ascii_slug(text: str, max_len: int = 20) -> str:
@@ -234,14 +250,22 @@ async def export_report_markdown(
         scenario_name=world_data["scenario"].get("name", ""),
     )
 
-    safe_name = _ascii_slug(world_data["name"])
+    # 文件名格式：report-{场景名}-{世界名}-{日期}
+    scenario_name = world_data.get("scenario", {}).get("name", "")
+    world_name = world_data.get("name", "")
+    # 组合场景名和世界名，清理非法字符
+    name_parts = [p for p in [scenario_name, world_name] if p]
+    safe_name = "-".join(name_parts) if name_parts else world_id
+    safe_name = "".join(c for c in safe_name if c not in r'\/:*?"<>|').strip()
+    if not safe_name:
+        safe_name = world_id
     filename = f"report-{safe_name}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.md"
     logger.info(f"Export report: world={world_id}, events={len(events)}, file={filename}")
 
     return Response(
         content=report,
         media_type="text/markdown; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
     )
 
 
@@ -275,12 +299,18 @@ async def export_report_json(
         "events": [e.model_dump() for e in events],
     }
 
-    safe_name = _ascii_slug(world_data["name"])
+    scenario_name = world_data.get("scenario", {}).get("name", "")
+    world_name = world_data.get("name", "")
+    name_parts = [p for p in [scenario_name, world_name] if p]
+    safe_name = "-".join(name_parts) if name_parts else world_id
+    safe_name = "".join(c for c in safe_name if c not in r'\/:*?"<>|').strip()
+    if not safe_name:
+        safe_name = world_id
     filename = f"report-{safe_name}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.json"
     content = json.dumps(report_data, ensure_ascii=False, indent=2)
 
     return Response(
         content=content,
         media_type="application/json; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
     )
