@@ -363,8 +363,8 @@ class WorldEngine(
                 type="agent_message",
                 source_agent_id=source_id,
                 target_agent_ids=[target_id] if target_id else [],
-                description=f"{msg.get('from_name', '?')} 对 {msg.get('to_name', '?')} 说: {content}",
-                data={"tone": msg.get("tone", "neutral"), "message": content},
+                description=f"{msg.get('from_name', '?')} 对 {msg.get('to_name', '?')} 说: {WorldMessageMixin._clean_group_content(content)}",
+                data={"tone": msg.get("tone", "neutral"), "message": WorldMessageMixin._clean_group_content(content)},
                 created_at=datetime.now(timezone.utc).isoformat(),
             )
             events.append(event)
@@ -389,7 +389,7 @@ class WorldEngine(
                     tick=t.get("tick", self.current_tick),
                     type="thought_stream",
                     source_agent_id=agent_id,
-                    description=t.get("thought", ""),
+                    description=WorldMessageMixin._clean_group_content(t.get("thought", "")),
                     created_at=datetime.now(timezone.utc).isoformat(),
                 ))
         return events

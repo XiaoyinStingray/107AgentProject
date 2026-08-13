@@ -197,10 +197,13 @@ function resolveBodyText(event: SSEEvent): string {
 function stripInternalMarkers(text: string): string {
   let cleaned = text.replace(/^调用工具:\s*\w+\(.*\)\s*$/s, "").trim();
   cleaned = cleaned.replace(/\[END_TICK\]/g, "").trim();
-  // 清除 DSML 标签：支持 <||DSML||...>、< ||DSML|| ... >、</ ||DSML|| ...> 等格式
-  cleaned = cleaned.replace(/<\/?\s*\|\|DSML\|\|[^>]*>/g, "").trim();
-  cleaned = cleaned.replace(/<\/?\s*\|\|DSML\|\|/g, "").trim();
-  cleaned = cleaned.replace(/\|\|DSML\|\|\s*>/g, "").trim();
-  cleaned = cleaned.replace(/\|\|DSML\|\|/g, "").trim();
+  // 清除 DSML 标签：支持 <||DSML||...>、< | | DSML | | ...>、</ | | DSML | | ...> 等格式（包括跨行）
+  // 关键：| 和 | 之间可能有空格（如 < | | DSML | |）
+  cleaned = cleaned.replace(/<\/?\s*\|\s*\|\s*DSML\s*\|\s*\|[^>]*>/gs, "").trim();
+  cleaned = cleaned.replace(/<\/?\s*\|\s*\|\s*DSML\s*\|\s*\|/g, "").trim();
+  cleaned = cleaned.replace(/\|\s*\|\s*DSML\s*\|\s*\|\s*>/g, "").trim();
+  cleaned = cleaned.replace(/\|\s*\|\s*DSML\s*\|\s*\|/g, "").trim();
+  // 清除 tool_calls 残留
+  cleaned = cleaned.replace(/tool_calls/g, "").trim();
   return cleaned;
 }

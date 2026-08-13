@@ -12,6 +12,7 @@ from engines.world.relationships import (
     assess_tick_relationships_llm,
 )
 from engines.world.instructions import resolve_agent_instruction
+from engines.world.messages import WorldMessageMixin
 from engines.world.resources import build_resource_context
 from models.event import Event, SimEvent
 
@@ -284,7 +285,7 @@ class WorldStateMixin:
         handled = getattr(self, "_handled_actions", set())
         if (source_id, "think_aloud") in handled:
             return []
-        description = event.data.get("thought", event.description)
+        description = WorldMessageMixin._clean_group_content(event.data.get("thought", event.description))
         return [self._make_derived_event("thought_stream", event, description)]
 
     def _handle_submit_deliverable(self, event: SimEvent) -> list[SimEvent]:

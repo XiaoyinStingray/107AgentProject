@@ -55,8 +55,9 @@ export default function ThoughtStream({
     const el = containerRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
+      // 仅当向上滚时才标记 userScrolledUp，向下滚不做任何操作
+      // 这样用户向下滚时不会触发自动跳到底部
       if (e.deltaY < 0) setUserScrolledUp(true);
-      else setUserScrolledUp(false);
     };
     const onTouch = () => setUserScrolledUp(true);
     el.addEventListener("wheel", onWheel, { passive: true });
@@ -67,17 +68,14 @@ export default function ThoughtStream({
     };
   }, []);
 
-  // 新事件到达 → 自动滚底（仅当用户已在底部附近时触发，避免打断浏览）
+  // 新事件到达 → 自动滚底（用户未手动上滚时始终滚到底部）
   useEffect(() => {
     if (!autoScroll || userScrolledUp || !followsLatest) return;
     const el = containerRef.current;
     if (!el) return;
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    // 只有在距离底部 150px 以内时才自动滚动
-    if (distanceFromBottom < 150) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [events.length, autoScroll, userScrolledUp, followsLatest]);
+    // 直接滚到底部，确保新消息可见
+    el.scrollTop = el.scrollHeight;
+  }, [events.length, autoScroll, followsLatest]);
 
   // 连续同一 Agent 的消息合并显示（compact 模式）
   const renderEvents = () => {

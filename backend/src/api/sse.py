@@ -421,9 +421,17 @@ def _event_to_dict(event: SimEvent, name_map: dict | None = None) -> dict:
         base["message"] = event.data.get("message", event.description) if event.data else event.description
         base["subtext"] = event.data.get("subtext", "") if event.data else ""
         base["tone"] = event.data.get("tone", "neutral") if event.data else "neutral"
-        # 注入消息的目标 Agent（用于前端显示）
+        # 目标 Agent（用于前端显示）
+        # 优先从 data.target_names 取（注入消息），否则从 target_agent_ids + name_map 取
         target_names = event.data.get("target_names", []) if event.data else []
-        base["target"] = target_names[0] if target_names else ""
+        if target_names:
+            base["target"] = target_names[0]
+        elif event.target_agent_ids:
+            # 非注入消息：从 name_map 获取目标 Agent 名称
+            target_id = event.target_agent_ids[0]
+            base["target"] = name_map.get(target_id, "")
+        else:
+            base["target"] = ""
     elif event.type == "agent_action":
         base["action"] = event.data.get("action", "") if event.data else ""
         base["target"] = event.data.get("target", "") if event.data else ""
