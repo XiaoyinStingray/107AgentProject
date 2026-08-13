@@ -298,14 +298,43 @@ def _cleanup_team_run(team_id: str):
 # =============================================================================
 
 
+def _plan_execution_response(
+    *,
+    team_id: str,
+    plan_id: str,
+    task: str,
+    steps: list[dict],
+    world_id: str | None = None,
+) -> dict:
+    """Keep the full Plan response while also exposing the stable plan_id."""
+    return {
+        "id": plan_id,
+        "plan_id": plan_id,
+        "team_id": team_id,
+        "task": task,
+        "steps": steps,
+        "status": "executing",
+        "world_id": world_id,
+    }
+
+
 @router.post("/{team_id}/execute")
 async def execute_team(
     team_id: str,
     db: AsyncSession = Depends(get_db),
 ):
     """启动 Team 执行——分解任务、创建 Plan、后台执行 Worker 步骤。"""
-    from engines.team.decomposer import decompose_task
-    from engines.team.workspace import init_team_workspace
+
+    # 前端重复点击或状态落库前的短暂窗口：复用同一次运行的 Plan。
+    active_run = _active_team_runs.get(team_id)
+    if active_run:
+        active_engine = active_run["engine"]
+        return _plan_execution_response(
+            team_id=team_id,
+            plan_id=active_run["plan_id"],
+            task=active_run.get("task", ""),
+            steps=active_engine._prepared_steps or [],
+        )
 
     result = await db.execute(select(TeamRow).where(TeamRow.id == team_id))
     team_row = result.scalar_one_or_none()
@@ -322,7 +351,9 @@ async def execute_team(
         )
         plan_row = plan_result.scalar_one_or_none()
         if plan_row:
-            return {"team_id": team_id, "plan_id": plan_row.id, "status": "executing"}
+            response = plan_row.to_dict()
+            response["plan_id"] = plan_row.id
+            return response
         team_row.status = "idle"
 
     if team_row.status not in ("idle", "finished"):
@@ -337,25 +368,17 @@ async def execute_team(
     except Exception:
         model_client = None
 
+    from engines.agent_factory.loader import AgentNotFoundError
     from engines.team.engine import TeamEngine
 
-    # ── 预计算：加载 Agent + 分解任务 + 创建 Plan（在后台任务之前，确保 plan_id 立即可用）──
+    # ── 预计算一次：后台 Worker 将直接消费这份 Plan ──
     engine = TeamEngine(team, db)
-    agents = await engine._load_agents()
-    if not agents:
-        raise HTTPException(status_code=400, detail="Team 中没有有效的 Agent")
-
-    steps = await decompose_task(task, agents, model_client)
-    if not steps:
-        raise HTTPException(status_code=400, detail="任务分解失败——无法生成步骤")
-    for s in steps:
-        resolved = engine._resolve_agent_id(s.get("assignee"))
-        s["assignee"] = resolved
-        s["assignee_name"] = engine._find_agent_name(resolved)
-
-    plan_id = await engine._create_plan_row(task, steps)
-    engine._plan_id = plan_id
-    engine._agents = agents
+    try:
+        plan_id = await engine.prepare(model_client)
+    except AgentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     event_queue: asyncio.Queue = asyncio.Queue()
 
@@ -393,7 +416,12 @@ async def execute_team(
     asyncio.create_task(_run())
 
     logger.info(f"Team {team_id!r} execution started, plan={plan_id}")
-    return {"team_id": team_id, "plan_id": plan_id, "status": "executing"}
+    return _plan_execution_response(
+        team_id=team_id,
+        plan_id=plan_id,
+        task=task,
+        steps=engine._prepared_steps or [],
+    )
 
 
 @router.get("/{team_id}/stream")
