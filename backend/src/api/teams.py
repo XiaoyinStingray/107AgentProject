@@ -5,13 +5,14 @@ Step 51: 为 Agent Team 模块提供数据层。
 
 import asyncio
 import json
+import json as _json
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from loguru import logger
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from pathlib import Path
 
@@ -59,6 +60,40 @@ async def create_team(
     if not isinstance(roles, list):
         roles = []
 
+    # 如果未提供角色，根据 Agent MBTI 自动分配默认角色
+    if not roles:
+        from models.agent_orm import AgentRow
+        mbti_role_map = {
+            "INTJ": ("技术架构师", "擅长系统思维和长期规划"),
+            "INTP": ("算法工程师", "擅长抽象推理和逻辑分析"),
+            "ENTJ": ("项目经理", "擅长组织领导和决策"),
+            "ENTP": ("产品策划", "擅长创新思维和市场洞察"),
+            "INFJ": ("用户体验师", "擅长共情和用户研究"),
+            "INFP": ("内容策划", "擅长创意写作和情感表达"),
+            "ENFJ": ("团队协调", "擅长沟通协调和团队管理"),
+            "ENFP": ("市场运营", "擅长创意营销和用户增长"),
+            "ISTJ": ("质量保证", "擅长细节检查和流程规范"),
+            "ISFJ": ("运维支持", "擅长稳定维护和后勤保障"),
+            "ESTJ": ("执行主管", "擅长任务分解和进度管控"),
+            "ESFJ": ("客户服务", "擅长用户沟通和需求收集"),
+            "ISTP": ("开发工程师", "擅长动手实现和技术攻关"),
+            "ISFP": ("视觉设计", "擅长美学设计和艺术创作"),
+            "ESTP": ("商务拓展", "擅长市场开拓和资源整合"),
+            "ESFP": ("活动策划", "擅长活动组织和现场执行"),
+        }
+        for aid in agent_ids:
+            result = await db.execute(select(AgentRow).where(AgentRow.id == aid))
+            row = result.scalar_one_or_none()
+            if not row:
+                continue
+            try:
+                persona = _json.loads(row.persona_json)
+                mbti = persona.get("mbti", "")
+            except Exception:
+                mbti = ""
+            role, reason = mbti_role_map.get(mbti, ("团队成员", f"{mbti or '未知'} 类型"))
+            roles.append({"agent_id": aid, "role": role, "reason": reason})
+
     team_id = str(uuid.uuid4())
     row = TeamRow.from_create(
         team_id=team_id,
@@ -81,6 +116,21 @@ async def list_teams(db: AsyncSession = Depends(get_db)):
         select(TeamRow).order_by(TeamRow.created_at.desc())
     )
     rows = result.scalars().all()
+
+    # 修正卡住的 executing 状态：如果 Plan 已 finished 但 Team 仍为 executing，自动修正
+    for row in rows:
+        if row.status == "executing":
+            plan_result = await db.execute(
+                select(PlanRow)
+                .where(PlanRow.team_id == row.id, PlanRow.status == "finished")
+                .limit(1)
+            )
+            if plan_result.scalar_one_or_none():
+                row.status = "finished"
+                db.add(row)
+                logger.info(f"[Team] list_teams: corrected stuck executing status for team {row.id}")
+    await db.commit()
+
     return [row.to_dict() for row in rows]
 
 
@@ -345,6 +395,9 @@ async def execute_team(
     if not agents:
         raise HTTPException(status_code=400, detail="Team 中没有有效的 Agent")
 
+    # ── 提前设置 _agents，确保 _find_agent_name 能正确查找名称 ──
+    engine._agents = agents
+
     steps = await decompose_task(task, agents, model_client)
     if not steps:
         raise HTTPException(status_code=400, detail="任务分解失败——无法生成步骤")
@@ -355,7 +408,11 @@ async def execute_team(
 
     plan_id = await engine._create_plan_row(task, steps)
     engine._plan_id = plan_id
-    engine._agents = agents
+
+    # ── 立即更新 team 状态为 executing（确保后续重复请求能命中幂等检查）──
+    team_row.status = "executing"
+    db.add(team_row)
+    await db.commit()
 
     event_queue: asyncio.Queue = asyncio.Queue()
 
@@ -366,7 +423,7 @@ async def execute_team(
             engine._agent_instances = {}
             logger.info(f"[Team] _run: switched to independent db session for team {team_id}")
             try:
-                async for sse_str in engine.execute(model_client):
+                async for sse_str in engine.execute(model_client, pre_steps=steps, pre_plan_id=plan_id):
                     await event_queue.put(sse_str)
             except Exception as e:
                 logger.error(f"[Team] execution error: {e}")
@@ -378,6 +435,16 @@ async def execute_team(
                 }, ensure_ascii=False)
                 await event_queue.put(f"data: {payload}\n\n")
             finally:
+                # 安全网：确保团队状态被更新为 finished（防止 _finalize_plan 未被调用）
+                try:
+                    from sqlalchemy import update as _update
+                    await run_db.execute(
+                        _update(TeamRow).where(TeamRow.id == team_id).values(status="finished")
+                    )
+                    await run_db.commit()
+                    logger.info(f"[Team] _run: team {team_id} status set to finished (safety net)")
+                except Exception as e:
+                    logger.warning(f"[Team] _run: safety net status update failed: {e}")
                 await event_queue.put(None)
                 await asyncio.sleep(5)
                 _cleanup_team_run(team_id)
@@ -422,9 +489,8 @@ async def stream_team(
             if plan_row:
                 plan = plan_row.to_dict()
                 # 发送一个合成的 plan_created 事件让前端恢复状态
-                event_queue: asyncio.Queue = asyncio.Queue()
-                import json as _json
-                payload = _json.dumps({
+                restored_queue: asyncio.Queue = asyncio.Queue()
+                payload = json.dumps({
                     "type": "plan_created",
                     "data": {
                         "plan_id": plan["id"],
@@ -439,9 +505,9 @@ async def stream_team(
                     },
                     "timestamp": "",
                 }, ensure_ascii=False)
-                await event_queue.put(f"data: {payload}\n\n")
+                await restored_queue.put(f"data: {payload}\n\n")
                 if plan.get("report"):
-                    report_payload = _json.dumps({
+                    report_payload = json.dumps({
                         "type": "team_done",
                         "data": {
                             "total_duration_secs": 0,
@@ -457,12 +523,12 @@ async def stream_team(
                         },
                         "timestamp": "",
                     }, ensure_ascii=False)
-                    await event_queue.put(f"data: {report_payload}\n\n")
+                    await restored_queue.put(f"data: {report_payload}\n\n")
 
                 async def _restored_generator():
                     while True:
                         try:
-                            event = await asyncio.wait_for(event_queue.get(), timeout=5.0)
+                            event = await asyncio.wait_for(restored_queue.get(), timeout=5.0)
                             if event is None:
                                 break
                             yield event
@@ -694,7 +760,7 @@ async def score_team(team_id: str, body: ScoreRequest, db: AsyncSession = Depend
         .order_by(PlanRow.created_at.desc()).limit(1)
     )
     row = plan_result.scalar_one_or_none()
-    report = row.to_dict().get("report") if row else {"content": "", "title": ""}
+    report = (row.to_dict().get("report") or {"content": "", "title": ""}) if row else {"content": "", "title": ""}
     task = body.task or row.to_dict().get("task", "") if row else ""
 
     client = create_model_client("think")
@@ -731,7 +797,7 @@ async def team_versus(body: VersusRequest, db: AsyncSession = Depends(get_db)):
             .order_by(PlanRow.created_at.desc()).limit(1)
         )
         prow = pr.scalar_one_or_none()
-        reports[tid] = prow.to_dict().get("report") if prow else {"content": "", "title": ""}
+        reports[tid] = (prow.to_dict().get("report") or {"content": "", "title": ""}) if prow else {"content": "", "title": ""}
 
     client = create_model_client("think")
     return await judge_versus(

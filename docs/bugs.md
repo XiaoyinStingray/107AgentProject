@@ -894,3 +894,321 @@
 - **根因**：`grid-cols-2 md:grid-cols-5` 断点跳跃太大
 - **修复**：改为 `grid-cols-2 sm:grid-cols-3 lg:grid-cols-5` 更合理的断点
 - **修复文件**：`frontend/src/pages/Archive.tsx`
+
+---
+
+## 2026-08-14：M9 Agent Team 模块测试
+
+> 详细测试记录见 [test-done/m09.md](test-done/m09.md)。
+
+### BUG-M9-001：test_team_engine.py 测试旧接口（on_tick / _save_report / finish）✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P1（4/4 测试全部失败——State 8 重写后测试未同步更新）
+- **现象**：`AttributeError: 'TeamEngine' has no attribute 'on_tick'`
+- **根因**：State 8 将 TeamEngine 从 GroupChat 模式重写为 Worker 编排模式，旧测试仍调用 `on_tick`、`_save_report`、`finish` 等已删除方法
+- **修复**：完全重写为 25 个新测试，覆盖 SSE 工具函数（_make_sse, _make_error_sse, _prefix_worker_sse, _parse_sse_dict）、Agent ID 解析（_resolve_agent_id）、StepResult 数据类和 _find_agent_name
+- **修复文件**：`backend/tests/test_team_engine.py`
+
+### BUG-M9-002：test_teams_api.py execute 响应字段名不匹配 ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P1（3 个测试失败——KeyError: 'id'）
+- **现象**：旧测试期望 `data["id"]`、`data["steps"]`、`data["world_id"]`，但新 execute API 返回 `{"team_id", "plan_id", "status"}`
+- **根因**：State 8 重写 execute 端点返回结构变化，测试未同步
+- **修复**：`data["id"]` → `data["plan_id"]`；evaluate 测试改用 `GET /plan` 端点获取步骤数据
+- **修复文件**：`backend/tests/test_teams_api.py`
+
+### BUG-M9-003：execute 双重分解——API 和 engine 各分解一次，产生两个 PlanRow ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P1（核心功能缺陷——每次执行产生两个 Plan，数据不一致）
+- **现象**：execute_team 端点预分解任务创建 Plan A，engine.execute() 再次分解创建 Plan B，DB 中出现两个 PlanRow
+- **根因**：`api/teams.py` 的 execute_team 在启动后台任务前调用 `decompose_task` + `_create_plan_row`，但 `engine.execute()` 不知道已有 Plan，又执行一次分解
+- **修复**：`engine.execute()` 添加 `pre_steps` / `pre_plan_id` 关键字参数；API handler 传递预计算值，engine 跳过重复分解
+- **修复文件**：`backend/src/engines/team/engine.py`、`backend/src/api/teams.py`
+
+### BUG-M9-004：execute 幂等性失效——重复执行创建新 Plan ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P1（重复点击执行按钮会创建多个 Plan）
+- **现象**：第二次 `POST /execute` 返回不同的 plan_id，而非复用第一个
+- **根因**：team 状态更新 `"executing"` 发生在后台 `_run()` 内的 engine.execute() 中（异步），API handler 返回响应时 team 状态仍为 `"idle"`，第二次请求直接走新建流程
+- **修复**：在 API handler 中创建 Plan 后立即更新 `team_row.status = "executing"` 并 commit，确保后续请求命中幂等检查分支
+- **修复文件**：`backend/src/api/teams.py`
+
+---
+
+## 2026-08-14：M9 人工验收 Bug（第一轮）
+
+### BUG-M9-005："智能推荐角色"应改为"智能分配角色" ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P2（文案不准确）
+- **现象**：按钮显示"智能推荐角色"，用户期望"智能分配角色"
+- **修复文件**：`frontend/src/pages/TeamDashboard.tsx` line 407
+
+### BUG-M9-006：空模板提示中"发布"应改为"存模板" ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P2（文案不一致——按钮是"存模板"但提示说"发布"）
+- **现象**：MarketPanel 空状态提示"在 Team 卡片上点「发布」将配置保存为模板"，但按钮文字是"存模板"
+- **修复文件**：`frontend/src/pages/team/MarketPanel.tsx` line 40
+
+### BUG-M9-007：模板卡片删除键太小且不易识别 ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P2（UX 缺陷——删除按钮只有一个小  图标，不易识别）
+- **现象**：模板卡片的删除按钮仅显示 `🗑` 图标，样式暗淡（text-text-secondary/40），用户难以识别为删除操作
+- **修复文件**：`frontend/src/pages/team/MarketPanel.tsx` lines 63-73
+
+### BUG-M9-008：步骤负责人显示 Agent ID 而非名称 ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P1（可读性问题——用户看到的是 UUID 而非 Agent 名称）
+- **现象**：StepCard 中"负责人"显示 `06f09bef` 等 UUID 前缀，而非 Agent 名称
+- **根因**：StepCard 使用 `step.assigneeName`，但 SSE `plan_created` 事件中 `assignee_name` 可能为空或回退到 ID；重入恢复时 `assignee_name` 字段可能缺失
+- **修复文件**：`frontend/src/components/team/StepCard.tsx`、`frontend/src/stores/useTeamStore.ts`
+
+### BUG-M9-009：报告代码块内容泄漏到 plaintext 外导致排版错乱 ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P1（显示缺陷——代码块内容出现在 `<details>` 外部，后续排版全乱）
+- **现象**：ReportViewer 渲染报告时，代码块（```plaintext...```）内的文字出现在折叠区域外，导致后续内容排版混乱
+- **根因**：ReportViewer 的 `renderMarkdown` 正则 `/```(\w*)\n([\s\S]*?)```/g` 对代码块格式要求严格（必须换行后接语言标签），当 LLM 生成的代码块格式稍有偏差时匹配失败，内容被当作普通文本处理
+- **修复文件**：`frontend/src/components/team/ReportViewer.tsx`
+
+### BUG-M9-010：文件下载应提供每个产出文件的单独链接 ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P2（UX 改进——当前只有一个"下载 Markdown"按钮，用户期望每个 .md/.json 文件有独立下载链接）
+- **现象**：报告页面只有一个整体下载按钮，用户无法单独下载每个步骤产出的文件
+- **修复文件**：`frontend/src/components/team/ReportViewer.tsx`、`frontend/src/pages/TeamDashboard.tsx`
+
+### BUG-M9-011：Team 对抗可以选择两个相同的 Team ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P1（逻辑缺陷——对抗双方不应是同一团队）
+- **现象**：VersusPanel 两个下拉框可以选择同一个 Team，虽然 `canStart` 有 `teamA !== teamB` 检查，但用户界面没有阻止选择
+- **修复文件**：`frontend/src/pages/team/VersusPanel.tsx`
+
+### BUG-M9-012：Team 对抗流程不清晰，报告不可见 ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P1（功能可用性问题——用户不清楚对抗流程，对抗结果报告无法查看）
+- **现象**：用户不知道对抗是"两队各自完成任务再评审"还是"直接评审已有报告"；对抗结果显示有报告但看不见内容
+- **根因**：VersusPanel 只显示评分对比条，不展示两队的完整报告；对抗流程说明不足
+- **修复文件**：`frontend/src/pages/team/VersusPanel.tsx`
+
+### BUG-M9-013：报告中应显示每个 Agent 的角色 ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P2（信息缺失——报告只列出 Agent 名称，没有角色信息）
+- **现象**：即使创建时已分配角色，报告中的"团队"部分只显示"名称 — 成员"，没有显示实际角色（如产品经理、开发等）
+- **根因**：`engine._compile_report()` 使用 `a.get("role", "成员")` 但 `self._agents` 中的 role 来自 `team.roles` 映射，如果创建时未分配角色则全部显示"成员"
+- **修复文件**：`backend/src/engines/team/engine.py` _compile_report 方法
+
+### BUG-M9-014：找不到重新执行按钮和学习曲线入口 ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P1（功能缺失——finished Team 无法重新执行，学习曲线不易发现）
+- **现象**：Team 卡片上 finished 状态只有"查看"按钮，没有"重新执行"按钮；学习曲线只在执行视图中显示，列表页看不到
+- **根因**：TeamDashboard.tsx 列表视图中 execute 按钮只在 `team.status === "idle"` 时显示；学习曲线只在执行视图 `isDone` 时渲染
+- **修复文件**：`frontend/src/pages/TeamDashboard.tsx`
+
+## 2026-08-14：M9 人工验收 Bug（第二轮）
+
+### BUG-M9-015：导出文件点击后跳转异常，应直接下载 ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P2（UX 缺陷——文件链接用 `target="_blank"` 打开新页签，而非下载）
+- **现象**：点击步骤产出文件链接后浏览器打开新页签显示文件内容，而非触发下载
+- **根因**：文件链接使用 `<a href="..." target="_blank">` 直接导航，未使用 Blob + download 属性
+- **修复文件**：`frontend/src/pages/TeamDashboard.tsx`（改为 fetch + Blob + download 触发下载）
+
+### BUG-M9-016：代码块内容泄漏到 plaintext 折叠区外 ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P1（显示缺陷——代码块内容出现在 `<details>` 外部，排版错乱）
+- **现象**：ReportViewer 渲染报告时，部分代码块内容泄漏到折叠区外
+- **根因**：正则 `/```(\w*)[ \t]*\n([\s\S]*?)```/g` 对代码块格式要求严格，LLM 生成的 4 反引号或无换行格式无法匹配
+- **修复文件**：`frontend/src/components/team/ReportViewer.tsx`（增加 3-4 反引号匹配 + 兜底正则）
+
+### BUG-M9-017：finished 卡片 Badge 显示 executing ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P1（状态显示错误——SSE 已完成但 DB 状态未更新）
+- **现象**：Team 卡片 Badge 显示 "executing"，但实际已完成
+- **根因**：Badge 直接使用 `team.status`（DB 值），未考虑 SSE store 中的实时状态
+- **修复文件**：`frontend/src/pages/TeamDashboard.tsx`（Badge 优先使用 SSE store 状态）
+
+### BUG-M9-018：点击一个卡片执行，所有卡片显示“启动中” ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P2（UX 缺陷——全局 isPending 状态导致所有卡片按钮文字变化）
+- **现象**：点击 Team A 的执行按钮，Team B/C 的按钮也变成“启动中…”
+- **根因**：`executeTeam.isPending` 是 React Query 全局状态，所有卡片共享
+- **修复文件**：`frontend/src/pages/TeamDashboard.tsx`（移除按钮文字中的 isPending 判断）
+
+### BUG-M9-019：报告中团队角色仍显示“成员” ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P1（信息缺失——报告团队部分所有 Agent 显示“成员”）
+- **现象**：即使创建时已分配角色，报告中仍显示“菠萝侠 — 成员”
+- **根因**：`_compile_report` 中 `_evolved_roles` 优先级高于 `role_map`，且 `role_map` 默认值为“成员”
+- **修复文件**：`backend/src/engines/team/engine.py`（调整优先级：team.roles > evolved_roles > agent.role）
+
+### BUG-M9-020：负责人仍显示 ID 而非名字 ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P1（可读性问题——步骤负责人显示 UUID 前缀如 "d3a16204"）
+- **现象**：StepCard 中负责人显示 "d3a16204" 而非 Agent 名称
+- **根因**：API handler 中 `engine._find_agent_name()` 在 `engine._agents` 设置之前调用，无法查找名称
+- **修复文件**：`backend/src/api/teams.py`（提前设置 `engine._agents`）+ `frontend/src/components/team/StepCard.tsx`（添加 ID 回退查找）
+
+### BUG-M9-021：学习曲线内容过于单一 ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P2（信息不足——只显示任务次数和趋势）
+- **现象**：学习曲线只显示“2 次任务 · 稳定”，信息量不足
+- **修复文件**：`frontend/src/pages/team/LearningCurve.tsx`（添加平均分、最佳表现、趋势图标）
+
+### BUG-M9-022：Team 对抗维度评分右侧数字未对齐 ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P2（视觉缺陷——不同位数数字导致右侧不对齐）
+- **现象**：对抗结果中评分条右侧数字（如 "10" vs "3"）宽度不一致，视觉不对齐
+- **修复文件**：`frontend/src/pages/team/VersusPanel.tsx`（固定数字宽度 + tabular-nums）
+
+## 2026-08-14：M9 人工验收 Bug（第三轮）
+
+### BUG-M9-023：执行按钮无加载状态 ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P2（UX 缺陷——点击执行后按钮文字不变化，用户不知道是否点击成功）
+- **现象**：点击 Team 卡片的「▶ 执行」按钮后，按钮文字不变，无加载反馈
+- **根因**：`executeTeam.isPending` 是全局 React Query 状态，之前为避免所有卡片同时显示"启动中"而移除了 isPending 判断，但导致完全没有加载状态
+- **修复文件**：`frontend/src/pages/TeamDashboard.tsx`（添加 `executingTeamId` 局部状态，仅当前点击的卡片显示"启动中…"）
+
+### BUG-M9-024：文件下载内容错误 ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P1（功能缺陷——下载的文件内容是 JSON 包装器而非实际文件内容）
+- **现象**：下载的文件内容显示 `{"detail":"文件 'CONTEXT.md' 不存在"}` 或 JSON 包装格式
+- **根因**：后端 API 返回 `{"path", "content", "size"}` JSON 对象，前端直接用 `resp.blob()` 下载了整个 JSON 而非提取 content 字段
+- **修复文件**：`frontend/src/pages/TeamDashboard.tsx`（先 `resp.json()` 解析，再提取 `data.content` 创建 Blob）
+
+### BUG-M9-025：plaintext 仍有文本溢出 ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P1（显示缺陷——代码块内容仍泄漏到折叠区外）
+- **现象**：ReportViewer 渲染报告时，部分代码块内容仍出现在 `<details>` 外部
+- **根因**：正则表达式对代码块格式要求严格，LLM 生成的代码块可能有尾部空格、空行等变体
+- **修复文件**：`frontend/src/components/team/ReportViewer.tsx`（改用逐行扫描算法，更鲁棒地识别代码块边界）
+
+### BUG-M9-026：Team 未分配角色 ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P1（功能缺失——创建 Team 时未点击"智能分配角色"则 roles 为空）
+- **现象**：Team 卡片和报告中所有 Agent 显示"成员"，没有具体角色
+- **根因**：前端创建 Team 时如果未调用 `suggest_roles`，roles 数组为空；后端直接存储空数组
+- **修复文件**：`backend/src/api/teams.py`（当 roles 为空时，根据 Agent MBTI 自动分配默认角色）
+
+### BUG-M9-027：对抗评估不合理 ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P2（体验缺陷——所有维度显示相同分数和"规则评估"，无区分度）
+- **现象**：Team 对抗结果中所有维度分数相同，评语都是"规则评估"
+- **根因**：LLM 客户端创建失败或 API 调用超时时，`_fallback_score` 返回无区分度的评分
+- **修复文件**：`backend/src/engines/team/versus.py`（改进 `_fallback_score`，基于报告内容长度、结构、关键词等维度差异化评分）
+
+## 2026-08-14：M9 人工验收 Bug（第四轮）
+
+### BUG-M9-028：步骤产出文件下载无实际内容 ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P1（功能缺陷——下载的文件为空或内容错误）
+- **现象**：点击步骤产出文件区域的文件名，下载出的文件没有实际内容
+- **根因**：两个问题叠加：(1) `files_created` 存储的是相对于 worker workspace 的文件名（如 `output.md`），但下载 API 在 `run-*/` 下查找，路径不匹配；(2) 引擎中步骤目录名用 `step_{i+1}` 但 workspace 初始化用 `step_{i+1}_{title}`，目录名不一致
+- **修复文件**：`backend/src/engines/team/engine.py`（`files_created` 存储相对于 run root 的完整路径 + 统一步骤目录命名）
+
+### BUG-M9-029：代码块仍溢出报告区域 ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P2（UX 缺陷——代码块内容未被正确折叠，溢出到报告外部）
+- **现象**：报告中的代码块内容没有被 ``` 包装，直接显示为普通文本
+- **根因**：逐行扫描算法对代码块格式要求严格（结尾 ``` 必须独立成行），LLM 生成的非标格式代码块未被捕获
+- **修复文件**：`frontend/src/components/team/ReportViewer.tsx`（在逐行扫描后添加兜底正则，捕获非标代码块）
+
+### BUG-M9-030：Team 对抗评估内容不对或为空 ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P1（功能缺陷——评估结果无参考价值）
+- **现象**：Team 对抗结束后的评估内容生成不对，甚至为空
+- **根因**：(1) `_fallback_score` 中 `has_files = "" in content` 永远为 True（空字符串在任何字符串中），导致评分虚高；(2) `report` 从 DB 读取可能为 None，未做兜底处理
+- **修复文件**：`backend/src/engines/team/versus.py`（修复 `has_files` 判断）、`backend/src/api/teams.py`（report None 兜底）
+
+### BUG-M9-031：导出文件下载仍显示文件不存在 ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P1（功能缺陷——文件下载完全不可用）
+- **现象**：点击步骤产出文件区域的文件名，仍然提示文件不存在
+- **根因**：后端文件路径与 API 查找路径持续不匹配，修复路径问题的方案过于复杂且易出错
+- **修复方案**：改变策略——不再通过 API 从文件系统读取，而是直接从报告正文中解析文件内容（报告中的 `####  filename` + ` ``` ` 代码块已包含完整文件内容），前端本地提取后生成下载
+- **修复文件**：`frontend/src/pages/TeamDashboard.tsx`（从 `store.report.content` 正则提取文件内容，本地 Blob 下载）
+
+### BUG-M9-032：已结束的 Team 仍显示“执行中” ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P1（UX 缺陷——用户无法区分已完成和正在执行的任务）
+- **现象**：Team 执行完成后，列表卡片仍显示“executing”/“执行中”状态
+- **根因**：`_finalize_plan` 可能因异常未被调用，导致 Team 状态停留在 "executing"；旧数据无修正机制
+- **修复方案**：(1) 在 `_run()` 的 `finally` 块添加安全网，SSE 流结束时强制更新状态为 "finished"；(2) 在 `list_teams` API 中添加自动修正逻辑，检测 Plan 已 finished 但 Team 仍为 executing 的情况并自动修正
+- **修复文件**：`backend/src/api/teams.py`（`_run()` 安全网 + `list_teams` 状态修正）
+
+### BUG-M9-033：已完成 Team 的“评估团队”按钮失效 ✅
+
+- **状态**：✅ 已修复 (2026-08-14)
+- **优先级**：P1（功能缺陷——用户无法对已完成的任务进行评估）
+- **现象**：Team 执行完成后，点击“查看”进入报告视图，但“评估团队”按钮不显示或失效
+- **根因**：重新进入已完成的 Team 时，SSE 连接已断开，`isDone` 被重置为 `false`，`store.report` 为 `null`，导致报告视图（包括评估按钮）不渲染
+- **修复方案**：修改报告视图的渲染条件，当 `store.report` 为空时使用 `teamPlan?.report`（从 DB 恢复的 Plan 数据）作为后备；统一使用 `currentReport` 变量访问报告内容
+- **修复文件**：`frontend/src/pages/TeamDashboard.tsx`（报告视图条件判断 + 报告内容来源）
+
+## 2026-08-15：M9 人工验收 Bug（第五轮）
+
+### BUG-M9-034：对抗评分表右端未对齐 ✅
+
+- **状态**：✅ 已修复 (2026-08-15)
+- **优先级**：P2（UX 缺陷——评分表数字对齐不整齐）
+- **现象**：Team 对抗多维评分表中，右侧的 A/B 分数数字没有对齐
+- **根因**：数字 span 的宽度 `w-5` 太小，导致两位数时溢出破坏对齐
+- **修复方案**：将数字 span 宽度从 `w-5` 增加到 `w-6`，确保两位数也能对齐
+- **修复文件**：`frontend/src/pages/team/VersusPanel.tsx`（ScoreBar 组件数字宽度）
+
+### BUG-M9-035：学习画像柱状图不可见 ✅
+
+- **状态**：✅ 已修复 (2026-08-15)
+- **优先级**：P2（UX 缺陷——柱状图高度太小且颜色太淡，几乎不可见）
+- **现象**：学习画像区域显示“5 次任务 · 平均 100%”，但柱状图几乎看不到
+- **根因**：(1) 柱子最小高度 4% of 48px ≈ 2px，太小；(2) 颜色不透明度 40% 太淡；(3) 容器高度 48px 不够
+- **修复方案**：(1) 最小高度从 4% 增加到 8% 并添加 `minHeight: 8px`；(2) 颜色不透明度从 40% 增加到 60%；(3) 容器高度从 48px 增加到 64px；(4) 添加底部边框作为基准线
+- **修复文件**：`frontend/src/pages/team/LearningCurve.tsx`（柱状图样式优化）
+
+### IMP-M9-036：学习画像柱状图样式优化 ✅
+
+- **状态**：✅ 已修复 (2026-08-15)
+- **优先级**：P3（UX 改进——柱状图比例不协调）
+- **现象**：柱状图宽度太宽（48px）、高度太低（容器 96px）、柱间距太小（gap-3）
+- **根因**：样式参数不合理，视觉比例不协调
+- **修复方案**：(1) 柱子宽度从 48px 减少到 32px；(2) 容器高度从 96px 增加到 128px；(3) 柱间距从 gap-3 增加到 gap-4；(4) 最小高度从 12px 增加到 16px
+- **修复文件**：`frontend/src/pages/team/LearningCurve.tsx`
+- **关于 100% 问题**：`completion_pct` 是步骤完成率（done/total），所有步骤完成即为 100%，这是正确行为。质量评分由 LLM 多维评分功能单独体现。
+
+### IMP-M9-037：对抗评分表改为鱼骨图样式 ✅
+
+- **状态**：✅ 已修复 (2026-08-15)
+- **优先级**：P3（UX 改进——评分表视觉效果不够直观）
+- **现象**：原评分表 A/B 长条在同一侧排列，不够直观
+- **修复方案**：改为鱼骨图样式——数字在中间对齐（A|B），A 长条从右向左延伸（绿色），B 长条从左向右延伸（橙色），两侧各占 flex-1 空间
+- **修复文件**：`frontend/src/pages/team/VersusPanel.tsx`（ScoreBar 组件重构）

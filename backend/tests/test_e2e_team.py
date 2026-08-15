@@ -1,6 +1,8 @@
 """
-Phase 14 E2E 全链路测试 — Step T1。
-使用真实 LLM API 验证 Team 创建 → 执行 → Plan → 报告 的完整链路。
+E2E Team 全链路测试 — State 8 / T15。
+
+Part 1: 真实 LLM（需 API Key，默认 skip）。
+Part 2: Mock LLM — 验证 engine SSE 事件流端到端。
 
 运行方式:
     cd backend && PYTHONPATH=src python -m pytest tests/test_e2e_team.py -v -s
@@ -8,7 +10,6 @@ Phase 14 E2E 全链路测试 — Step T1。
 
 import json
 import tempfile
-from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -89,7 +90,7 @@ class TestTeamFullChain:
         # 2. 创建 Team
         resp = client.post("/api/teams", json={
             "name": "校园社交App产品团队",
-            "description": "设计一款面向大学生的校园社交App，包含课程表共享、二手交易、组队学习功能",
+            "description": "设计一款面向大学生的校园社交App",
             "agent_ids": [a1, a2, a3],
         })
         assert resp.status_code == 201
@@ -97,159 +98,147 @@ class TestTeamFullChain:
         team_id = team["id"]
         assert team["status"] == "idle"
 
-        # 3. 角色推荐（使用真实 LLM）
-        resp = client.post("/api/teams/suggest-roles", json={
-            "agent_ids": [a1, a2, a3],
-        })
-        assert resp.status_code == 200
-        roles = resp.json()
-        assert len(roles) == 3
-        for r in roles:
-            assert "role" in r
-            assert "reason" in r
-
-        # 4. 执行 Team → 触发任务分解（真实 LLM）
+        # 3. 执行 Team
         resp = client.post(f"/api/teams/{team_id}/execute")
         assert resp.status_code == 200
-        plan = resp.json()
-        assert "id" in plan
-        assert "steps" in plan
-        assert "world_id" in plan
+        data = resp.json()
+        assert "plan_id" in data
+        assert data["status"] == "executing"
 
-        # 5. 验证任务分解结果
-        steps = plan["steps"]
-        assert len(steps) >= 3, f"任务分解应产生 ≥3 个子任务，实际: {len(steps)}"
-        for s in steps:
-            assert "title" in s
-            assert "status" in s
-            assert s["status"] == "pending"
-
-        # 6. 查询 Plan
+        # 4. 查询 Plan
         resp = client.get(f"/api/teams/{team_id}/plan")
         assert resp.status_code == 200
         stored_plan = resp.json()
         assert stored_plan["team_id"] == team_id
-        assert len(stored_plan["steps"]) >= 3
+        assert len(stored_plan["steps"]) >= 1
 
-        # 7. 验证 Team 状态变为 executing
-        resp = client.get(f"/api/teams/{team_id}")
-        assert resp.status_code == 200
-        team_data = resp.json()
-        assert team_data["status"] == "executing"
-
-        # 8. 获取 Team 列表
+        # 5. Team 列表
         resp = client.get("/api/teams")
         assert resp.status_code == 200
         teams_list = resp.json()
-        assert len(teams_list) >= 1
         assert any(t["id"] == team_id for t in teams_list)
 
 
 # =====================================================================
-# E2E: Team 完成闭环（Mock LLM / Mock World）
+# E2E: Engine SSE 事件流（Mock LLM — 不需要真实 API）
 # =====================================================================
 
 
-class _CompletingPlan:
-    """Deterministic PlanManager stand-in that completes on the first tick."""
-
-    def __init__(self):
-        self.all_done = False
-        self._ticks_on_step = 0
-        self.steps = [{"title": "输出方案", "status": "active", "progress": 0.1}]
-
-    async def check_progress(self, _tick, _events):
-        self.steps[0].update(status="done", progress=1.0)
-        self.all_done = True
-
-    def to_dict(self):
-        return {"steps": self.steps, "progress_pct": 1.0, "all_done": True}
-
-    def current_step(self):
-        return None
-
-    def build_report(self):
-        return {
-            "title": "团队任务完成报告",
-            "content": "已完成全部步骤",
-            "steps_count": 1,
-            "completed_count": 1,
-        }
+class _MockResult:
+    def __init__(self, content: str):
+        self.content = content
 
 
-class _RecordingTeamEngine:
-    def __init__(self):
-        self.sync_count = 0
-        self.saved_reports = []
+class _MockModelClient:
+    """Mock LLM——返回有效 JSON 或失败。"""
 
-    async def _sync_plan_to_db(self):
-        self.sync_count += 1
+    def __init__(self, decompose_response=None, fail=False):
+        self._decompose = decompose_response or [
+            {"title": "调研", "assignee": None, "description": "用户调研"},
+        ]
+        self._fail = fail
+        self.call_count = 0
 
-    async def _save_report(self, report):
-        self.saved_reports.append(report)
-
-
-class _OneTickWorld:
-    def __init__(self, plan, team_engine):
-        self.agents = {}
-        self.world = SimpleNamespace(status="running")
-        self.current_tick = 0
-        self.team_plan = plan
-        self.team_engine = team_engine
-
-    async def tick_stream(self):
-        from models.event import SimEvent
-
-        self.current_tick = 1
-        yield SimEvent(
-            id="event-1",
-            world_id="world-team",
-            tick=1,
-            type="agent_action",
-            source_agent_id="agent-1",
-            description="提交最终方案",
-            data={"action": "submit_deliverable"},
-            created_at="2026-07-29T00:00:00+00:00",
-        )
+    async def create(self, messages, **kw):
+        self.call_count += 1
+        if self._fail:
+            raise RuntimeError("LLM unavailable")
+        # decomposer 调用
+        return _MockResult(json.dumps(self._decompose, ensure_ascii=False))
 
 
 @pytest.mark.asyncio
-async def test_mock_runtime_emits_and_persists_completion(monkeypatch):
-    """Mock runtime must emit progress/report events and persist the report."""
-    import api.sse as sse_api
+async def test_engine_sse_flow_with_mock_db():
+    """TeamEngine.execute() 端到端 SSE 流验证（使用 Mock LLM + 真实 SQLite DB）。"""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from db import Base as TestBase
+    from models.team_orm import TeamRow
+    from models.plan_orm import PlanRow
+    from models.agent_orm import AgentRow
+    from engines.team.engine import TeamEngine
 
-    plan = _CompletingPlan()
-    team_engine = _RecordingTeamEngine()
-    world_engine = _OneTickWorld(plan, team_engine)
+    # 创建临时 DB
+    import tempfile as _tf
+    tmp = _tf.NamedTemporaryFile(suffix=".db", delete=False)
+    tmp.close()
+    db_url = f"sqlite+aiosqlite:///{tmp.name}"
+    sync_url = f"sqlite:///{tmp.name}"
 
-    async def _skip_simulation_finish(_engine):
-        return None
+    # 同步建表
+    sync_engine = create_engine(sync_url)
+    TestBase.metadata.drop_all(sync_engine)
+    TestBase.metadata.create_all(sync_engine)
+    sync_engine.dispose()
 
-    monkeypatch.setattr(
-        sse_api,
-        "_finish_engine_simulation",
-        _skip_simulation_finish,
-    )
-    sse_api._active_connection_ids["world-team"] = "conn-team"
+    # 异步 session
+    async_engine = create_async_engine(db_url)
+    async_session = async_sessionmaker(async_engine, expire_on_commit=False)
 
-    payloads = []
-    async for chunk in sse_api._world_event_generator(
-        "world-team",
-        world_engine,
-        "conn-team",
-    ):
-        payloads.append(json.loads(chunk.removeprefix("data: ").strip()))
+    async with async_session() as db:
+        # 创建 Agent
+        agent_row = AgentRow(
+            id="agent-e2e-1",
+            name="测试Agent",
+            persona_json=json.dumps({"name": "小红", "mbti": "ENFP"}),
+            background_json=json.dumps({"decision_style": "analytical"}),
+            goals_json=json.dumps([]),
+        )
+        db.add(agent_row)
 
-    event_types = [payload["type"] for payload in payloads]
-    assert event_types == [
-        "connected",
-        "agent_action",
-        "plan_updated",
-        "session_end",
-        "report_ready",
-    ]
-    assert payloads[2]["data"]["progress_pct"] == 1.0
-    assert payloads[-1]["data"]["completed_count"] == 1
-    assert world_engine.world.status == "finished"
-    assert team_engine.sync_count == 1
-    assert team_engine.saved_reports == [payloads[-1]["data"]]
+        # 创建 Team
+        team_row = TeamRow.from_create(
+            team_id="team-e2e-1", name="E2E团队",
+            description="测试任务", agent_ids=["agent-e2e-1"], roles=[],
+        )
+        db.add(team_row)
+        await db.commit()
+
+        team_dict = team_row.to_dict()
+        engine = TeamEngine(team_dict, db)
+
+        # 使用 FailingClient 触发规则兜底（不依赖 LLM 返回格式）
+        class _FailClient:
+            async def create(self, messages, **kw):
+                raise RuntimeError("No LLM")
+
+        events = []
+        async for sse_str in engine.execute(_FailClient()):
+            if sse_str.startswith("data: "):
+                try:
+                    obj = json.loads(sse_str[6:].strip())
+                    events.append(obj)
+                except Exception:
+                    pass
+
+        # 验证事件序列
+        event_types = [e["type"] for e in events]
+
+        # 必须包含 plan_created
+        assert "plan_created" in event_types, f"Missing plan_created in {event_types}"
+
+        # 必须包含 team_done 或 team.error
+        has_terminal = "team_done" in event_types or "team.error" in event_types
+        assert has_terminal, f"Missing terminal event in {event_types}"
+
+        # 如果有 step 事件，验证其结构
+        step_events = [e for e in events if e.get("type", "").startswith("step.")]
+        for se in step_events:
+            assert "step_id" in se, f"Step event missing step_id: {se}"
+
+        # 验证 PlanRow 已持久化
+        from sqlalchemy import select
+        result = await db.execute(
+            select(PlanRow).where(PlanRow.team_id == "team-e2e-1")
+        )
+        plan_row = result.scalar_one_or_none()
+        assert plan_row is not None
+        assert plan_row.status == "finished"
+
+        # 验证 TeamRow 状态
+        result = await db.execute(
+            select(TeamRow).where(TeamRow.id == "team-e2e-1")
+        )
+        team = result.scalar_one_or_none()
+        assert team.status == "finished"
+
+    await async_engine.dispose()

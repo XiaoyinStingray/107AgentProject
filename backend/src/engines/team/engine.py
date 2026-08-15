@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from engines.team.decomposer import decompose_task
 from engines.team.role_evolution import evaluate_and_evolve, apply_evolution
-from engines.team.workspace import init_team_workspace, write_step_context
+from engines.team.workspace import init_team_workspace, write_step_context, _safe_dirname
 from models.team_orm import TeamRow
 from models.plan_orm import PlanRow
 
@@ -97,13 +97,13 @@ class TeamEngine:
         self._evolved_roles: dict[str, str] = {}
         self._model_client = None
         self._agents: list[dict] = []
-        self._agent_instances: dict[str, "LifeAgent"] = {}
+        self._agent_instances: dict[str, object] = {}
 
     # =================================================================
     # 主入口
     # =================================================================
 
-    async def execute(self, model_client) -> AsyncGenerator[str, None]:
+    async def execute(self, model_client, *, pre_steps=None, pre_plan_id=None) -> AsyncGenerator[str, None]:
         self._model_client = model_client
         team_id = self.team["id"]
         task = self.team.get("description", "") or self.team.get("name", "")
@@ -113,21 +113,26 @@ class TeamEngine:
             yield _make_sse("team.error", {"error": "Team 中没有有效的 Agent"})
             return
 
-        steps = await decompose_task(task, self._agents, model_client)
-        if not steps:
-            yield _make_sse("team.error", {"error": "任务分解失败"})
-            return
-        for s in steps:
-            # 安全网：LLM 可能返回名字而非 UUID → 映射回 UUID
-            raw_assignee = s.get("assignee")
-            resolved = self._resolve_agent_id(raw_assignee)
-            if resolved != raw_assignee:
-                logger.info(f"[TeamEngine] assignee name→id: {raw_assignee!r} → {resolved!r}")
-            s["assignee"] = resolved
-            s["assignee_name"] = self._find_agent_name(resolved)
+        # API 可能已经预分解了步骤并创建了 Plan——复用，避免双重分解
+        if pre_steps is not None and pre_plan_id is not None:
+            steps = pre_steps
+            self._plan_id = pre_plan_id
+        else:
+            steps = await decompose_task(task, self._agents, model_client)
+            if not steps:
+                yield _make_sse("team.error", {"error": "任务分解失败"})
+                return
+            for s in steps:
+                # 安全网：LLM 可能返回名字而非 UUID → 映射回 UUID
+                raw_assignee = s.get("assignee")
+                resolved = self._resolve_agent_id(raw_assignee)
+                if resolved != raw_assignee:
+                    logger.info(f"[TeamEngine] assignee name→id: {raw_assignee!r} → {resolved!r}")
+                s["assignee"] = resolved
+                s["assignee_name"] = self._find_agent_name(resolved)
 
-        # ── 先创建 PlanRow（确保 plan_id 立即可用）──
-        self._plan_id = await self._create_plan_row(task, steps)
+            # ── 先创建 PlanRow（确保 plan_id 立即可用）──
+            self._plan_id = await self._create_plan_row(task, steps)
 
         # ── 初始化工作区 ──
         self._workspace_root = init_team_workspace(
@@ -166,7 +171,8 @@ class TeamEngine:
             # === 准备步骤工作区 ===
             # Worker 文件空间: step_i/work/files/ —— Agent 的 read_file/list_files/write_file
             # 都在这下面操作。所以 shared/ 和上游产出必须复制到 files/ 子目录内。
-            step_dir = Path(self._workspace_root) / f"step_{i + 1}"
+            step_dir_name = f"step_{i + 1}_{_safe_dirname(title)}"
+            step_dir = Path(self._workspace_root) / step_dir_name
             worker_files_dir = step_dir / "work" / "files"
             worker_files_dir.mkdir(parents=True, exist_ok=True)
 
@@ -181,12 +187,16 @@ class TeamEngine:
             # 复制上游步骤产出 → worker 可见的 files/
             for prev_r in step_results:
                 if prev_r.success:
-                    prev_files_dir = Path(self._workspace_root) / f"step_{self._find_step_index(steps, prev_r.step_id) + 1}" / "work" / "files"
+                    prev_idx = self._find_step_index(steps, prev_r.step_id)
+                    prev_step_dir_name = f"step_{prev_idx + 1}_{_safe_dirname(prev_r.step_title)}"
+                    prev_files_dir = Path(self._workspace_root) / prev_step_dir_name / "work" / "files"
                     if prev_files_dir.exists():
                         for f_path in prev_r.files:
-                            src_file = prev_files_dir / f_path
+                            # f_path 现在是相对于 run root 的路径，提取文件名部分
+                            fname = f_path.split("/")[-1] if "/" in f_path else f_path
+                            src_file = prev_files_dir / fname
                             if src_file.exists():
-                                dst_file = worker_files_dir / f_path
+                                dst_file = worker_files_dir / fname
                                 dst_file.parent.mkdir(parents=True, exist_ok=True)
                                 try:
                                     shutil.copy2(src_file, dst_file)
@@ -258,7 +268,10 @@ class TeamEngine:
                         if isinstance(flist, list):
                             for f in flist:
                                 if isinstance(f, dict) and f.get("path"):
-                                    files_created.append(f["path"])
+                                    # 存储相对于 run root 的完整路径，供下载 API 使用
+                                    step_dir_name = f"step_{i + 1}_{_safe_dirname(title)}"
+                                    full_rel = f"{step_dir_name}/work/files/{f['path']}"
+                                    files_created.append(full_rel)
                     elif etype == "worker.summary":
                         output_summary = (parsed.get("data") or {}).get("deliverable_summary", "") or ""
                     elif etype == "worker.done":
@@ -353,7 +366,7 @@ class TeamEngine:
         if not agent_id:
             # "全员"步骤 → 回退到第一个 Agent
             if self._agents:
-                agent_id = self._agents[0]["id"]
+                agent_id = str(self._agents[0]["id"])
                 logger.info(f"[TeamEngine] '全员' step → fallback to first agent {agent_id}")
             else:
                 logger.warning("[TeamEngine] _get_agent_instance: agent_id is None/empty and no agents loaded")
@@ -457,9 +470,16 @@ class TeamEngine:
         task = self.team.get("description", "") or self.team.get("name", "")
         parts = [f"# {self.team.get('name', '团队')} 任务报告\n\n## 任务\n\n{task}\n"]
 
+        # 构建 agent_id → role 映射（优先使用 team.roles，其次用 evolved_roles，最后用 agent 自带的 role）
+        role_map: dict[str, str] = {}
+        for r in (self.team.get("roles") or []):
+            if isinstance(r, dict) and r.get("agent_id"):
+                role_map[r["agent_id"]] = r.get("role", "")
+
         parts.append("\n## 团队\n")
         for a in self._agents:
-            role = self._evolved_roles.get(a["id"], a.get("role", "成员"))
+            # 优先级：team.roles > evolved_roles > agent.role > "成员"
+            role = role_map.get(a["id"]) or self._evolved_roles.get(a["id"]) or a.get("role", "") or "成员"
             parts.append(f"- {a['name']} — {role}")
 
         parts.append("\n## 执行结果\n")
@@ -469,7 +489,7 @@ class TeamEngine:
             parts.append(f"- 负责人: {r.assignee_name} | 耗时: {r.duration_secs:.1f}s | Worker步数: {r.steps_used}")
 
             # 读取 Worker 产出文件（只读 work/files/ 下的用户文件，跳过 shared/ 系统文件）
-            step_dir = Path(self._workspace_root) / f"step_{i + 1}"
+            step_dir = Path(self._workspace_root) / f"step_{i + 1}_{_safe_dirname(r.step_title)}"
             output_dir = step_dir / "work" / "files"
             files_found: list[str] = []
             if output_dir.exists():

@@ -15,13 +15,23 @@ const DIM_LABELS: Record<string, string> = {
 function ScoreBar({ label, a, b }: { label: string; a: number; b: number }) {
   const maxS = 10;
   return (
-    <div className="flex items-center gap-2 text-[11px] font-mono">
-      <span className="w-14 text-text-secondary text-right">{label}</span>
-      <div className="flex-1 flex items-center gap-0.5">
-        <div className="h-3 bg-accent-green/30 rounded-l" style={{ width: `${(a/maxS)*100}%`, minWidth: a > 0 ? 8 : 0 }} />
-        <div className="text-[10px] text-accent-green w-4">{a}</div>
-        <div className="text-[10px] text-accent-orange w-4 text-right">{b}</div>
-        <div className="h-3 bg-accent-orange/30 rounded-r" style={{ width: `${(b/maxS)*100}%`, minWidth: b > 0 ? 8 : 0 }} />
+    <div className="flex items-center gap-1 text-[11px] font-mono">
+      <span className="w-14 text-text-secondary text-right shrink-0">{label}</span>
+      <div className="flex-1 flex items-center">
+        {/* A 长条（从右向左延伸） */}
+        <div className="flex-1 flex items-center justify-end">
+          <div className="h-3 bg-accent-green/40 rounded-l transition-all" style={{ width: `${(a/maxS)*100}%`, minWidth: a > 0 ? 6 : 0 }} />
+        </div>
+        {/* 中间分数 */}
+        <div className="flex items-center gap-0.5 px-1 shrink-0">
+          <span className="text-[10px] text-accent-green w-5 text-right tabular-nums">{a}</span>
+          <span className="text-[8px] text-text-secondary/40">|</span>
+          <span className="text-[10px] text-accent-orange w-5 text-left tabular-nums">{b}</span>
+        </div>
+        {/* B 长条（从左向右延伸） */}
+        <div className="flex-1 flex items-center justify-start">
+          <div className="h-3 bg-accent-orange/40 rounded-r transition-all" style={{ width: `${(b/maxS)*100}%`, minWidth: b > 0 ? 6 : 0 }} />
+        </div>
       </div>
     </div>
   );
@@ -45,6 +55,11 @@ export default function VersusPanel({ onClose }: Props) {
         <button onClick={onClose} className="text-xs text-text-secondary hover:text-text-primary">✕</button>
       </div>
 
+      <p className="text-[11px] font-mono text-text-secondary/60 leading-relaxed">
+        选择两个已完成的 Team，输入评审任务，LLM 将对比两队的报告并从 8 个维度打分。
+        两队必须不同，且都已完成至少一次任务。
+      </p>
+
       <div className="space-y-2">
         <label className="text-xs font-mono text-text-secondary">评审任务（两队共同面对的问题）</label>
         <input value={task} onChange={(e) => setTask(e.target.value)}
@@ -56,12 +71,12 @@ export default function VersusPanel({ onClose }: Props) {
         <select value={teamA} onChange={(e) => setTeamA(e.target.value)}
           className="px-2 py-1 text-xs font-mono rounded border border-border bg-bg-secondary text-text-primary">
           <option value="">Team A…</option>
-          {finished.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          {finished.map((t) => <option key={t.id} value={t.id} disabled={t.id === teamB}>{t.name}</option>)}
         </select>
         <select value={teamB} onChange={(e) => setTeamB(e.target.value)}
           className="px-2 py-1 text-xs font-mono rounded border border-border bg-bg-secondary text-text-primary">
           <option value="">Team B…</option>
-          {finished.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          {finished.map((t) => <option key={t.id} value={t.id} disabled={t.id === teamA}>{t.name}</option>)}
         </select>
       </div>
 
@@ -111,12 +126,43 @@ export default function VersusPanel({ onClose }: Props) {
             <div>
               <p className="text-accent-green mb-1">{result.team_a_name}</p>
               <p className="text-text-secondary/50">{result.summary_a}</p>
+              {result.strengths_a.length > 0 && (
+                <p className="text-accent-green/70 mt-1">✓ {result.strengths_a.join("、")}</p>
+              )}
+              {result.weaknesses_a.length > 0 && (
+                <p className="text-accent-red/70 mt-0.5"> {result.weaknesses_a.join("、")}</p>
+              )}
             </div>
             <div>
               <p className="text-accent-orange mb-1">{result.team_b_name}</p>
               <p className="text-text-secondary/50">{result.summary_b}</p>
+              {result.strengths_b.length > 0 && (
+                <p className="text-accent-green/70 mt-1">✓ {result.strengths_b.join("、")}</p>
+              )}
+              {result.weaknesses_b.length > 0 && (
+                <p className="text-accent-red/70 mt-0.5"> {result.weaknesses_b.join("、")}</p>
+              )}
             </div>
           </div>
+
+          {/* 各维度详细评语 */}
+          <details className="text-[11px] font-mono">
+            <summary className="cursor-pointer text-text-secondary hover:text-text-primary py-1"> 查看各维度详细评语</summary>
+            <div className="mt-2 space-y-2 pt-2 border-t border-border">
+              {Object.keys(DIM_LABELS).map((k) => {
+                const ca = result.scores_a[k]?.comment ?? "";
+                const cb = result.scores_b[k]?.comment ?? "";
+                if (!ca && !cb) return null;
+                return (
+                  <div key={k} className="space-y-0.5">
+                    <p className="text-text-secondary font-semibold">{DIM_LABELS[k]}</p>
+                    {ca && <p className="text-accent-green/70 pl-2">{result.team_a_name}：{ca}</p>}
+                    {cb && <p className="text-accent-orange/70 pl-2">{result.team_b_name}：{cb}</p>}
+                  </div>
+                );
+              })}
+            </div>
+          </details>
         </Card>
       )}
     </div>

@@ -37,7 +37,7 @@ export default function MarketPanel() {
         </div>
       )}
       {items.length === 0 ? (
-        <EmptyState title="暂无模板" description="在 Team 卡片上点「发布」将配置保存为模板" />
+        <EmptyState title="暂无模板" description="在 Team 卡片上点「存模板」将配置保存为模板" />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {items.map((item) => (
@@ -64,12 +64,13 @@ export default function MarketPanel() {
                   type="button"
                   disabled={deleteItem.isPending}
                   onClick={async () => {
+                    if (!window.confirm(`确定删除模板「${item.name}」？`)) return;
                     try { await deleteItem.mutateAsync(item.id); setMsg("已删除"); setTimeout(() => setMsg(null), 2000); }
                     catch { setMsg("删除失败"); }
                   }}
-                  className="text-xs font-mono text-text-secondary/40 hover:text-accent-red transition-colors"
+                  className="px-2 py-1 text-xs font-mono rounded border border-accent-red/30 text-accent-red hover:bg-accent-red/10 transition-colors"
                 >
-                  🗑
+                  🗑 删除
                 </button>
               </div>
             </Card>

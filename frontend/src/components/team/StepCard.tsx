@@ -7,6 +7,7 @@ import type { StepState } from "../../types/team";
 interface Props {
   step: StepState;
   isActive: boolean;
+  agentNames?: Record<string, string>;
 }
 
 const statusConfig: Record<string, { icon: string; border: string; bg: string; label: string }> = {
@@ -17,9 +18,19 @@ const statusConfig: Record<string, { icon: string; border: string; bg: string; l
   skipped: { icon: "—", border: "border-border", bg: "bg-bg-secondary/20", label: "已跳过" },
 };
 
-export default function StepCard({ step, isActive }: Props) {
+export default function StepCard({ step, isActive, agentNames }: Props) {
   const [expanded, setExpanded] = useState(false);
   const cfg = statusConfig[step.status] ?? statusConfig.pending;
+
+  // 回退逻辑：如果 assigneeName 是 ID 格式（8位十六进制），尝试从 agentNames 查找
+  const displayName = (() => {
+    if (!step.assigneeName || step.assigneeName === "全员") return step.assigneeName || "全员";
+    // 检查是否是 UUID 前缀（8位十六进制）
+    if (/^[0-9a-f]{8}$/i.test(step.assigneeName) && step.assigneeId && agentNames?.[step.assigneeId]) {
+      return agentNames[step.assigneeId];
+    }
+    return step.assigneeName;
+  })();
 
   return (
     <div
@@ -39,7 +50,7 @@ export default function StepCard({ step, isActive }: Props) {
             <span className="text-xs font-mono text-text-primary truncate">{step.title}</span>
             <span className="text-xs text-text-secondary/50 shrink-0">{cfg.label}</span>
           </div>
-          <div className="text-xs text-text-secondary/60 mt-0.5">{step.assigneeName}</div>
+          <div className="text-xs text-text-secondary/60 mt-0.5">{displayName}</div>
           {step.durationSecs != null && (
             <div className="text-xs text-text-secondary/40 mt-0.5">
               ⏱ {step.durationSecs.toFixed(1)}s · 🪜 {step.stepsUsed}步

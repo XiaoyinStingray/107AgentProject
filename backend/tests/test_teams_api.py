@@ -326,7 +326,7 @@ class TestSuggestRoles:
 class TestExecuteTeam:
 
     def test_execute_creates_plan(self, client):
-        """执行 Team 应创建 Plan 并返回 steps。"""
+        """执行 Team 应创建 Plan 并返回 plan_id + status。"""
         aid = _create_agent(client)
         create_resp = client.post("/api/teams", json={
             "name": "执行测试团队",
@@ -338,10 +338,9 @@ class TestExecuteTeam:
         resp = client.post(f"/api/teams/{tid}/execute")
         assert resp.status_code == 200
         data = resp.json()
-        assert "id" in data
-        assert "steps" in data
-        assert len(data["steps"]) >= 1
-        assert "world_id" in data
+        assert "plan_id" in data
+        assert "team_id" in data
+        assert data["status"] == "executing"
 
     def test_execute_nonexistent_team(self, client):
         """不存在的 Team 返回 404。"""
@@ -380,7 +379,7 @@ class TestExecuteTeam:
         }).json()
         plan = client.post(f"/api/teams/{team['id']}/execute").json()
         report = {"title": "团队任务完成报告", "content": "报告正文"}
-        _persist_plan_report(plan["id"], report)
+        _persist_plan_report(plan["plan_id"], report)
 
         response = client.get(f"/api/teams/{team['id']}/plan")
 
@@ -400,11 +399,11 @@ class TestExecuteTeam:
 
         first = client.post(f"/api/teams/{tid}/execute")
         assert first.status_code == 200
-        plan_id_1 = first.json()["id"]
+        plan_id_1 = first.json()["plan_id"]
 
         second = client.post(f"/api/teams/{tid}/execute")
         assert second.status_code == 200
-        plan_id_2 = second.json()["id"]
+        plan_id_2 = second.json()["plan_id"]
 
         assert plan_id_1 == plan_id_2  # 同一个 Plan
 
@@ -421,7 +420,8 @@ class TestEvaluateTeam:
             "description": "完成一项测试任务",
             "agent_ids": [aid],
         }).json()
-        plan = client.post(f"/api/teams/{team['id']}/execute").json()
+        client.post(f"/api/teams/{team['id']}/execute")
+        plan = client.get(f"/api/teams/{team['id']}/plan").json()
         prompts = []
 
         class RecordingModelClient:
@@ -456,7 +456,8 @@ class TestEvaluateTeam:
             "description": "完成一项测试任务",
             "agent_ids": [aid],
         }).json()
-        plan = client.post(f"/api/teams/{team['id']}/execute").json()
+        client.post(f"/api/teams/{team['id']}/execute")
+        plan = client.get(f"/api/teams/{team['id']}/plan").json()
 
         import api.agents
 
@@ -485,7 +486,8 @@ class TestEvaluateTeam:
             "description": "验证报告评估",
             "agent_ids": [aid],
         }).json()
-        plan = client.post(f"/api/teams/{team['id']}/execute").json()
+        client.post(f"/api/teams/{team['id']}/execute")
+        plan = client.get(f"/api/teams/{team['id']}/plan").json()
         report = {
             "title": "团队任务完成报告",
             "content": "关键成果：完成校园应用原型与风险清单。",

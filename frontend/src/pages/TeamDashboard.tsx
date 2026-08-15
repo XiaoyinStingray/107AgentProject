@@ -33,6 +33,7 @@ export default function TeamDashboard() {
 
   // Team 执行状态
   const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
+  const [executingTeamId, setExecutingTeamId] = useState<string | null>(null);
   const store = useTeamStore();
   const { connected, isRunning, isDone, error: sseError } = useTeamSSE(activeTeamId);
   const [evaluation, setEvaluation] = useState<string | null>(null);
@@ -56,7 +57,7 @@ export default function TeamDashboard() {
       id: s.id ?? `s${i}`,
       title: s.title ?? `步骤 ${i + 1}`,
       assignee_id: s.assignee ?? null,
-      assignee_name: s.assignee_name ?? (s.assignee ? (agentNames[s.assignee] ?? "?") : "全员"),
+      assignee_name: (s as any).assignee_name || (s.assignee ? (agentNames[s.assignee] || s.assignee.slice(0, 8)) : "全员"),
       description: s.description ?? "",
     }));
     store.setPlanCreated({
@@ -171,11 +172,14 @@ export default function TeamDashboard() {
     setErrorMsg(null);
     setEvaluation(null);
     store.reset();
+    setExecutingTeamId(id);
     try {
       const result = await executeTeam.mutateAsync(id);
       setActiveTeamId(id);
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : "执行失败");
+    } finally {
+      setExecutingTeamId(null);
     }
   }, [executeTeam, store]);
 
@@ -250,12 +254,15 @@ export default function TeamDashboard() {
 
           {/* 内容区 */}
           <div className="flex-1 min-h-0">
-            {isDone && store.report ? (
-              /* 报告视图 */
-              <div className="space-y-4">
+            {(() => {
+              const currentReport = store.report || teamPlan?.report;
+              if (currentReport) {
+                return (
+                /* 报告视图 */
+                <div className="space-y-4">
                 <div className="flex items-center gap-2">
-                  <span className="text-lg">📄</span>
-                  <h3 className="text-sm font-mono text-accent-green">{store.report.title}</h3>
+                  <span className="text-lg"></span>
+                  <h3 className="text-sm font-mono text-accent-green">{currentReport.title}</h3>
                   <button type="button" disabled={evaluateTeam.isPending}
                     onClick={async () => {
                       try { const r = await evaluateTeam.mutateAsync(activeTeamId); setEvaluation(r.evaluation); }
@@ -267,9 +274,9 @@ export default function TeamDashboard() {
                 </div>
                 <Card className="p-4 max-h-[55vh] overflow-y-auto">
                   <ReportViewer
-                    content={store.report.content}
+                    content={currentReport.content}
                     onDownload={() => {
-                    const text = `# ${store.report!.title}\n\n${store.report!.content}`;
+                    const text = `# ${currentReport.title}\n\n${currentReport.content}`;
                     const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement("a");
@@ -279,6 +286,50 @@ export default function TeamDashboard() {
                   }}
                 />
                 </Card>
+                {/* 步骤产出文件下载 —— 直接从报告正文中提取内容 */}
+                {Object.values(store.steps).some((s) => s.files.length > 0) && (() => {
+                  const fileContentMap = new Map<string, string>();
+                  const reportText = currentReport.content || "";
+                  const fileBlocks = reportText.match(/#### 📄 (.+?)\n+```[\s\S]*?\n([\s\S]*?)\n```/g) || [];
+                  for (const block of fileBlocks) {
+                    const nameMatch = block.match(/#### 📄 (.+)/);
+                    const contentMatch = block.match(/```\n([\s\S]*?)\n```/);
+                    if (nameMatch && contentMatch) {
+                      fileContentMap.set(nameMatch[1].trim(), contentMatch[1]);
+                    }
+                  }
+                  return (
+                  <Card className="p-4">
+                    <h4 className="text-xs font-mono text-text-secondary mb-2">📁 步骤产出文件</h4>
+                    <div className="space-y-1">
+                      {Object.values(store.steps).map((step) =>
+                        step.files.map((f) => {
+                          const fname = f.includes("/") ? f.split("/").pop()! : f;
+                          const content = fileContentMap.get(fname) ?? fileContentMap.get(f) ?? "";
+                          return (
+                          <button key={`${step.id}-${f}`}
+                            type="button"
+                            onClick={() => {
+                              if (!content) return;
+                              const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement("a");
+                              a.href = url; a.download = fname;
+                              document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                              setTimeout(() => URL.revokeObjectURL(url), 0);
+                            }}
+                            className="flex items-center gap-2 text-xs font-mono text-accent-green hover:text-accent-green/80 transition-colors cursor-pointer bg-transparent border-none p-0">
+                            <span>📄</span>
+                            <span className="truncate">{fname}</span>
+                            <span className="text-text-secondary/40 shrink-0">({step.title})</span>
+                          </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </Card>
+                  );
+                })()}
                 {evaluation && (
                   <Card className="p-4 border-accent-orange/40 bg-accent-orange/5">
                     <div className="flex items-center gap-2 mb-2">
@@ -291,13 +342,16 @@ export default function TeamDashboard() {
                 <RoleEvolutionBadge />
                 <TeamHistory teamId={activeTeamId} />
               </div>
-            ) : (
+                );
+              }
               /* 执行中视图 */
+              return (
               <div className="h-full">
-                <StepTimeline />
+                <StepTimeline agentNames={agentNames} />
                 <div className="mt-3"><RoleEvolutionBadge /></div>
               </div>
-            )}
+              );
+            })()}
           </div>
         </div>
       </div>
@@ -404,7 +458,7 @@ export default function TeamDashboard() {
                     ? "bg-bg-secondary border border-border text-text-secondary/40 cursor-not-allowed"
                     : "bg-bg-secondary border border-border text-text-secondary hover:border-accent-orange hover:text-accent-orange"
                 }`.trim()}>
-                {suggestRoles.isPending ? "分析中…" : "🤖 智能推荐角色"}
+                {suggestRoles.isPending ? "分析中…" : "🤖 智能分配角色"}
               </button>
               {suggestRoles.isError && (
                 <p className="text-xs text-accent-red font-mono mt-1">推荐失败，可手动填写角色</p>
@@ -442,8 +496,16 @@ export default function TeamDashboard() {
                       <h3 className="text-sm font-mono text-text-primary">{team.name}</h3>
                       <p className="text-xs text-text-secondary/60 mt-0.5 line-clamp-1">{team.description || "暂无描述"}</p>
                     </div>
-                    <Badge label={team.status === "idle" ? "待执行" : team.status}
-                      variant={team.status === "idle" ? "P2" : "P1"} />
+                    <Badge
+                      label={
+                        activeTeamId === team.id
+                          ? (isDone ? "已完成" : isRunning ? "执行中" : team.status)
+                          : (team.status === "idle" ? "待执行" : team.status === "finished" ? "已完成" : team.status)
+                      }
+                      variant={
+                        (activeTeamId === team.id && isDone) || team.status === "finished" ? "P2" : "P1"
+                      }
+                    />
                   </div>
                   <div className="text-xs font-mono text-text-secondary/60 space-y-0.5">
                     <p>👥 {memberNames}</p>
@@ -453,9 +515,16 @@ export default function TeamDashboard() {
                   <div className="flex gap-2 mt-3 pt-3 border-t border-border">
                     {team.status === "idle" && (
                       <button type="button" onClick={() => handleExecute(team.id)}
-                        disabled={executeTeam.isPending}
+                        disabled={executingTeamId === team.id}
                         className="text-xs font-mono text-accent-orange hover:text-accent-orange/80 transition-colors">
-                        {executeTeam.isPending ? "启动中…" : "▶ 执行"}
+                        {executingTeamId === team.id ? "启动中…" : "▶ 执行"}
+                      </button>
+                    )}
+                    {team.status === "finished" && (
+                      <button type="button" onClick={() => handleExecute(team.id)}
+                        disabled={executingTeamId === team.id}
+                        className="text-xs font-mono text-accent-orange hover:text-accent-orange/80 transition-colors">
+                        {executingTeamId === team.id ? "启动中…" : "▶ 重新执行"}
                       </button>
                     )}
                     {(team.status === "executing" || team.status === "finished") && (
