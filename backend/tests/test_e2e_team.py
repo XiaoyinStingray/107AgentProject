@@ -239,6 +239,7 @@ async def test_engine_sse_flow_with_mock_db():
             select(TeamRow).where(TeamRow.id == "team-e2e-1")
         )
         team = result.scalar_one_or_none()
+        assert team is not None, "TeamRow not found"
         assert team.status == "finished"
 
     await async_engine.dispose()
