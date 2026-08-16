@@ -2,8 +2,8 @@
 
 Real Agent IDs are always rebuilt from their persisted identity snapshot.  The
 only ID allowed to resolve to a generic worker is ``worker-default``.  Memory is
-intentionally not restored here: execution modules currently share identity,
-not World memory/context.
+not restored by this identity loader; AgentWorker retrieves and injects
+task-relevant Memory immediately before each execution.
 """
 
 from __future__ import annotations
@@ -43,9 +43,8 @@ def _get_model_client(model_client=None):
 def build_agent_from_row(row: AgentRow, *, model_client=None) -> LifeAgent:
     """Rebuild one LifeAgent from a persisted identity snapshot.
 
-    This restores Persona, Background, Goals and basic dynamic state.  It does
-    not query or inject Memory, so World memory remains isolated until the
-    dedicated cross-module Memory integration is implemented.
+    This restores Persona, Background, Goals and basic dynamic state.  Memory
+    remains a separate, task-aware layer prepared by AgentWorker.
     """
     try:
         data = row.to_dict()
