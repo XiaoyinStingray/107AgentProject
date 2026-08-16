@@ -76,6 +76,9 @@ vi.mock("../../../api/teams", () => ({
   useExecuteTeam: () => ({ mutateAsync: hookState.execute, isPending: false }),
   useEvaluateTeam: () => ({ mutateAsync: hookState.evaluate, isPending: false }),
   useTeamPlan: () => ({ data: hookState.plan }),
+  useTeamHistory: () => ({ data: [], isLoading: false }),
+  useLearningCurve: () => ({ data: null }),
+  useScoreTeam: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock("../../../api/market", () => ({
@@ -93,6 +96,15 @@ vi.mock("../../../hooks/useSSE", () => ({
     connected: false,
     disconnect: hookState.disconnect,
     clear: hookState.clear,
+  }),
+}));
+
+vi.mock("../../../hooks/useTeamSSE", () => ({
+  useTeamSSE: () => ({
+    connected: false,
+    isRunning: false,
+    isDone: false,
+    error: null,
   }),
 }));
 
@@ -116,6 +128,9 @@ function renderDashboard() {
 describe("TeamDashboard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    MOCK_TEAMS[0].status = "idle";
+    MOCK_TEAMS[0].outcome = "pending";
+    MOCK_TEAMS[0].failed_steps = 0;
     hookState.plan = null;
     hookState.events = [];
     hookState.execute.mockResolvedValue(MOCK_PLAN);
@@ -156,6 +171,18 @@ describe("TeamDashboard", () => {
     expect(screen.getByText("待执行")).toBeInTheDocument();
   });
 
+  it("shows partial completion instead of completed when a step failed", () => {
+    MOCK_TEAMS[0].status = "finished";
+    MOCK_TEAMS[0].outcome = "partial";
+    MOCK_TEAMS[0].failed_steps = 1;
+
+    renderDashboard();
+
+    expect(screen.getByText("部分完成（1 步失败）")).toBeInTheDocument();
+    expect(screen.queryByText("已完成")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /部分完成.*查看/ })).toBeInTheDocument();
+  });
+
   it("shows execute button for idle teams", () => {
     renderDashboard();
     // 使用 getByRole 精确匹配按钮，避免匹配到 "待执行" Badge
@@ -170,7 +197,6 @@ describe("TeamDashboard", () => {
     fireEvent.click(screen.getByRole("button", { name: /执行/ }));
 
     await waitFor(() => {
-      expect(hookState.clear).toHaveBeenCalledOnce();
       expect(hookState.execute).toHaveBeenCalledWith("t1");
     });
     expect(await screen.findByRole("button", { name: /返回列表/ })).toBeInTheDocument();

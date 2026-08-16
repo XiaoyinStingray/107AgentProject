@@ -11,6 +11,7 @@ import { unlock } from "../game/achievements";
 import { useTeamSSE } from "../hooks/useTeamSSE";
 import { useTeamStore } from "../stores/useTeamStore";
 import type { TeamRole, SuggestedRole } from "../types/team";
+import { teamOutcomeLabel, teamOutcomeVariant } from "../utils/teamOutcome";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
 import EmptyState from "../components/shared/EmptyState";
@@ -74,7 +75,7 @@ export default function TeamDashboard() {
         const result = s.result ?? {};
         store.markStepDone(sid, result.files ?? [], result.output_summary ?? "", result.steps_used ?? 0, result.duration_secs ?? 0);
       } else if (s.status === "error") {
-        store.setStepStatus(sid, "error");
+        store.markStepError(sid, (s.result ?? {}).error ?? "Worker 执行失败");
       } else {
         store.setStepStatus(sid, s.status === "active" ? "running" : "pending");
       }
@@ -82,8 +83,10 @@ export default function TeamDashboard() {
     // 恢复报告
     if (teamPlan.report) {
       store.setTeamDone({
+        outcome: teamPlan.outcome ?? "success",
         total_duration_secs: 0,
         total_steps_completed: (teamPlan.steps ?? []).filter((s: any) => s.status === "done").length,
+        failed_steps: teamPlan.failed_steps ?? (teamPlan.steps ?? []).filter((s: any) => s.status === "error").length,
         total_steps: (teamPlan.steps ?? []).length,
         steps: (teamPlan.steps ?? []).map((s: any) => ({
           step_title: s.title ?? "",
@@ -221,6 +224,8 @@ export default function TeamDashboard() {
   // 执行视图
   // =====================================================================
   if (activeTeamId && activeTeam) {
+    const activeOutcome = store.outcome ?? teamPlan?.outcome ?? activeTeam.outcome;
+    const activeFailedSteps = store.failedSteps || teamPlan?.failed_steps || activeTeam.failed_steps || 0;
     return (
       <div className="h-full overflow-y-auto p-6 animate-fade-in">
         <div className="h-full flex flex-col">
@@ -232,8 +237,8 @@ export default function TeamDashboard() {
             </button>
             <h1 className="text-lg font-mono text-accent-orange">{activeTeam.name}</h1>
             <Badge
-              label={isDone ? "已完成" : isRunning ? "执行中" : connected ? "连接中" : activeTeam.status}
-              variant={isDone ? "P2" : "P1"}
+              label={isDone ? teamOutcomeLabel(activeOutcome, activeFailedSteps) : isRunning ? "执行中" : connected ? "连接中" : activeTeam.status}
+              variant={isDone ? teamOutcomeVariant(activeOutcome) : "P1"}
             />
             {!isRunning && !isDone && (
               <span className="text-xs text-text-secondary/50 font-mono">等待 SSE 连接…</span>
@@ -489,6 +494,7 @@ export default function TeamDashboard() {
                 .map((aid) => agents.find((a) => a.id === aid)?.name ?? aid.slice(0, 6))
                 .join("、");
               const roleSummary = team.roles.slice(0, 3).map((r) => r.role).join(" · ");
+              const finishedLabel = teamOutcomeLabel(team.outcome, team.failed_steps ?? 0);
               return (
                 <Card key={team.id}>
                   <div className="flex items-start justify-between mb-2">
@@ -499,11 +505,13 @@ export default function TeamDashboard() {
                     <Badge
                       label={
                         activeTeamId === team.id
-                          ? (isDone ? "已完成" : isRunning ? "执行中" : team.status)
-                          : (team.status === "idle" ? "待执行" : team.status === "finished" ? "已完成" : team.status)
+                          ? (isDone ? teamOutcomeLabel(store.outcome ?? team.outcome, store.failedSteps || team.failed_steps || 0) : isRunning ? "执行中" : team.status)
+                          : (team.status === "idle" ? "待执行" : team.status === "finished" ? finishedLabel : team.status)
                       }
                       variant={
-                        (activeTeamId === team.id && isDone) || team.status === "finished" ? "P2" : "P1"
+                        (activeTeamId === team.id && isDone)
+                          ? teamOutcomeVariant(store.outcome ?? team.outcome)
+                          : team.status === "finished" ? teamOutcomeVariant(team.outcome) : "P1"
                       }
                     />
                   </div>
@@ -533,7 +541,7 @@ export default function TeamDashboard() {
                         store.reset();
                       }}
                         className="text-xs font-mono text-accent-green hover:text-accent-green/80 transition-colors">
-                        {team.status === "executing" ? "● 执行中 — 进入" : "✓ 已完成 — 查看"}
+                        {team.status === "executing" ? "● 执行中 — 进入" : `${team.outcome === "partial" ? "△ 部分完成" : team.outcome === "failed" ? "✕ 执行失败" : "✓ 已完成"} — 查看`}
                       </button>
                     )}
                     <button type="button" onClick={async () => {

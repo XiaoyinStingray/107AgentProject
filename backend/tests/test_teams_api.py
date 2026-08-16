@@ -130,6 +130,36 @@ def _persist_plan_report(plan_id: str, report: dict) -> None:
     engine.dispose()
 
 
+def _persist_partial_plan(team_id: str) -> None:
+    """Persist one successful and one failed step without starting a background run."""
+    from models.plan_orm import PlanRow
+    from models.team_orm import TeamRow
+
+    engine = create_engine(_SYNC_DB_URL)
+    with Session(engine) as session:
+        team = session.get(TeamRow, team_id)
+        assert team is not None
+        team.status = "finished"
+        plan = PlanRow.from_decomposition(
+            plan_id="partial-plan",
+            team_id=team_id,
+            task="部分完成测试",
+            steps=[
+                {"id": "s1", "title": "失败步骤", "status": "error", "result": {"error": "Request timed out"}},
+                {"id": "s2", "title": "成功步骤", "status": "done", "result": {"files": ["output.md"]}},
+            ],
+        )
+        plan.status = "finished"
+        plan.report = json.dumps({
+            "title": "部分完成报告",
+            "content": "部分完成",
+            "outcome": "partial",
+        }, ensure_ascii=False)
+        session.add(plan)
+        session.commit()
+    engine.dispose()
+
+
 # =============================================================================
 # Tests
 # =============================================================================
@@ -225,6 +255,23 @@ class TestListTeams:
         assert len(teams) == 2
         names = {t["name"] for t in teams}
         assert names == {"A团队", "B团队"}
+
+    def test_list_exposes_partial_outcome_and_failed_count(self, client):
+        aid = _create_agent(client)
+        team = client.post("/api/teams", json={
+            "name": "部分完成团队",
+            "agent_ids": [aid],
+        }).json()
+        _persist_partial_plan(team["id"])
+
+        response = client.get("/api/teams")
+
+        assert response.status_code == 200
+        item = next(row for row in response.json() if row["id"] == team["id"])
+        assert item["status"] == "finished"
+        assert item["outcome"] == "partial"
+        assert item["completed_steps"] == 1
+        assert item["failed_steps"] == 1
 
 
 class TestGetTeam:
