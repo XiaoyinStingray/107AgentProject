@@ -79,7 +79,11 @@ def _prefix_worker_sse(raw: str, step_id: str) -> str:
         return raw
     try:
         obj = _json.loads(raw[6:].strip())
-        obj["type"] = _WORKER_EVENT_MAP.get(obj.get("type", ""), f"step.{obj.get('type', '')}")
+        worker_type = obj.get("type", "")
+        obj["type"] = _WORKER_EVENT_MAP.get(worker_type, f"step.{worker_type}")
+        if worker_type == "worker.error":
+            data = obj.setdefault("data", {})
+            data["error"] = data.get("error") or data.get("message") or "Worker 执行失败"
         obj["step_id"] = step_id
         return f"data: {_json.dumps(obj, ensure_ascii=False)}\n\n"
     except Exception:
@@ -270,13 +274,14 @@ class TeamEngine:
             # === 获取 Agent ===
             agent = await self._get_agent_instance(aid)
             if agent is None:
+                agent_error = f"Agent {aid or '?'} 不可用"
                 yield _make_sse("step.worker_error", {
-                    "error": f"Agent {aid or '?'} 不可用", "recoverable": False,
+                    "error": agent_error, "recoverable": False,
                 }, step_id=sid)
-                sr = StepResult(sid, title, aid, aname, False, error=f"Agent {aid or '?'} 不可用")
+                sr = StepResult(sid, title, aid, aname, False, error=agent_error)
                 step_results.append(sr)
                 completed[sid] = sr
-                await self._update_plan_step(sid, "error")
+                await self._update_plan_step(sid, "error", {"error": agent_error})
                 continue
 
             # === 创建 Worker ===
@@ -338,8 +343,9 @@ class TeamEngine:
                     "steps_used": steps_used, "duration_secs": round(duration, 1),
                 }, step_id=sid)
             elif not error_msg:
+                error_msg = "Worker 未产生成功结果"
                 yield _make_sse("step.worker_error", {
-                    "error": "Worker 未产生成功结果", "recoverable": True,
+                    "error": error_msg, "recoverable": True,
                 }, step_id=sid)
 
             sr = StepResult(sid, title, aid, aname, success, files_created,
@@ -350,6 +356,7 @@ class TeamEngine:
             await self._update_plan_step(sid, "done" if success else "error", {
                 "files": files_created, "output_summary": output_summary,
                 "steps_used": steps_used, "duration_secs": round(duration, 1),
+                "error": error_msg or None,
             })
 
             # ── 角色演化 ──
@@ -364,10 +371,24 @@ class TeamEngine:
         report = await self._compile_report(step_results)
         total_dur = round(sum(r.duration_secs for r in step_results), 1)
         completed_count = sum(1 for r in step_results if r.success)
+        failed_count = len(step_results) - completed_count
+        outcome = (
+            "partial" if completed_count and failed_count
+            else "failed" if failed_count
+            else "success"
+        )
+        report.update({
+            "outcome": outcome,
+            "total_steps": len(steps),
+            "completed_steps": completed_count,
+            "failed_steps": failed_count,
+        })
 
         yield _make_sse("team_done", {
+            "outcome": outcome,
             "total_duration_secs": total_dur,
             "total_steps_completed": completed_count,
+            "failed_steps": failed_count,
             "total_steps": len(steps),
             "steps": [
                 {"step_title": r.step_title, "success": r.success,
@@ -485,6 +506,16 @@ class TeamEngine:
     async def _compile_report(self, step_results: list[StepResult]) -> dict:
         task = self.team.get("description", "") or self.team.get("name", "")
         parts = [f"# {self.team.get('name', '团队')} 任务报告\n\n## 任务\n\n{task}\n"]
+
+        completed_count = sum(1 for result in step_results if result.success)
+        failed_count = len(step_results) - completed_count
+        if failed_count and completed_count:
+            result_summary = f"部分完成：{completed_count}/{len(step_results)} 步完成，{failed_count} 步失败"
+        elif failed_count:
+            result_summary = f"执行失败：{failed_count} 步失败"
+        else:
+            result_summary = f"全部完成：{completed_count}/{len(step_results)} 步完成"
+        parts.append(f"\n> **执行状态：{result_summary}**\n")
 
         # 构建 agent_id → role 映射（优先使用 team.roles，其次用 evolved_roles，最后用 agent 自带的 role）
         role_map: dict[str, str] = {}

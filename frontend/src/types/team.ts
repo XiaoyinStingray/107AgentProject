@@ -21,6 +21,8 @@ export interface TeamCreate {
   roles?: TeamRole[];
 }
 
+export type TeamOutcome = "pending" | "in_progress" | "success" | "partial" | "failed";
+
 export interface TeamSummary {
   id: string;
   name: string;
@@ -29,6 +31,10 @@ export interface TeamSummary {
   roles: TeamRole[];
   status: "idle" | "executing" | "paused" | "finished";
   created_at: string;
+  outcome?: TeamOutcome;
+  total_steps?: number;
+  completed_steps?: number;
+  failed_steps?: number;
 }
 
 export interface AgentBrief {
@@ -46,9 +52,16 @@ export interface PlanStep {
   title: string;
   assignee: string | null;
   description: string;
-  status: "pending" | "active" | "done";
+  status: "pending" | "active" | "done" | "error";
   progress: number;
   depends_on: string[];
+  result?: {
+    files?: string[];
+    output_summary?: string;
+    steps_used?: number;
+    duration_secs?: number;
+    error?: string | null;
+  };
 }
 
 export interface TeamPlan {
@@ -60,7 +73,11 @@ export interface TeamPlan {
   world_id: string | null;
   created_at: string;
   progress_pct?: number;
-  report?: { title: string; content: string } | null;
+  outcome?: TeamOutcome;
+  total_steps?: number;
+  completed_steps?: number;
+  failed_steps?: number;
+  report?: { title: string; content: string; outcome?: TeamOutcome } | null;
 }
 
 // ── State 8: Team SSE 事件类型 ──
@@ -122,8 +139,10 @@ export interface StepWorkerDone {
 }
 
 export interface TeamDoneData {
+  outcome?: TeamOutcome;
   total_duration_secs: number;
   total_steps_completed: number;
+  failed_steps?: number;
   total_steps: number;
   steps: Array<{
     step_title: string;

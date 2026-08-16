@@ -2,7 +2,7 @@
  * State 8: Team SSE 事件缓冲 + 步骤状态 Zustand store。
  */
 import { create } from "zustand";
-import type { StepState, StepStatus, TeamSSEEvent, RoleEvolution, TeamDoneData, TeamPlanCreated } from "../types/team";
+import type { StepState, StepStatus, TeamSSEEvent, RoleEvolution, TeamDoneData, TeamPlanCreated, TeamOutcome } from "../types/team";
 
 interface TeamStore {
   // Plan
@@ -21,6 +21,9 @@ interface TeamStore {
   // Final report
   report: TeamDoneData["report"] | null;
   workspaceRoot: string;
+  outcome: TeamOutcome | null;
+  completedSteps: number;
+  failedSteps: number;
 
   // Status
   connected: boolean;
@@ -69,6 +72,9 @@ const initialState = {
   evolutions: [],
   report: null,
   workspaceRoot: "",
+  outcome: null,
+  completedSteps: 0,
+  failedSteps: 0,
   connected: false,
   isRunning: false,
   isDone: false,
@@ -94,6 +100,9 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
       stepOrder: order,
       isRunning: true,
       isDone: false,
+      outcome: null,
+      completedSteps: 0,
+      failedSteps: 0,
       error: null,
     });
   },
@@ -157,10 +166,19 @@ export const useTeamStore = create<TeamStore>((set, get) => ({
         steps[stepId] = { ...steps[stepId], files: s.files, durationSecs: s.duration_secs };
       }
     });
+    const failedSteps = data.failed_steps ?? data.steps.filter((step) => !step.success).length;
+    const outcome = data.outcome ?? (
+      failedSteps > 0
+        ? (data.total_steps_completed > 0 ? "partial" : "failed")
+        : "success"
+    );
     set({
       steps,
       report: data.report,
       workspaceRoot: data.workspace_root,
+      outcome,
+      completedSteps: data.total_steps_completed,
+      failedSteps,
       isRunning: false,
       isDone: true,
     });

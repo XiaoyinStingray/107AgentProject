@@ -15,7 +15,7 @@ from db import Base
 import models.team_orm
 import models.plan_orm
 from models.team_orm import TeamRow
-from models.plan_orm import PlanRow
+from models.plan_orm import PlanRow, summarize_plan_steps
 
 pytestmark = pytest.mark.asyncio
 
@@ -132,6 +132,26 @@ class TestTeamRow:
 
 class TestPlanRow:
 
+    async def test_step_summary_distinguishes_partial_from_success(self, session):
+        summary = summarize_plan_steps([
+            {"id": "s1", "status": "error"},
+            {"id": "s2", "status": "done"},
+        ], "finished")
+
+        assert summary == {
+            "outcome": "partial",
+            "total_steps": 2,
+            "completed_steps": 1,
+            "failed_steps": 1,
+        }
+
+    async def test_finished_plan_with_only_errors_is_failed(self, session):
+        summary = summarize_plan_steps([
+            {"id": "s1", "status": "error"},
+        ], "finished")
+
+        assert summary["outcome"] == "failed"
+
     async def test_from_decomposition(self, session):
         """from_decomposition 正确持久化步骤。"""
         steps = [
@@ -167,6 +187,9 @@ class TestPlanRow:
         assert d["world_id"] == "w1"
         assert isinstance(d["steps"], list)
         assert d["report"] is None
+        assert d["outcome"] == "success"
+        assert d["completed_steps"] == 1
+        assert d["failed_steps"] == 0
 
     async def test_status_transition(self, session):
         """Plan 状态: executing → finished。"""
@@ -193,3 +216,26 @@ class TestPlanRow:
 
         d = row.to_dict()
         assert d["report"]["title"] == "复盘报告"
+
+    async def test_failed_step_error_is_persisted_for_reload(self, session):
+        from engines.team.engine import TeamEngine
+
+        row = PlanRow.from_decomposition(
+            plan_id="p-error", team_id="t-error", task="测试错误恢复",
+            steps=[{"id": "s1", "title": "失败步骤", "status": "pending"}],
+        )
+        session.add(row)
+        await session.commit()
+
+        engine = TeamEngine(team={"id": "t-error"}, db=session)
+        engine._plan_id = row.id
+        await engine._update_plan_step(
+            "s1",
+            "error",
+            {"files": [], "error": "Request timed out"},
+        )
+        await session.refresh(row)
+
+        step = row.to_dict()["steps"][0]
+        assert step["status"] == "error"
+        assert step["result"]["error"] == "Request timed out"

@@ -24,6 +24,32 @@ from config import settings
 router = APIRouter(prefix="/api/teams", tags=["teams"])
 
 
+async def _latest_plan_dict(db: AsyncSession, team_id: str) -> dict | None:
+    result = await db.execute(
+        select(PlanRow)
+        .where(PlanRow.team_id == team_id)
+        .order_by(PlanRow.created_at.desc())
+        .limit(1)
+    )
+    row = result.scalar_one_or_none()
+    return row.to_dict() if row else None
+
+
+def _attach_plan_outcome(team: dict, plan: dict | None) -> dict:
+    if not plan:
+        team.update({
+            "outcome": "pending",
+            "total_steps": 0,
+            "completed_steps": 0,
+            "failed_steps": 0,
+        })
+        return team
+
+    for key in ("outcome", "total_steps", "completed_steps", "failed_steps"):
+        team[key] = plan.get(key)
+    return team
+
+
 # =============================================================================
 # CRUD
 # =============================================================================
@@ -117,21 +143,18 @@ async def list_teams(db: AsyncSession = Depends(get_db)):
     )
     rows = result.scalars().all()
 
-    # 修正卡住的 executing 状态：如果 Plan 已 finished 但 Team 仍为 executing，自动修正
+    # 修正卡住的 executing 状态，并附带最近一次 Plan 的真实执行结果。
+    response = []
     for row in rows:
-        if row.status == "executing":
-            plan_result = await db.execute(
-                select(PlanRow)
-                .where(PlanRow.team_id == row.id, PlanRow.status == "finished")
-                .limit(1)
-            )
-            if plan_result.scalar_one_or_none():
-                row.status = "finished"
-                db.add(row)
-                logger.info(f"[Team] list_teams: corrected stuck executing status for team {row.id}")
+        plan = await _latest_plan_dict(db, row.id)
+        if row.status == "executing" and plan and plan.get("status") == "finished":
+            row.status = "finished"
+            db.add(row)
+            logger.info(f"[Team] list_teams: corrected stuck executing status for team {row.id}")
+        response.append(_attach_plan_outcome(row.to_dict(), plan))
     await db.commit()
 
-    return [row.to_dict() for row in rows]
+    return response
 
 
 @router.get("/{team_id}")
@@ -142,7 +165,7 @@ async def get_team(team_id: str, db: AsyncSession = Depends(get_db)):
     if not row:
         raise HTTPException(status_code=404, detail=f"Team {team_id!r} 不存在")
 
-    data = row.to_dict()
+    data = _attach_plan_outcome(row.to_dict(), await _latest_plan_dict(db, row.id))
 
     # 附带 Agent 摘要（id, name, mbti）
     from models.agent_orm import AgentRow
@@ -536,8 +559,10 @@ async def stream_team(
                     report_payload = json.dumps({
                         "type": "team_done",
                         "data": {
+                            "outcome": plan.get("outcome", "success"),
                             "total_duration_secs": 0,
                             "total_steps_completed": sum(1 for s in plan.get("steps", []) if s.get("status") == "done"),
+                            "failed_steps": sum(1 for s in plan.get("steps", []) if s.get("status") == "error"),
                             "total_steps": len(plan.get("steps", [])),
                             "steps": [
                                 {"step_title": s.get("title", ""), "success": s.get("status") == "done",
