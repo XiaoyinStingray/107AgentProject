@@ -214,6 +214,7 @@ class AgentWorker:
         self._completed_steps: list[dict] = []   # 已完成的步骤摘要
         self._files_created: list[str] = []       # 本运行中创建的文件
         self._start_time: float = 0
+        self._execution_memory = None             # 任务执行前注入的 Memory 元数据
 
         # 文件锁 — 用户编辑时禁止 Agent 写入
         self._locked_files: set[str] = set()
@@ -262,6 +263,16 @@ class AgentWorker:
                 recoverable=False,
             ).__dict__)
             return
+
+        # M9 / M12 / Pipeline 共用入口：真实 Agent 在每次工作前按当前任务
+        # 检索并注入持久化 Memory。默认 Worker 和测试替身会自动跳过。
+        from engines.agent_factory.execution_memory import (
+            prepare_execution_memory_context,
+        )
+        self._execution_memory = await prepare_execution_memory_context(
+            self._agent,
+            task,
+        )
 
         self._start_time = time.monotonic()
         self._tools = make_worker_tools(self._workspace, extra_tools=extra_tools or [], enabled_tools=enabled_tools or [])

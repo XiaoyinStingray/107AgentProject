@@ -21,6 +21,7 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from engines.agent_factory.loader import AgentNotFoundError, AgentRestoreError
 from engines.worker.engine import AgentWorker
 from engines.worker.workspace import CloudWorkspace, LocalWorkspace, WorkspaceProvider
 
@@ -160,55 +161,21 @@ async def _restore_workers_from_disk(base_dir: str | None = None):
 
 
 async def _get_or_create_agent(agent_id: str) -> Any:
-    """从数据库或内存中获取 LifeAgent 实例。
+    """Compatibility wrapper around the shared execution Agent loader.
 
-    Phase 23: 从现有的 Agent Factory / DB 获取。
-    如果找不到，返回一个简单的测试 Agent。
+    A real ID is restored from SQLite.  Only ``worker-default`` may create a
+    generic worker; missing/deleted IDs raise an explicit error.
     """
-    from llm.client import create_model_client
-    from engines.agent_factory.factory import LifeAgent
-    from models.agent import Persona, Background
+    from engines.agent_factory.loader import load_agent_for_execution
 
     # 尝试从活跃世界中获取
     from api.sse import _active_worlds
     for engine in _active_worlds.values():
         if agent_id in engine.agents:
             return engine.agents[agent_id]
-
-    # BUG-M10-013: 从数据库查找 Agent 真实名称
-    _agent_name = None
-    try:
-        from models.agent_orm import AgentRow
-        from db import async_session
-        async with async_session() as s:
-            from sqlalchemy import select
-            result = await s.execute(select(AgentRow).where(AgentRow.id == agent_id))
-            row = result.scalar_one_or_none()
-            if row:
-                _agent_name = row.name
-    except Exception:
-        pass
-
-    # 创建临时 Agent（用于 Worker 模式——不需要 World 上下文）
-    model_client = create_model_client()
-    persona = Persona(
-        name=_agent_name or f"Worker-{agent_id[:8]}",
-        mbti="ISTJ",
-        narrative="高效的任务执行者",
-    )
-    background = Background(
-        hometown="",
-        education="未知",
-        key_events=[],
-    )
-    return LifeAgent(
-        id=agent_id,
-        persona=persona,
-        background=background,
-        goals=[],
-        model_client=model_client,
-        tools=[],
-    )
+ 
+    # 使用统一的 Agent 加载器
+    return await load_agent_for_execution(agent_id)
 
 
 # =============================================================================
@@ -251,6 +218,10 @@ async def execute_worker_task(req: WorkerExecuteRequest):
     # 获取 Agent
     try:
         agent = await _get_or_create_agent(req.agent_id)
+    except AgentNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except AgentRestoreError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"无法创建 Agent: {e}")
 
@@ -687,9 +658,10 @@ async def fork_worker(run_id: str, req: ForkRequest):
 
     try:
         agent = await _get_or_create_agent(entry.get("agent_id", ""))
-    except Exception:
-        # 用原始 worker 的 agent（如果还在内存中）
-        agent = worker_obj._agent
+    except AgentNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except AgentRestoreError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
 
     from engines.worker.fork import fork_from_checkpoint
 

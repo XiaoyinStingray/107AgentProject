@@ -5,6 +5,7 @@ import { useTeamHistory } from "../../api/teams";
 import Card from "../shared/Card";
 import Badge from "../shared/Badge";
 import EmptyState from "../shared/EmptyState";
+import { teamOutcomeLabel, teamOutcomeVariant } from "../../utils/teamOutcome";
 
 interface Props {
   teamId: string;
@@ -37,8 +38,8 @@ export default function TeamHistory({ teamId }: Props) {
                 </div>
               </div>
               <Badge
-                label={plan.status === "finished" ? "已完成" : plan.status}
-                variant={plan.status === "finished" ? "P2" : "P1"}
+                label={plan.status === "finished" ? teamOutcomeLabel(plan.outcome, plan.failed_steps ?? 0) : plan.status}
+                variant={plan.status === "finished" ? teamOutcomeVariant(plan.outcome) : "P1"}
               />
             </div>
             {plan.report && (

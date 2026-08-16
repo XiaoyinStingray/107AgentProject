@@ -12,6 +12,30 @@ from sqlalchemy.orm import Mapped, mapped_column
 from db import Base
 
 
+def summarize_plan_steps(steps: list[dict], plan_status: str = "executing") -> dict:
+    """Summarize execution outcome without conflating terminal and successful."""
+    total_steps = len(steps)
+    completed_steps = sum(1 for step in steps if step.get("status") == "done")
+    failed_steps = sum(1 for step in steps if step.get("status") == "error")
+
+    if failed_steps:
+        outcome = "partial" if completed_steps else "failed"
+    elif total_steps and completed_steps == total_steps:
+        outcome = "success"
+    elif plan_status == "finished":
+        # A terminal Plan with unfinished steps must never be presented as success.
+        outcome = "partial" if completed_steps else "failed"
+    else:
+        outcome = "in_progress"
+
+    return {
+        "outcome": outcome,
+        "total_steps": total_steps,
+        "completed_steps": completed_steps,
+        "failed_steps": failed_steps,
+    }
+
+
 class PlanRow(Base):
     """plans 表——一个 Team 同时只有一个活跃 Plan。"""
 
@@ -39,13 +63,19 @@ class PlanRow(Base):
         )
 
     def to_dict(self) -> dict:
+        steps = json.loads(self.steps)
+        report = json.loads(self.report) if self.report else None
+        summary = summarize_plan_steps(steps, self.status)
+        if report and report.get("outcome"):
+            summary["outcome"] = report["outcome"]
         return {
             "id": self.id,
             "team_id": self.team_id,
             "task": self.task,
-            "steps": json.loads(self.steps),
+            "steps": steps,
             "status": self.status,
             "world_id": self.world_id,
             "created_at": self.created_at,
-            "report": json.loads(self.report) if self.report else None,
+            "report": report,
+            **summary,
         }

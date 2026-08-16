@@ -114,6 +114,14 @@ class TestPrefixWorkerSse:
         obj = json.loads(result[6:].strip())
         assert obj["type"] == "step.worker.custom_event"
 
+    def test_worker_error_normalizes_message_for_frontend(self):
+        raw = self._make_worker_event("worker.error", {"message": "Request timed out"})
+        result = _prefix_worker_sse(raw, "s1")
+        obj = json.loads(result[6:].strip())
+
+        assert obj["type"] == "step.worker_error"
+        assert obj["data"]["error"] == "Request timed out"
+
     def test_non_data_passthrough(self):
         """非 data: 开头的行原样返回。"""
         raw = "not a data line\n"
@@ -234,3 +242,21 @@ class TestFindAgentName:
     def test_none_returns_all(self):
         engine = self._make_engine()
         assert engine._find_agent_name(None) == "全员"
+
+
+@pytest.mark.asyncio
+async def test_compile_report_calls_partial_execution_partial(tmp_path):
+    engine = TeamEngine(
+        team={"id": "t1", "name": "测试团队", "description": "测试任务", "roles": []},
+        db=None,  # type: ignore[arg-type]
+    )
+    engine._workspace_root = str(tmp_path)
+    engine._agents = [{"id": "a1", "name": "岳书言", "role": "负责人"}]
+
+    report = await engine._compile_report([
+        StepResult(step_id="s1", step_title="步骤一", success=False, error="Request timed out"),
+        StepResult(step_id="s2", step_title="步骤二", success=True),
+    ])
+
+    assert "执行状态：部分完成：1/2 步完成，1 步失败" in report["content"]
+    assert "Request timed out" in report["content"]

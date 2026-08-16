@@ -73,6 +73,9 @@ def create_model_client(profile: LLMProfile = "think"):
         model=settings.llm_model,
         api_key=settings.llm_api_key,
         base_url=settings.llm_base_url,
+        # AutoGen/OpenAI 客户端有自己的请求超时；如果不显式传入，
+        # settings.agent_timeout_seconds 不会对 Worker 的模型请求生效。
+        timeout=float(settings.agent_timeout_seconds),
         max_tokens=settings.llm_max_tokens,
         model_info=model_info,  # type: ignore[arg-type]
         **create_options,

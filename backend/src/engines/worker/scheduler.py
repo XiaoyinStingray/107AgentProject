@@ -238,7 +238,7 @@ class WorkerScheduler:
         # 获取 Agent（从活跃注册表或创建新 Agent）
         try:
             from api.workers import _get_or_create_agent
-            agent = _get_or_create_agent(task.agent_id)
+            agent = await _get_or_create_agent(task.agent_id)
         except Exception as e:
             logger.error(f"[Scheduler] failed to create agent: {e}")
             return

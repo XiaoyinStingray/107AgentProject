@@ -294,10 +294,15 @@ async def start_duel(req: DuelRequest):
     from fastapi.responses import StreamingResponse
     from engines.worker.duel import run_duel
     from api.workers import _get_or_create_agent
+    from engines.agent_factory.loader import AgentNotFoundError, AgentRestoreError
 
     try:
-        agent_a = _get_or_create_agent(req.agent_a_id)
-        agent_b = _get_or_create_agent(req.agent_b_id)
+        agent_a = await _get_or_create_agent(req.agent_a_id)
+        agent_b = await _get_or_create_agent(req.agent_b_id)
+    except AgentNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except AgentRestoreError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"无法创建 Agent: {e}")
 

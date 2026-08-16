@@ -79,7 +79,11 @@ def _prefix_worker_sse(raw: str, step_id: str) -> str:
         return raw
     try:
         obj = _json.loads(raw[6:].strip())
-        obj["type"] = _WORKER_EVENT_MAP.get(obj.get("type", ""), f"step.{obj.get('type', '')}")
+        worker_type = obj.get("type", "")
+        obj["type"] = _WORKER_EVENT_MAP.get(worker_type, f"step.{worker_type}")
+        if worker_type == "worker.error":
+            data = obj.setdefault("data", {})
+            data["error"] = data.get("error") or data.get("message") or "Worker 执行失败"
         obj["step_id"] = step_id
         return f"data: {_json.dumps(obj, ensure_ascii=False)}\n\n"
     except Exception:
@@ -97,42 +101,85 @@ class TeamEngine:
         self._evolved_roles: dict[str, str] = {}
         self._model_client = None
         self._agents: list[dict] = []
+        self._prepared_steps: list[dict] | None = None
         self._agent_instances: dict[str, object] = {}
 
     # =================================================================
     # 主入口
     # =================================================================
 
-    async def execute(self, model_client, *, pre_steps=None, pre_plan_id=None) -> AsyncGenerator[str, None]:
+    async def prepare(self, model_client) -> str:
+        """Prepare and persist exactly one Plan for this Team run.
+
+        The API calls this before starting the background task so it can return
+        a stable plan_id immediately. ``execute`` then consumes the same steps
+        instead of decomposing the task and creating a second Plan.
+        """
+        self._model_client = model_client
+        task = self.team.get("description", "") or self.team.get("name", "")
+
+        # Idempotent within one TeamEngine/run: repeated preparation must reuse
+        # the already persisted Plan rather than creating another history row.
+        if self._plan_id and self._prepared_steps is not None and self._agents:
+            return self._plan_id
+
+        self._agents = await self._load_agents()
+        if not self._agents:
+            raise ValueError("Team 中没有有效的 Agent")
+
+        steps = await decompose_task(task, self._agents, model_client)
+        if not steps:
+            raise ValueError("任务分解失败——无法生成步骤")
+        for s in steps:
+            # 安全网：LLM 可能返回名字而非 UUID → 映射回 UUID
+            raw_assignee = s.get("assignee")
+            resolved = self._resolve_agent_id(raw_assignee)
+            if resolved != raw_assignee:
+                logger.info(f"[TeamEngine] assignee name→id: {raw_assignee!r} → {resolved!r}")
+            s["assignee"] = resolved
+            s["assignee_name"] = self._find_agent_name(resolved)
+
+        # Persist once. All later progress/results are written back to this ID.
+        self._plan_id = await self._create_plan_row(task, steps)
+        self._prepared_steps = steps
+        return self._plan_id
+
+    async def execute(
+        self,
+        model_client,
+        *,
+        pre_steps=None,
+        pre_plan_id=None,
+    ) -> AsyncGenerator[str, None]:
         self._model_client = model_client
         team_id = self.team["id"]
         task = self.team.get("description", "") or self.team.get("name", "")
 
-        self._agents = await self._load_agents()
-        if not self._agents:
-            yield _make_sse("team.error", {"error": "Team 中没有有效的 Agent"})
-            return
-
-        # API 可能已经预分解了步骤并创建了 Plan——复用，避免双重分解
-        if pre_steps is not None and pre_plan_id is not None:
-            steps = pre_steps
+        # Compatibility for callers that already prepared and persisted a Plan.
+        # The normal API path uses prepare(), which is idempotent and guarantees
+        # that one execution creates exactly one Plan row.
+        if pre_steps is not None or pre_plan_id is not None:
+            if pre_steps is None or pre_plan_id is None:
+                yield _make_sse("team.error", {
+                    "error": "pre_steps 与 pre_plan_id 必须同时提供",
+                })
+                return
+            if not self._agents:
+                self._agents = await self._load_agents()
+            if not self._agents:
+                yield _make_sse("team.error", {"error": "Team 中没有有效的 Agent"})
+                return
+            self._prepared_steps = pre_steps
             self._plan_id = pre_plan_id
         else:
-            steps = await decompose_task(task, self._agents, model_client)
-            if not steps:
-                yield _make_sse("team.error", {"error": "任务分解失败"})
+            try:
+                await self.prepare(model_client)
+            except ValueError as exc:
+                yield _make_sse("team.error", {"error": str(exc)})
                 return
-            for s in steps:
-                # 安全网：LLM 可能返回名字而非 UUID → 映射回 UUID
-                raw_assignee = s.get("assignee")
-                resolved = self._resolve_agent_id(raw_assignee)
-                if resolved != raw_assignee:
-                    logger.info(f"[TeamEngine] assignee name→id: {raw_assignee!r} → {resolved!r}")
-                s["assignee"] = resolved
-                s["assignee_name"] = self._find_agent_name(resolved)
 
-            # ── 先创建 PlanRow（确保 plan_id 立即可用）──
-            self._plan_id = await self._create_plan_row(task, steps)
+        # prepare() guarantees these values and is idempotent for this run.
+        steps = self._prepared_steps or []
 
         # ── 初始化工作区 ──
         self._workspace_root = init_team_workspace(
@@ -227,13 +274,14 @@ class TeamEngine:
             # === 获取 Agent ===
             agent = await self._get_agent_instance(aid)
             if agent is None:
+                agent_error = f"Agent {aid or '?'} 不可用"
                 yield _make_sse("step.worker_error", {
-                    "error": f"Agent {aid or '?'} 不可用", "recoverable": False,
+                    "error": agent_error, "recoverable": False,
                 }, step_id=sid)
-                sr = StepResult(sid, title, aid, aname, False, error=f"Agent {aid or '?'} 不可用")
+                sr = StepResult(sid, title, aid, aname, False, error=agent_error)
                 step_results.append(sr)
                 completed[sid] = sr
-                await self._update_plan_step(sid, "error")
+                await self._update_plan_step(sid, "error", {"error": agent_error})
                 continue
 
             # === 创建 Worker ===
@@ -295,8 +343,9 @@ class TeamEngine:
                     "steps_used": steps_used, "duration_secs": round(duration, 1),
                 }, step_id=sid)
             elif not error_msg:
+                error_msg = "Worker 未产生成功结果"
                 yield _make_sse("step.worker_error", {
-                    "error": "Worker 未产生成功结果", "recoverable": True,
+                    "error": error_msg, "recoverable": True,
                 }, step_id=sid)
 
             sr = StepResult(sid, title, aid, aname, success, files_created,
@@ -307,6 +356,7 @@ class TeamEngine:
             await self._update_plan_step(sid, "done" if success else "error", {
                 "files": files_created, "output_summary": output_summary,
                 "steps_used": steps_used, "duration_secs": round(duration, 1),
+                "error": error_msg or None,
             })
 
             # ── 角色演化 ──
@@ -321,10 +371,24 @@ class TeamEngine:
         report = await self._compile_report(step_results)
         total_dur = round(sum(r.duration_secs for r in step_results), 1)
         completed_count = sum(1 for r in step_results if r.success)
+        failed_count = len(step_results) - completed_count
+        outcome = (
+            "partial" if completed_count and failed_count
+            else "failed" if failed_count
+            else "success"
+        )
+        report.update({
+            "outcome": outcome,
+            "total_steps": len(steps),
+            "completed_steps": completed_count,
+            "failed_steps": failed_count,
+        })
 
         yield _make_sse("team_done", {
+            "outcome": outcome,
             "total_duration_secs": total_dur,
             "total_steps_completed": completed_count,
+            "failed_steps": failed_count,
             "total_steps": len(steps),
             "steps": [
                 {"step_title": r.step_title, "success": r.success,
@@ -342,6 +406,7 @@ class TeamEngine:
     # =================================================================
 
     async def _load_agents(self) -> list[dict]:
+        from engines.agent_factory.loader import AgentNotFoundError
         from models.agent_orm import AgentRow
 
         agents = []
@@ -350,7 +415,7 @@ class TeamEngine:
             result = await self.db.execute(select(AgentRow).where(AgentRow.id == aid))
             row = result.scalar_one_or_none()
             if not row:
-                continue
+                raise AgentNotFoundError(f"Agent {aid!r} 不存在或已被删除")
             try:
                 persona = _json.loads(row.persona_json)
                 name = persona.get("name", "") or row.name or aid[:8]
@@ -374,48 +439,20 @@ class TeamEngine:
         if agent_id in self._agent_instances:
             return self._agent_instances[agent_id]
 
-        from models.agent_orm import AgentRow
-        from models.agent import Persona, Background, Goal
-        from engines.agent_factory.factory import LifeAgent
-        from llm.client import create_model_client
+        from engines.agent_factory.loader import load_agent_for_execution
 
         logger.info(f"[TeamEngine] _get_agent_instance: loading agent {agent_id}")
-        try:
-            result = await self.db.execute(select(AgentRow).where(AgentRow.id == agent_id))
-            row = result.scalar_one_or_none()
-        except Exception as e:
-            logger.error(f"[TeamEngine] _get_agent_instance: DB query failed for {agent_id}: {e}")
-            return None
-
-        if not row:
-            logger.error(f"[TeamEngine] _get_agent_instance: AgentRow not found for id={agent_id}")
-            return None
-
-        try:
-            data = row.to_dict()
-            logger.debug(f"[TeamEngine] agent data keys: {list(data.keys())}")
-            persona = Persona(**data["persona"])
-            background = Background(**data["background"])
-            goals = [Goal(**g) for g in data.get("goals", [])]
-        except Exception as e:
-            logger.error(f"[TeamEngine] _get_agent_instance: failed to build persona/bg/goals for {agent_id}: {e}")
-            return None
-
-        try:
-            mc = self._model_client or create_model_client()
-        except Exception as e:
-            logger.error(f"[TeamEngine] _get_agent_instance: no model_client available: {e}")
-            return None
-
-        try:
-            agent = LifeAgent(id=row.id, persona=persona, background=background,
-                              goals=goals, model_client=mc, tools=[])
-        except Exception as e:
-            logger.error(f"[TeamEngine] _get_agent_instance: LifeAgent creation failed for {agent_id}: {e}")
-            return None
+        agent = await load_agent_for_execution(
+            agent_id,
+            db=self.db,
+            model_client=self._model_client,
+        )
 
         self._agent_instances[agent_id] = agent
-        logger.info(f"[TeamEngine] _get_agent_instance: agent {agent_id} ({persona.name}) created ok")
+        logger.info(
+            f"[TeamEngine] _get_agent_instance: agent {agent_id} "
+            f"({agent.persona.name}) restored ok"
+        )
         return agent
 
     # =================================================================
@@ -469,6 +506,16 @@ class TeamEngine:
     async def _compile_report(self, step_results: list[StepResult]) -> dict:
         task = self.team.get("description", "") or self.team.get("name", "")
         parts = [f"# {self.team.get('name', '团队')} 任务报告\n\n## 任务\n\n{task}\n"]
+
+        completed_count = sum(1 for result in step_results if result.success)
+        failed_count = len(step_results) - completed_count
+        if failed_count and completed_count:
+            result_summary = f"部分完成：{completed_count}/{len(step_results)} 步完成，{failed_count} 步失败"
+        elif failed_count:
+            result_summary = f"执行失败：{failed_count} 步失败"
+        else:
+            result_summary = f"全部完成：{completed_count}/{len(step_results)} 步完成"
+        parts.append(f"\n> **执行状态：{result_summary}**\n")
 
         # 构建 agent_id → role 映射（优先使用 team.roles，其次用 evolved_roles，最后用 agent 自带的 role）
         role_map: dict[str, str] = {}
