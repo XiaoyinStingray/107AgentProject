@@ -14,6 +14,7 @@ Phase 25: 扩展支持多 Agent 协作。
 import json
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -128,7 +129,7 @@ async def _persist_worker_state(entry: dict):
         pass  # 持久化失败不阻塞 Worker
 
 
-async def _restore_workers_from_disk(base_dir: str = None):
+async def _restore_workers_from_disk(base_dir: str | None = None):
     """从磁盘恢复已完成/运行中的 Worker（服务重启后调用）。"""
     from pathlib import Path
     import json as _json
@@ -158,7 +159,7 @@ async def _restore_workers_from_disk(base_dir: str = None):
             pass
 
 
-def _get_or_create_agent(agent_id: str) -> "LifeAgent":
+async def _get_or_create_agent(agent_id: str) -> Any:
     """从数据库或内存中获取 LifeAgent 实例。
 
     Phase 23: 从现有的 Agent Factory / DB 获取。
@@ -174,18 +175,31 @@ def _get_or_create_agent(agent_id: str) -> "LifeAgent":
         if agent_id in engine.agents:
             return engine.agents[agent_id]
 
+    # BUG-M10-013: 从数据库查找 Agent 真实名称
+    _agent_name = None
+    try:
+        from models.agent_orm import AgentRow
+        from db import async_session
+        async with async_session() as s:
+            from sqlalchemy import select
+            result = await s.execute(select(AgentRow).where(AgentRow.id == agent_id))
+            row = result.scalar_one_or_none()
+            if row:
+                _agent_name = row.name
+    except Exception:
+        pass
+
     # 创建临时 Agent（用于 Worker 模式——不需要 World 上下文）
     model_client = create_model_client()
     persona = Persona(
-        name=f"Worker-{agent_id[:8]}",
+        name=_agent_name or f"Worker-{agent_id[:8]}",
         mbti="ISTJ",
         narrative="高效的任务执行者",
-        traits=["organized", "thorough", "pragmatic"],
     )
     background = Background(
-        profession="研究员",
+        hometown="",
         education="未知",
-        experience="多年的信息分析和报告撰写经验",
+        key_events=[],
     )
     return LifeAgent(
         id=agent_id,
@@ -236,7 +250,7 @@ async def execute_worker_task(req: WorkerExecuteRequest):
 
     # 获取 Agent
     try:
-        agent = _get_or_create_agent(req.agent_id)
+        agent = await _get_or_create_agent(req.agent_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"无法创建 Agent: {e}")
 
@@ -592,7 +606,7 @@ async def test_ssh_connection(req: TestConnectionRequest):
     return TestConnectionResponse(
         success=success,
         message=message,
-        latency_ms=latency,
+        latency_ms=int(latency),
         location=f"云端: {req.user}@{req.host}:{req.path}",
     )
 
@@ -672,7 +686,7 @@ async def fork_worker(run_id: str, req: ForkRequest):
         raise HTTPException(400, f"Worker {run_id!r} 已过期，无法分叉")
 
     try:
-        agent = _get_or_create_agent(entry.get("agent_id", ""))
+        agent = await _get_or_create_agent(entry.get("agent_id", ""))
     except Exception:
         # 用原始 worker 的 agent（如果还在内存中）
         agent = worker_obj._agent
