@@ -97,42 +97,85 @@ class TeamEngine:
         self._evolved_roles: dict[str, str] = {}
         self._model_client = None
         self._agents: list[dict] = []
+        self._prepared_steps: list[dict] | None = None
         self._agent_instances: dict[str, object] = {}
 
     # =================================================================
     # 主入口
     # =================================================================
 
-    async def execute(self, model_client, *, pre_steps=None, pre_plan_id=None) -> AsyncGenerator[str, None]:
+    async def prepare(self, model_client) -> str:
+        """Prepare and persist exactly one Plan for this Team run.
+
+        The API calls this before starting the background task so it can return
+        a stable plan_id immediately. ``execute`` then consumes the same steps
+        instead of decomposing the task and creating a second Plan.
+        """
+        self._model_client = model_client
+        task = self.team.get("description", "") or self.team.get("name", "")
+
+        # Idempotent within one TeamEngine/run: repeated preparation must reuse
+        # the already persisted Plan rather than creating another history row.
+        if self._plan_id and self._prepared_steps is not None and self._agents:
+            return self._plan_id
+
+        self._agents = await self._load_agents()
+        if not self._agents:
+            raise ValueError("Team 中没有有效的 Agent")
+
+        steps = await decompose_task(task, self._agents, model_client)
+        if not steps:
+            raise ValueError("任务分解失败——无法生成步骤")
+        for s in steps:
+            # 安全网：LLM 可能返回名字而非 UUID → 映射回 UUID
+            raw_assignee = s.get("assignee")
+            resolved = self._resolve_agent_id(raw_assignee)
+            if resolved != raw_assignee:
+                logger.info(f"[TeamEngine] assignee name→id: {raw_assignee!r} → {resolved!r}")
+            s["assignee"] = resolved
+            s["assignee_name"] = self._find_agent_name(resolved)
+
+        # Persist once. All later progress/results are written back to this ID.
+        self._plan_id = await self._create_plan_row(task, steps)
+        self._prepared_steps = steps
+        return self._plan_id
+
+    async def execute(
+        self,
+        model_client,
+        *,
+        pre_steps=None,
+        pre_plan_id=None,
+    ) -> AsyncGenerator[str, None]:
         self._model_client = model_client
         team_id = self.team["id"]
         task = self.team.get("description", "") or self.team.get("name", "")
 
-        self._agents = await self._load_agents()
-        if not self._agents:
-            yield _make_sse("team.error", {"error": "Team 中没有有效的 Agent"})
-            return
-
-        # API 可能已经预分解了步骤并创建了 Plan——复用，避免双重分解
-        if pre_steps is not None and pre_plan_id is not None:
-            steps = pre_steps
+        # Compatibility for callers that already prepared and persisted a Plan.
+        # The normal API path uses prepare(), which is idempotent and guarantees
+        # that one execution creates exactly one Plan row.
+        if pre_steps is not None or pre_plan_id is not None:
+            if pre_steps is None or pre_plan_id is None:
+                yield _make_sse("team.error", {
+                    "error": "pre_steps 与 pre_plan_id 必须同时提供",
+                })
+                return
+            if not self._agents:
+                self._agents = await self._load_agents()
+            if not self._agents:
+                yield _make_sse("team.error", {"error": "Team 中没有有效的 Agent"})
+                return
+            self._prepared_steps = pre_steps
             self._plan_id = pre_plan_id
         else:
-            steps = await decompose_task(task, self._agents, model_client)
-            if not steps:
-                yield _make_sse("team.error", {"error": "任务分解失败"})
+            try:
+                await self.prepare(model_client)
+            except ValueError as exc:
+                yield _make_sse("team.error", {"error": str(exc)})
                 return
-            for s in steps:
-                # 安全网：LLM 可能返回名字而非 UUID → 映射回 UUID
-                raw_assignee = s.get("assignee")
-                resolved = self._resolve_agent_id(raw_assignee)
-                if resolved != raw_assignee:
-                    logger.info(f"[TeamEngine] assignee name→id: {raw_assignee!r} → {resolved!r}")
-                s["assignee"] = resolved
-                s["assignee_name"] = self._find_agent_name(resolved)
 
-            # ── 先创建 PlanRow（确保 plan_id 立即可用）──
-            self._plan_id = await self._create_plan_row(task, steps)
+        # prepare() guarantees these values and is idempotent for this run.
+        steps = self._prepared_steps or []
 
         # ── 初始化工作区 ──
         self._workspace_root = init_team_workspace(
@@ -342,6 +385,7 @@ class TeamEngine:
     # =================================================================
 
     async def _load_agents(self) -> list[dict]:
+        from engines.agent_factory.loader import AgentNotFoundError
         from models.agent_orm import AgentRow
 
         agents = []
@@ -350,7 +394,7 @@ class TeamEngine:
             result = await self.db.execute(select(AgentRow).where(AgentRow.id == aid))
             row = result.scalar_one_or_none()
             if not row:
-                continue
+                raise AgentNotFoundError(f"Agent {aid!r} 不存在或已被删除")
             try:
                 persona = _json.loads(row.persona_json)
                 name = persona.get("name", "") or row.name or aid[:8]
@@ -374,48 +418,20 @@ class TeamEngine:
         if agent_id in self._agent_instances:
             return self._agent_instances[agent_id]
 
-        from models.agent_orm import AgentRow
-        from models.agent import Persona, Background, Goal
-        from engines.agent_factory.factory import LifeAgent
-        from llm.client import create_model_client
+        from engines.agent_factory.loader import load_agent_for_execution
 
         logger.info(f"[TeamEngine] _get_agent_instance: loading agent {agent_id}")
-        try:
-            result = await self.db.execute(select(AgentRow).where(AgentRow.id == agent_id))
-            row = result.scalar_one_or_none()
-        except Exception as e:
-            logger.error(f"[TeamEngine] _get_agent_instance: DB query failed for {agent_id}: {e}")
-            return None
-
-        if not row:
-            logger.error(f"[TeamEngine] _get_agent_instance: AgentRow not found for id={agent_id}")
-            return None
-
-        try:
-            data = row.to_dict()
-            logger.debug(f"[TeamEngine] agent data keys: {list(data.keys())}")
-            persona = Persona(**data["persona"])
-            background = Background(**data["background"])
-            goals = [Goal(**g) for g in data.get("goals", [])]
-        except Exception as e:
-            logger.error(f"[TeamEngine] _get_agent_instance: failed to build persona/bg/goals for {agent_id}: {e}")
-            return None
-
-        try:
-            mc = self._model_client or create_model_client()
-        except Exception as e:
-            logger.error(f"[TeamEngine] _get_agent_instance: no model_client available: {e}")
-            return None
-
-        try:
-            agent = LifeAgent(id=row.id, persona=persona, background=background,
-                              goals=goals, model_client=mc, tools=[])
-        except Exception as e:
-            logger.error(f"[TeamEngine] _get_agent_instance: LifeAgent creation failed for {agent_id}: {e}")
-            return None
+        agent = await load_agent_for_execution(
+            agent_id,
+            db=self.db,
+            model_client=self._model_client,
+        )
 
         self._agent_instances[agent_id] = agent
-        logger.info(f"[TeamEngine] _get_agent_instance: agent {agent_id} ({persona.name}) created ok")
+        logger.info(
+            f"[TeamEngine] _get_agent_instance: agent {agent_id} "
+            f"({agent.persona.name}) restored ok"
+        )
         return agent
 
     # =================================================================

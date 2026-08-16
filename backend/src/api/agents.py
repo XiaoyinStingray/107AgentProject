@@ -24,7 +24,7 @@ from engines.persona.remixer import (
     RemixGenerationError,
     RemixNoChangesError,
 )
-from models.agent import AgentCreate, AgentResponse, Persona, Background, Goal, EmotionalState
+from models.agent import AgentCreate, AgentResponse, Persona, Background, Goal
 from models.agent_orm import AgentRow
 from models.remix import RemixDraft, RemixRequest, RemixResponse
 from models.world_orm import WorldRow
@@ -63,21 +63,12 @@ def get_persona_remixer() -> PersonaRemixer:
 
 async def _rebuild_agent_from_row(row: AgentRow) -> LifeAgent:
     """从数据库行重建 LifeAgent 实例（不调用 LLM）。"""
-    factory = get_agent_factory()
-    persona = Persona(**row.to_dict()["persona"])
-    background = Background(**row.to_dict()["background"])
-    goals = [Goal(**g) for g in row.to_dict()["goals"]]
-    agent = factory.create_from_persona(
-        agent_id=row.id,
-        persona=persona,
-        background=background,
-        goals=goals,
+    from engines.agent_factory.loader import build_agent_from_row
+
+    return build_agent_from_row(
+        row,
+        model_client=get_agent_factory().model_client,
     )
-    agent.emotional_state = EmotionalState(**row.to_dict()["emotional_state"])
-    agent.energy = row.energy
-    agent.created_at = row.created_at
-    agent.updated_at = row.updated_at
-    return agent
 
 
 def _draft_from_row(row: AgentRow) -> RemixDraft:

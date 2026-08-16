@@ -404,6 +404,21 @@ async def execute_pipeline(pipeline_id: str, req: PipelineExecuteRequest = None)
     if not valid:
         raise HTTPException(status_code=400, detail=f"管道无效: {msg}")
 
+    # Validate every node before opening the SSE stream.  A deleted Agent must
+    # fail explicitly instead of being replaced by a generic Worker mid-run.
+    from engines.agent_factory.loader import (
+        AgentNotFoundError,
+        AgentRestoreError,
+        validate_execution_agent_id,
+    )
+    try:
+        for agent_id in {node.agent_id for node in pipeline.nodes}:
+            await validate_execution_agent_id(agent_id)
+    except AgentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except AgentRestoreError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     from pathlib import Path
     from api.workers import _create_workspace
     workspace = _create_workspace(req.workspace_type, req.workspace_config or {}, f"pipeline-{pipeline_id}")
@@ -413,7 +428,7 @@ async def execute_pipeline(pipeline_id: str, req: PipelineExecuteRequest = None)
 
     async def get_agent(agent_id: str):
         from api.workers import _get_or_create_agent
-        return _get_or_create_agent(agent_id)
+        return await _get_or_create_agent(agent_id)
 
     from engines.worker.pipeline_engine import PipelineEngine
     engine = PipelineEngine()
