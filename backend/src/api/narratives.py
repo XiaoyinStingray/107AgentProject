@@ -44,6 +44,7 @@ class NarrativeGenResponse(BaseModel):
     style: str
     agent_id: str
     generated_at: str
+    events_count: int = 0  # World 事件数量，0 时表示无事件
 
 
 class ReportRequest(BaseModel):
@@ -130,6 +131,7 @@ async def _generate_narrative(
         style=result.style.value,
         agent_id=result.agent_id,
         generated_at=result.generated_at,
+        events_count=len(sim_events),
     )
 
 
@@ -280,18 +282,45 @@ async def generate_report(
 # ── 71: P3 叙事风格 ──
 
 @router.post("/microfilm", response_model=NarrativeGenResponse)
-async def generate_microfilm(req: NarrativeGenRequest):
+async def generate_microfilm(
+    req: NarrativeGenRequest,
+    db: AsyncSession = Depends(get_db),
+    engine: NarrativeEngine = Depends(get_narrative_engine),
+):
     """微电影大纲"""
-    return await _generate_narrative(req, NarrativeStyle.MICROFILM)
+    try:
+        return await _generate_narrative(NarrativeStyle.MICROFILM, req, db, engine)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"叙事生成失败: {str(e)}")
 
 
 @router.post("/serial", response_model=NarrativeGenResponse)
-async def generate_serial(req: NarrativeGenRequest):
+async def generate_serial(
+    req: NarrativeGenRequest,
+    db: AsyncSession = Depends(get_db),
+    engine: NarrativeEngine = Depends(get_narrative_engine),
+):
     """连载小说"""
-    return await _generate_narrative(req, NarrativeStyle.SERIAL)
+    try:
+        return await _generate_narrative(NarrativeStyle.SERIAL, req, db, engine)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"叙事生成失败: {str(e)}")
 
 
 @router.post("/selfportrait", response_model=NarrativeGenResponse)
-async def generate_selfportrait(req: NarrativeGenRequest):
+async def generate_selfportrait(
+    req: NarrativeGenRequest,
+    db: AsyncSession = Depends(get_db),
+    engine: NarrativeEngine = Depends(get_narrative_engine),
+):
     """Agent 自画像"""
-    return await _generate_narrative(req, NarrativeStyle.SELFPORTRAIT)
+    try:
+        return await _generate_narrative(NarrativeStyle.SELFPORTRAIT, req, db, engine)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"叙事生成失败: {str(e)}")

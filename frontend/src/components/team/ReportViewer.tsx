@@ -14,13 +14,45 @@ interface Props {
 function renderMarkdown(md: string): string {
   // 先处理代码块（优先级最高 —— 防止内部内容被后续正则误伤）
   const codeBlocks: string[] = [];
-  let html = md.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, lang, code) => {
+
+  // 策略：逐行扫描，找到 ``` 开头和结尾的行，提取中间内容
+  const lines = md.split('\n');
+  const resultLines: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    // 检查是否是代码块开始行（``` 开头，可选语言标签）
+    const startMatch = line.match(/^`{3,4}(\w*)[ \t]*$/);
+    if (startMatch) {
+      const lang = startMatch[1] || '';
+      const codeLines: string[] = [];
+      i++;
+      // 找到代码块结束行
+      while (i < lines.length && !lines[i].match(/^`{3,4}[ \t]*$/)) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      // 跳过结束行
+      if (i < lines.length) i++;
+      // 存储代码块
+      const idx = codeBlocks.length;
+      codeBlocks.push({ lang, code: codeLines.join('\n').trimEnd() } as any);
+      resultLines.push(`%%CODEBLOCK_${idx}%%`);
+    } else {
+      resultLines.push(line);
+      i++;
+    }
+  }
+  let html = resultLines.join('\n');
+
+  // 兜底：处理逐行扫描未捕获的代码块（例如结尾 ``` 后有内容、或没有独立成行）
+  html = html.replace(/```(\w*)[ \t]*(?:\r?\n)([\s\S]*?)```/g, (_m, lang, code) => {
     const idx = codeBlocks.length;
-    codeBlocks.push({ lang, code: code.trimEnd() } as any);
+    codeBlocks.push({ lang: lang || '', code: code.trimEnd() } as any);
     return `%%CODEBLOCK_${idx}%%`;
   });
 
-  // 转义 HTML
+  // 转义 HTML（在代码块提取之后，避免转义代码内容中的 < > &）
   html = html
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 

@@ -347,6 +347,22 @@ async def finish_world(
     return {"status": "finished", "world_id": world_id}
 
 
+async def _resolve_agent_name(db: AsyncSession, agent_id: str) -> str | None:
+    """查询 Agent 的显示名称（人格名 > 数据库名 > ID 前缀）。"""
+    from models.agent_orm import AgentRow as _AgentRow
+    result = await db.execute(
+        select(_AgentRow).where(_AgentRow.id == agent_id)
+    )
+    row = result.scalar_one_or_none()
+    if not row:
+        return None
+    try:
+        persona = json.loads(row.persona_json)
+        return persona.get("name", "") or row.name or agent_id[:8]
+    except Exception:
+        return row.name or agent_id[:8]
+
+
 @router.post("/{world_id}/inject")
 async def inject_event(
     world_id: str,
@@ -391,6 +407,7 @@ async def inject_event(
     description = event.get("description")
     injection_type = event.get("type", "world_event")
     target_agent_id = event.get("target_agent_id", None)
+    target_agent_id_2 = event.get("target_agent_id_2", None)
     if not isinstance(description, str) or not description.strip():
         raise HTTPException(
             status_code=400,
@@ -413,27 +430,33 @@ async def inject_event(
             status_code=400,
             detail="target_agent_id must be a string or null",
         )
+    if target_agent_id_2 is not None and not isinstance(target_agent_id_2, str):
+        raise HTTPException(
+            status_code=400,
+            detail="target_agent_id_2 must be a string or null",
+        )
+
+    # 构建目标列表：relationship_change 包含两个 Agent
+    target_ids = []
+    if target_agent_id:
+        target_ids.append(target_agent_id)
+    if injection_type == "relationship_change" and target_agent_id_2:
+        target_ids.append(target_agent_id_2)
 
     injected_event = engine.inject_event(
         description,
         event_type=injection_type,
-        target_agent_ids=[target_agent_id] if target_agent_id else [],
+        target_agent_ids=target_ids,
     )
 
-    # 查询 target agent name
+    # 查询 target agent name(s)
     target_agent_name = None
     if target_agent_id:
-        from models.agent_orm import AgentRow as _AgentRow
-        agent_result = await db.execute(
-            select(_AgentRow).where(_AgentRow.id == target_agent_id)
-        )
-        agent_row = agent_result.scalar_one_or_none()
-        if agent_row:
-            try:
-                persona = json.loads(agent_row.persona_json)
-                target_agent_name = persona.get("name", "") or agent_row.name or target_agent_id[:8]
-            except Exception:
-                target_agent_name = agent_row.name or target_agent_id[:8]
+        target_agent_name = await _resolve_agent_name(db, target_agent_id)
+    if target_agent_id_2 and target_agent_name:
+        name2 = await _resolve_agent_name(db, target_agent_id_2)
+        if name2:
+            target_agent_name = f"{target_agent_name} → {name2}"
 
     # 持久化干预记录
     intervention = InterventionRow(

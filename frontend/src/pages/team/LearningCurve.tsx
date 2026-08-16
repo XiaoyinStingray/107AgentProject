@@ -20,6 +20,11 @@ export default function LearningCurve({ teamId }: Props) {
   if (!teamId || !data || data.points.length < 1) return null;
 
   const { points, trend, total_plans } = data;
+  const avgScore = points.length > 0
+    ? Math.round(points.reduce((sum, p) => sum + p.completion_pct, 0) / points.length)
+    : 0;
+  const bestPoint = points.reduce((best, p) => p.completion_pct > best.completion_pct ? p : best, points[0]);
+  const trendIcon = trend === "上升" ? "📈" : trend === "下降" ? "📉" : "➡️";
 
   return (
     <Card>
@@ -37,20 +42,28 @@ export default function LearningCurve({ teamId }: Props) {
         </button>
       </div>
 
-      {/* 历史趋势（如有多次） */}
+      {/* 历史趋势柱状图 */}
       {points.length > 1 && (
-        <div className="flex items-end gap-1 h-12 mb-2">
-          {points.map((p) => (
-            <div key={p.index} className="flex-1 flex flex-col items-center" title={`${p.task}: ${p.completion_pct}%`}>
-              <div className="w-full rounded-t bg-accent-green/40" style={{ height: `${Math.max(4, p.completion_pct)}%` }} />
-              <span className="text-[8px] font-mono text-text-secondary/30 mt-0.5">{p.index}</span>
+        <div className="flex items-end justify-center gap-4 h-48 mb-2 border-b border-border/30 pb-1">
+          {points.map((p) => {
+            const height = Math.max(128, p.completion_pct);
+            return (
+            <div key={p.index} className="flex flex-col items-center" style={{ width: 32 }} title={`${p.task}: ${p.completion_pct}%`}>
+              <div className="w-full rounded-t bg-accent-green/70 transition-all" style={{ height: `${height}%`, minHeight: 128 }} />
+              <span className="text-[10px] font-mono text-text-secondary/60 mt-1.5">{p.index}</span>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
       <div className="text-[10px] font-mono text-text-secondary/40 mb-2">
-        {total_plans} 次任务 · {trend}
+        {total_plans} 次任务 · {trendIcon} {trend} · 平均 {avgScore}%
       </div>
+      {points.length > 1 && (
+        <div className="text-[10px] font-mono text-accent-green/60 mb-2">
+          最佳表现：第 {bestPoint.index} 次 ({bestPoint.completion_pct}%)
+        </div>
+      )}
 
       {/* LLM 评分结果 */}
       {score && (

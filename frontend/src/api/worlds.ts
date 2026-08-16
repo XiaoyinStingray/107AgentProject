@@ -127,11 +127,13 @@ export function useInjectEvent() {
       worldId,
       type,
       targetAgentId,
+      targetAgentId2,
       description,
     }: {
       worldId: string;
       type?: string;
       targetAgentId?: string | null;
+      targetAgentId2?: string | null;
       description: string;
     }) =>
       client.post<{
@@ -141,6 +143,7 @@ export function useInjectEvent() {
         description,
         type: type ?? "world_event",
         target_agent_id: targetAgentId ?? null,
+        target_agent_id_2: targetAgentId2 ?? null,
       }),
     onSuccess: (data, { worldId, type, targetAgentId, description }) => {
       // 乐观更新：直接将新记录插入缓存头部，不等 refetch

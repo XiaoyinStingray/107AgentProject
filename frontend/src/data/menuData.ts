@@ -18,9 +18,9 @@ export const MENU_SECTIONS: MenuSection[] = [
     title: "M1 铸造厂", route: "/agents",
     items: [
       { id: 1, emoji: "🎭", label: "创建 Agent", priority: "P0", anchor: "foundry" },
-      { id: 6, emoji: "🔄", label: "Agent Remix", priority: "P2", anchor: "item-6" },
+      { id: 6, emoji: "🔄", label: "Agent Remix", priority: "P2", anchor: "remix" },
       { id: 4, emoji: "🎯", label: "目标系统", priority: "P1", anchor: "goals" },
-      { id: 7, emoji: "📦", label: "模板库", priority: "P2", anchor: "item-7" },
+      { id: 7, emoji: "📦", label: "模板库", priority: "P2", anchor: "models" },
     ],
   },
   {
@@ -56,6 +56,7 @@ export const MENU_SECTIONS: MenuSection[] = [
     title: "M5 叙事工厂", route: "/narratives",
     items: [
       { id: 29, emoji: "📖", label: "小说化叙事", priority: "P1", anchor: "story" },
+      { id: 72, emoji: "📔", label: "Agent 日记", priority: "P1", anchor: "diary" },
       { id: 30, emoji: "✉️", label: "未来的信", priority: "P2", anchor: "letter" },
       { id: 31, emoji: "💬", label: "平行对话", priority: "P2", anchor: "parallel" },
       { id: 32, emoji: "🎙️", label: "播客脚本", priority: "P2", anchor: "podcast" },

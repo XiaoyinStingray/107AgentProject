@@ -42,11 +42,13 @@ export default function EventFeed({
     };
   }, []);
 
-  // 新事件到达 → 自动滚底
+  // 新事件到达 → 自动滚底（仅当用户已在底部附近时触发）
   useEffect(() => {
     if (userScrolledUp) return;
     const el = containerRef.current;
-    if (el) {
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceFromBottom < 150) {
       el.scrollTop = el.scrollHeight;
     }
   }, [events, userScrolledUp]);
@@ -126,7 +128,10 @@ export default function EventFeed({
 
 function EventRow({ event }: { event: SSEEvent }) {
   const visual = EVENT_VISUALS[event.type];
-  const actor = event.agent_name ?? "WORLD";
+  const isInjected = !!event.data?.injected;
+  const targetNames: string[] = isInjected ? ((event.data?.target_names as string[]) ?? []) : [];
+  // 使用 || 而非 ?? ——空字符串也应回退到默认值
+  const actor = event.agent_name || "WORLD";
 
   return (
     <article
@@ -136,6 +141,9 @@ function EventRow({ event }: { event: SSEEvent }) {
         <span className={visual.text}>{visual.label}</span>
         <span className="text-text-secondary/60">Tick #{event.tick}</span>
         <span className="ml-auto text-text-secondary">{actor}</span>
+        {isInjected && targetNames.length > 0 && (
+          <span className="text-accent-orange/80">→ {targetNames.join(", ")}</span>
+        )}
       </div>
       <p className="text-sm text-text-primary mt-1 leading-relaxed">
         {formatEventDescription(event)}
@@ -182,18 +190,30 @@ function ConflictMeta({ event }: { event: SSEEvent }) {
 }
 
 function formatEventDescription(event: SSEEvent): string {
+  const stripMarkers = (t: string) => {
+    let cleaned = t.replace(/\[END_TICK\]/g, "").trim();
+    // 清除 DSML 标签：支持 <||DSML||...>、< | | DSML | | ...>、</ | | DSML | | ...> 等格式（包括跨行）
+    // 关键：| 和 | 之间可能有空格（如 < | | DSML | |）
+    cleaned = cleaned.replace(/<\/?\s*\|\s*\|\s*DSML\s*\|\s*\|[^>]*>/gs, "").trim();
+    cleaned = cleaned.replace(/<\/?\s*\|\s*\|\s*DSML\s*\|\s*\|/g, "").trim();
+    cleaned = cleaned.replace(/\|\s*\|\s*DSML\s*\|\s*\|\s*>/g, "").trim();
+    cleaned = cleaned.replace(/\|\s*\|\s*DSML\s*\|\s*\|/g, "").trim();
+    // 清除 tool_calls 残留
+    cleaned = cleaned.replace(/tool_calls/g, "").trim();
+    return cleaned;
+  };
   if (event.type === "agent_message") {
-    return event.message ?? event.description ?? "Agent 发送了一条消息";
+    const raw = event.message ?? event.description ?? "Agent 发送了一条消息";
+    return stripMarkers(raw);
   }
   if (event.type === "agent_action") {
     const action = event.action ?? "执行行动";
     const target = event.target ? ` → ${event.target}` : "";
-    const message = event.message ? `：${event.message}` : "";
+    const message = event.message ? `：${stripMarkers(event.message)}` : "";
     return `${action}${target}${message}`;
   }
-  return (
-    event.description ?? event.message ?? event.content ?? "未命名事件"
-  );
+  const raw = event.description ?? event.message ?? event.content ?? "未命名事件";
+  return stripMarkers(raw);
 }
 
 function formatSignedNumber(value: number): string {
@@ -211,23 +231,23 @@ const EVENT_VISUALS: Record<
   },
   agent_message: {
     label: "MESSAGE",
-    border: "border-accent-green",
-    text: "text-accent-green",
+    border: "border-accent-purple",
+    text: "text-accent-purple",
   },
   agent_action: {
     label: "ACTION",
-    border: "border-accent-orange",
-    text: "text-accent-orange",
+    border: "border-accent-green",
+    text: "text-accent-green",
   },
   world_event: {
     label: "WORLD",
-    border: "border-accent-purple",
-    text: "text-accent-purple",
+    border: "border-accent-orange",
+    text: "text-accent-orange",
   },
   relationship_change: {
     label: "RELATION",
-    border: "border-accent-purple",
-    text: "text-accent-purple",
+    border: "border-accent-cyan",
+    text: "text-accent-cyan",
   },
   conflict_detected: {
     label: "CONFLICT",

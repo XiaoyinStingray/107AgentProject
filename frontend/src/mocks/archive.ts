@@ -25,10 +25,14 @@ export interface ArchiveTabMeta {
 }
 
 export const ARCHIVE_TABS: ArchiveTabMeta[] = [
-  { key: "highlights", label: "精彩回放", emoji: "🎬", priority: "P2", available: true },
-  { key: "templates", label: "实验模板", emoji: "🧪", priority: "P2", available: true },
-  { key: "achievements", label: "成就系统", emoji: "🎖️", priority: "P2", available: true },
-  { key: "export", label: "研究报告导出", emoji: "📄", priority: "P2", available: true },
+  { key: "highlights", label: "精彩回放", emoji: "\u{1F3AC}", priority: "P2", available: true },
+  { key: "templates", label: "实验模板", emoji: "\u{1F9EA}", priority: "P2", available: true },
+  { key: "achievements", label: "成就系统", emoji: "\u{1F396}\u{FE0F}", priority: "P2", available: true },
+  { key: "export", label: "研究报告导出", emoji: "\u{1F4C4}", priority: "P2", available: true },
+  // P3 占位 Tab
+  { key: "market", label: "Agent 市场", emoji: "\u{1F3EA}", priority: "P3", available: false },
+  { key: "dashboard", label: "社区数据大屏", emoji: "\u{1F4CA}", priority: "P3", available: false },
+  { key: "api", label: "API 开放", emoji: "\u{1F50C}", priority: "P3", available: false },
 ];
 
 /** Mock 精彩回放记录 */

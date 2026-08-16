@@ -238,11 +238,28 @@ class WorldEngine(
 
         State 4: 使用 continuous 模式——Agent 的 system prompt 只在初始化时设置，
         世界状态以 UserMessage 追加到消息历史末尾。Agent 拥有持续的意识流。
+
+        Injected (director intervention) events are excluded from the shared
+        context.  For agent_message / agent_action injections the target agent
+        receives a private hint so that only it reacts to the director message.
         """
         self._activate_pending_instruction_routes()
         shared_context = self._build_world_context()
+        # 收集最近的注入事件，按目标 Agent 分组
+        injected_by_target: dict[str, list[str]] = {}
+        for event in self.events[-10:]:
+            if not event.data.get("injected"):
+                continue
+            for tid in event.target_agent_ids:
+                injected_by_target.setdefault(tid, []).append(
+                    f"[导演干预] {event.description}"
+                )
         for agent in self.agents.values():
-            context = self._build_agent_context(agent, shared_context)
+            extra = ""
+            private_hints = injected_by_target.get(agent.id)
+            if private_hints:
+                extra = "\n🎬 导演悄悄话（仅你可见）:\n" + "\n".join(private_hints)
+            context = self._build_agent_context(agent, shared_context + extra)
             memories = await self._retriever.retrieve(agent.id, context)
             agent.inject_context(context, memories, mode="continuous")
 
@@ -346,8 +363,8 @@ class WorldEngine(
                 type="agent_message",
                 source_agent_id=source_id,
                 target_agent_ids=[target_id] if target_id else [],
-                description=f"{msg.get('from_name', '?')} 对 {msg.get('to_name', '?')} 说: {content}",
-                data={"tone": msg.get("tone", "neutral"), "message": content},
+                description=f"{msg.get('from_name', '?')} 对 {msg.get('to_name', '?')} 说: {WorldMessageMixin._clean_group_content(content)}",
+                data={"tone": msg.get("tone", "neutral"), "message": WorldMessageMixin._clean_group_content(content)},
                 created_at=datetime.now(timezone.utc).isoformat(),
             )
             events.append(event)
@@ -372,7 +389,7 @@ class WorldEngine(
                     tick=t.get("tick", self.current_tick),
                     type="thought_stream",
                     source_agent_id=agent_id,
-                    description=t.get("thought", ""),
+                    description=WorldMessageMixin._clean_group_content(t.get("thought", "")),
                     created_at=datetime.now(timezone.utc).isoformat(),
                 ))
         return events

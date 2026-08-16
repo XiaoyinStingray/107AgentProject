@@ -401,13 +401,17 @@ def _event_to_dict(event: SimEvent, name_map: dict | None = None) -> dict:
     name_map = name_map or {}
     agent_id = event.source_agent_id or ""
 
+    # 注入事件（导演干预台）：来源显示为"world"
+    is_injected = bool(event.data.get("injected")) if event.data else False
+    display_name = "world" if is_injected else name_map.get(agent_id, agent_id)
+
     base = {
         "id": event.id,
         "world_id": event.world_id,
         "tick": event.tick,
         "type": event.type,
         "agent_id": agent_id,
-        "agent_name": name_map.get(agent_id, agent_id),
+        "agent_name": display_name,
         "content": event.description,
         "data": event.data,
     }
@@ -417,6 +421,17 @@ def _event_to_dict(event: SimEvent, name_map: dict | None = None) -> dict:
         base["message"] = event.data.get("message", event.description) if event.data else event.description
         base["subtext"] = event.data.get("subtext", "") if event.data else ""
         base["tone"] = event.data.get("tone", "neutral") if event.data else "neutral"
+        # 目标 Agent（用于前端显示）
+        # 优先从 data.target_names 取（注入消息），否则从 target_agent_ids + name_map 取
+        target_names = event.data.get("target_names", []) if event.data else []
+        if target_names:
+            base["target"] = target_names[0]
+        elif event.target_agent_ids:
+            # 非注入消息：从 name_map 获取目标 Agent 名称
+            target_id = event.target_agent_ids[0]
+            base["target"] = name_map.get(target_id, "")
+        else:
+            base["target"] = ""
     elif event.type == "agent_action":
         base["action"] = event.data.get("action", "") if event.data else ""
         base["target"] = event.data.get("target", "") if event.data else ""

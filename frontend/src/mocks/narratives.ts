@@ -19,6 +19,7 @@ export interface NarrativeResult {
   agent_name: string;
   generated_at: string;
   word_count: number;
+  events_count?: number;
 }
 
 /** 风格元数据——驱动 UI Tab 渲染 */

@@ -158,6 +158,7 @@ describe("Step 24 DirectorIntervention — 渲染与基础交互", () => {
 
   it("shows target agent selector when switching to agent_message", () => {
     render(<DirectorIntervention />);
+    selectRunningWorld();
 
     // 切到 agent_message
     fireEvent.click(screen.getByRole("button", { name: /Agent 消息/ }));
@@ -167,6 +168,7 @@ describe("Step 24 DirectorIntervention — 渲染与基础交互", () => {
 
   it("shows target agent selector for agent_action", () => {
     render(<DirectorIntervention />);
+    selectRunningWorld();
 
     fireEvent.click(screen.getByRole("button", { name: /Agent 行动/ }));
     expect(screen.getByText("目标 Agent")).toBeInTheDocument();
@@ -174,21 +176,26 @@ describe("Step 24 DirectorIntervention — 渲染与基础交互", () => {
 
   it("shows target agent selector for relationship_change", () => {
     render(<DirectorIntervention />);
+    selectRunningWorld();
 
     fireEvent.click(screen.getByRole("button", { name: /关系变化/ }));
-    expect(screen.getByText("目标 Agent")).toBeInTheDocument();
+    expect(screen.getByText("源 Agent（发起方）")).toBeInTheDocument();
   });
 
   it("renders available agents as target candidates", () => {
     render(<DirectorIntervention />);
+    selectRunningWorld();
 
     fireEvent.click(screen.getByRole("button", { name: /Agent 消息/ }));
 
-    // MOCK_AGENTS 中的 Agent 名字应作为候选
-    // 注意：历史记录中也可能出现同名，用 getAllByText
-    for (const agent of MOCK_AGENTS) {
-      expect(screen.getAllByText(agent.name).length).toBeGreaterThan(0);
-    }
+    // 选中 World 的 agent_ids 为 ["mock-1", "mock-2"]，仅这两个 Agent 应显示为可选按钮
+    // Agent 按钮中包含名字 + MBTI，如“小明 INTJ-T”
+    expect(screen.getAllByText("小明").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("小红").length).toBeGreaterThan(0);
+    // mock-3（小刚）不在选中 World 中，不应作为可选 Agent 按钮出现
+    // 注意：小刚可能出现在干预历史中，但不应出现在 Agent 选择按钮中
+    const gangButtons = screen.queryAllByRole("button", { name: /小刚/ });
+    expect(gangButtons).toHaveLength(0);
   });
 });
 

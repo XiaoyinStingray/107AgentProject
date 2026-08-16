@@ -141,17 +141,46 @@ async def judge_versus(
 
 
 def _fallback_score(team_name: str, report: dict, task: str) -> dict:
-    """无 LLM 时的规则兜底评分。"""
+    """无 LLM 时的规则兜底评分——基于报告内容长度、结构、关键词等维度。"""
     content = report.get("content", "") if isinstance(report, dict) else str(report)
     length = len(content)
     steps = report.get("steps_count", 0) or report.get("completed_count", 0)
 
-    base = min(10, max(3, length // 150 + steps))
+    # 基础分：根据内容长度和步骤数
+    base = min(10, max(3, length // 200 + steps))
+
+    # 各维度差异化评分
+    has_team_section = "## 团队" in content or "团队" in content[:500]
+    has_result_section = "## 执行结果" in content or "执行结果" in content
+    has_files = "📄" in content or "产出文件" in content or "产出摘要" in content
+    has_summary = "产出摘要" in content or "summary" in content.lower()
+
+    scores = {
+        "completeness": {"score": min(10, base + (2 if has_result_section else 0) + (1 if has_files else 0)), "comment": f"报告{length}字，{'包含执行结果' if has_result_section else '缺少执行结果'}"},
+        "innovation": {"score": max(3, base - 2), "comment": "规则评估：无法判断创新性，建议 LLM 评审"},
+        "feasibility": {"score": max(3, base - 1), "comment": "规则评估：无法判断可行性，建议 LLM 评审"},
+        "clarity": {"score": min(10, base + (1 if has_team_section else 0)), "comment": f"报告结构{'清晰' if has_team_section and has_result_section else '一般'}"},
+        "collaboration": {"score": max(3, base - 2 + (2 if has_team_section else 0)), "comment": f"{'有团队分工信息' if has_team_section else '缺少团队分工信息'}"},
+        "depth": {"score": max(3, base - 2), "comment": "规则评估：无法判断深度，建议 LLM 评审"},
+        "practicality": {"score": max(3, base - 1 + (2 if has_files else 0)), "comment": f"{'有产出文件' if has_files else '无产出文件'}"},
+        "creativity": {"score": max(3, base - 3), "comment": "规则评估：无法判断创造力，建议 LLM 评审"},
+    }
+
+    strengths = []
+    if has_team_section: strengths.append("有团队分工")
+    if has_result_section: strengths.append("有执行结果")
+    if has_files: strengths.append("有产出文件")
+    if not strengths: strengths = ["报告已生成"]
+
+    weaknesses = ["无 LLM 深度评估"]
+    if not has_team_section: weaknesses.append("缺少团队信息")
+    if not has_result_section: weaknesses.append("缺少执行结果")
+
     return {
         "team_name": team_name,
-        "scores": {d["key"]: {"score": base, "comment": "规则评估"} for d in DIMENSIONS},
+        "scores": scores,
         "overall": base,
-        "strengths": ["报告已生成"],
-        "weaknesses": ["无 LLM 深度评估"],
-        "summary": f"规则评估：{length}字/{steps}步，综合{base}分",
+        "strengths": strengths,
+        "weaknesses": weaknesses,
+        "summary": f"规则评估：{length}字/{steps}步，综合{base}分（建议配置 LLM 获得更准确评分）",
     }

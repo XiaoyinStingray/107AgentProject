@@ -28,9 +28,16 @@ export default function DirectorIntervention() {
   const [worldId, setWorldId] = useState<string>("");
   const [type, setType] = useState<InjectionEventType>("world_event");
   const [targetAgentId, setTargetAgentId] = useState<string>("");
+  const [targetAgentId2, setTargetAgentId2] = useState<string>("");
   const [description, setDescription] = useState("");
   const [lastInjected, setLastInjected] = useState<InjectionRecord | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // 选中的 World——用于过滤 Agent 列表
+  const selectedWorld = worlds.find((w) => w.id === worldId);
+  const worldAgentIds = selectedWorld?.agent_ids ?? [];
+  const worldAgents = agents.filter((a) => worldAgentIds.includes(a.id));
+  const isRelationshipChange = type === "relationship_change";
 
   // 干预历史——从后端 interventions 表加载
   const { data: apiInterventions = [] } = useWorldInterventions(worldId || null);
@@ -48,10 +55,12 @@ export default function DirectorIntervention() {
   const selectedType = getInjectionTypeMeta(type);
   const needsTarget = selectedType?.needsTarget ?? false;
   const targetAgent = agents.find((a) => a.id === targetAgentId);
+  const targetAgent2 = agents.find((a) => a.id === targetAgentId2);
   const canInject =
     !!worldId &&
     description.trim().length > 0 &&
     (!needsTarget || !!targetAgentId) &&
+    (!isRelationshipChange || (!!targetAgentId && !!targetAgentId2 && targetAgentId !== targetAgentId2)) &&
     !injectEvent.isPending;
 
   const activeWorlds = worlds.filter(
@@ -66,9 +75,11 @@ export default function DirectorIntervention() {
   const handleInject = useCallback(async () => {
     if (!canInject) return;
     setErrorMsg(null);
-    const targetName = needsTarget
-      ? (targetAgent?.name ?? "未知")
-      : "世界";
+    const targetName = isRelationshipChange
+      ? `${targetAgent?.name ?? "未知"} → ${targetAgent2?.name ?? "未知"}`
+      : needsTarget
+        ? (targetAgent?.name ?? "未知")
+        : "世界";
     const desc = description.trim();
 
     try {
@@ -76,6 +87,7 @@ export default function DirectorIntervention() {
         worldId,
         type,
         targetAgentId: needsTarget ? targetAgentId : null,
+        targetAgentId2: isRelationshipChange ? targetAgentId2 : null,
         description: desc,
       });
     } catch (cause) {
@@ -93,7 +105,7 @@ export default function DirectorIntervention() {
     setLastInjected(record);
     setDescription("");
     setTimeout(() => setLastInjected(null), 2000);
-  }, [canInject, needsTarget, targetAgent, type, targetAgentId, description,
+  }, [canInject, needsTarget, isRelationshipChange, targetAgent, targetAgent2, type, targetAgentId, targetAgentId2, description,
       worldId, injectEvent]);
 
   return (
@@ -140,7 +152,7 @@ export default function DirectorIntervention() {
                       <button
                         key={world.id}
                         type="button"
-                        onClick={() => setWorldId(world.id)}
+                        onClick={() => { setWorldId(world.id); setTargetAgentId(""); setTargetAgentId2(""); }}
                         className={`
                           text-left px-3 py-2 rounded border text-xs font-mono transition-colors
                           ${isSelected
@@ -175,7 +187,7 @@ export default function DirectorIntervention() {
                     <button
                       key={t.key}
                       type="button"
-                      onClick={() => setType(t.key)}
+                      onClick={() => { setType(t.key); setTargetAgentId(""); setTargetAgentId2(""); }}
                       className={`
                         text-left p-2 rounded border text-xs font-mono transition-colors
                         ${isActive
@@ -201,26 +213,76 @@ export default function DirectorIntervention() {
             {needsTarget && (
               <div className="mb-4 animate-fade-in">
                 <label className="text-xs font-mono text-text-secondary mb-2 block">
-                  目标 Agent
+                  {isRelationshipChange ? "源 Agent（发起方）" : "目标 Agent"}
                 </label>
                 <div className="flex flex-wrap gap-2">
-                  {agents.length === 0 ? (
+                  {worldAgents.length === 0 ? (
                     <p className="text-xs font-mono text-text-secondary/60">
-                      暂无可选 Agent
+                      {worldId ? "该 World 中暂无可选 Agent" : "请先选择 World"}
                     </p>
                   ) : (
-                    agents.map((agent) => {
+                    worldAgents.map((agent) => {
                       const isSelected = agent.id === targetAgentId;
+                      const isDisabled = isRelationshipChange && agent.id === targetAgentId2;
                       return (
                         <button
                           key={agent.id}
                           type="button"
-                          onClick={() => setTargetAgentId(agent.id)}
+                          disabled={isDisabled}
+                          onClick={() => setTargetAgentId(isSelected ? "" : agent.id)}
                           className={`
                             flex items-center gap-1.5 px-2.5 py-1.5 rounded border text-xs font-mono transition-colors
-                            ${isSelected
-                              ? "border-accent-orange/60 bg-accent-orange/10 text-accent-orange"
-                              : "border-border bg-bg-secondary/60 text-text-secondary hover:border-text-secondary/40"
+                            ${isDisabled
+                              ? "border-border/30 bg-bg-secondary/20 text-text-secondary/30 cursor-not-allowed"
+                              : isSelected
+                                ? "border-accent-orange/60 bg-accent-orange/10 text-accent-orange"
+                                : "border-border bg-bg-secondary/60 text-text-secondary hover:border-text-secondary/40"
+                            }
+                          `.trim()}
+                        >
+                          <span className="w-5 h-5 rounded-full bg-accent-green/10 border border-accent-green/30 flex items-center justify-center text-xs shrink-0">
+                            {agent.name.charAt(0)}
+                          </span>
+                          {agent.name}
+                          <span className="text-text-secondary/50">
+                            {agent.persona.mbti}
+                          </span>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 关系变化——第二个 Agent 选择器（目标方） */}
+            {isRelationshipChange && (
+              <div className="mb-4 animate-fade-in">
+                <label className="text-xs font-mono text-text-secondary mb-2 block">
+                  目标 Agent（受影响方）
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {worldAgents.length === 0 ? (
+                    <p className="text-xs font-mono text-text-secondary/60">
+                      {worldId ? "该 World 中暂无可选 Agent" : "请先选择 World"}
+                    </p>
+                  ) : (
+                    worldAgents.map((agent) => {
+                      const isSelected = agent.id === targetAgentId2;
+                      const isDisabled = agent.id === targetAgentId;
+                      return (
+                        <button
+                          key={agent.id}
+                          type="button"
+                          disabled={isDisabled}
+                          onClick={() => setTargetAgentId2(isSelected ? "" : agent.id)}
+                          className={`
+                            flex items-center gap-1.5 px-2.5 py-1.5 rounded border text-xs font-mono transition-colors
+                            ${isDisabled
+                              ? "border-border/30 bg-bg-secondary/20 text-text-secondary/30 cursor-not-allowed"
+                              : isSelected
+                                ? "border-accent-orange/60 bg-accent-orange/10 text-accent-orange"
+                                : "border-border bg-bg-secondary/60 text-text-secondary hover:border-text-secondary/40"
                             }
                           `.trim()}
                         >
@@ -292,6 +354,16 @@ export default function DirectorIntervention() {
             {worldId && !canInject && needsTarget && !targetAgentId && (
               <p className="text-xs font-mono text-accent-red mt-2">
                 请选择目标 Agent
+              </p>
+            )}
+            {worldId && !canInject && isRelationshipChange && !!targetAgentId && !targetAgentId2 && (
+              <p className="text-xs font-mono text-accent-red mt-2">
+                请选择第二个 Agent（受影响方）
+              </p>
+            )}
+            {worldId && !canInject && isRelationshipChange && !!targetAgentId && !!targetAgentId2 && targetAgentId === targetAgentId2 && (
+              <p className="text-xs font-mono text-accent-red mt-2">
+                两个 Agent 不能相同
               </p>
             )}
             {errorMsg && (

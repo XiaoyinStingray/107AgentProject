@@ -5,7 +5,11 @@ import { useTeamStore } from "../../stores/useTeamStore";
 import StepCard from "./StepCard";
 import StepTerminal from "./StepTerminal";
 
-export default function StepTimeline() {
+interface Props {
+  agentNames?: Record<string, string>;
+}
+
+export default function StepTimeline({ agentNames }: Props) {
   const stepOrder = useTeamStore((s) => s.stepOrder);
   const steps = useTeamStore((s) => s.steps);
   const isRunning = useTeamStore((s) => s.isRunning);
@@ -47,7 +51,7 @@ export default function StepTimeline() {
                     }`}
                   />
                 )}
-                <StepCard step={step} isActive={id === activeStepId} />
+                <StepCard step={step} isActive={id === activeStepId} agentNames={agentNames} />
               </div>
             );
           })}

@@ -230,7 +230,7 @@ export default function SoloTheater() {
   // ── 投放前：设置区 ──
   if (!isRunning) {
     return (
-      <div className="p-6 max-w-2xl mx-auto animate-fade-in">
+      <div className="p-6 max-w-5xl mx-auto animate-fade-in">
         <div className="mb-6">
           <h1 className="text-xl font-mono text-accent-green">
             M2 单人剧场
@@ -311,13 +311,13 @@ export default function SoloTheater() {
 
         {/* Agent 选择 */}
         <Card className="mb-4">
-          <label className="block text-sm text-text-secondary font-mono mb-2">
-            选择 Agent
-            {agentsLoading && <span className="ml-2 text-xs">加载中...</span>}
-          </label>
-          <div className="grid grid-cols-1 gap-2">
+          <div className="flex items-center gap-2 mb-3">
+            <h2 className="text-sm font-mono text-text-secondary">选择 Agent</h2>
+            {agentsLoading && <span className="text-xs text-text-secondary/60">加载中...</span>}
+          </div>
+        <div className="grid grid-cols-3 gap-3">
             {agents.length === 0 && !agentsLoading && (
-              <p className="text-sm text-text-secondary py-4 text-center">
+              <p className="col-span-3 text-sm text-text-secondary py-4 text-center">
                 暂无 Agent，请先去「铸造厂」创建
               </p>
             )}
@@ -331,31 +331,24 @@ export default function SoloTheater() {
                     text-left p-3 rounded-lg border transition-colors
                     ${
                       isSelected
-                        ? "border-accent-green/60 bg-accent-green/5 ring-1 ring-accent-green/20"
-                        : "border-border bg-bg-card hover:border-text-secondary/40"
+                        ? "border-accent-green/60 bg-accent-green/10"
+                        : "border-border bg-bg-card hover:border-accent-green/30"
                     }
                   `}
                 >
                   <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full bg-accent-green/10 border border-accent-green/30 flex items-center justify-center text-sm select-none">
+                    <div className="w-10 h-10 rounded-full bg-accent-green/10 border border-accent-green/30 flex items-center justify-center text-lg select-none shrink-0">
                       {agent.name.charAt(0)}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <span className="font-mono text-sm text-text-primary">
-                        {agent.name}
-                      </span>
-                      <span className="ml-2 text-xs font-mono text-accent-purple/70">
-                        {agent.persona.mbti}
-                      </span>
-                    </div>
-                    {isSelected && (
-                      <span className="text-xs text-accent-green font-mono">
-                        ✓
-                      </span>
-                    )}
+                    <span className="font-mono text-sm text-text-primary">
+                      {agent.name}
+                    </span>
+                    <span className="ml-auto text-xs text-text-secondary">
+                      {isSelected ? "已选" : "未选"}
+                    </span>
                   </div>
-                  <p className="text-sm text-text-secondary mt-1 line-clamp-2 pl-10">
-                    {agent.persona.narrative}
+                  <p className="text-xs text-text-secondary mt-2">
+                    {agent.persona.mbti}
                   </p>
                 </button>
               );
@@ -510,7 +503,7 @@ export default function SoloTheater() {
       </div>
 
       {/* 三栏主体 */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 min-h-0 flex overflow-hidden">
         {/* 左栏：Agent 状态面板 + 目标 */}
         <div className="w-[260px] shrink-0 border-r border-border overflow-y-auto p-3 space-y-3">
           {enrichedAgent && (
@@ -527,7 +520,7 @@ export default function SoloTheater() {
         </div>
 
         {/* 中栏：思维流 */}
-        <ThoughtStream events={events} className="flex-1" />
+        <ThoughtStream events={events} className="flex-1 min-h-0" />
 
         {/* 右栏：事件统计 */}
         <div className="w-[200px] shrink-0 border-l border-border overflow-y-auto p-3">

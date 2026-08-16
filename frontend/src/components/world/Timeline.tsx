@@ -221,8 +221,8 @@ const TIMELINE_COLORS: Record<
   { dot: string; line: string }
 > = {
   relationship_change: {
-    dot: "border-accent-purple bg-accent-purple/30",
-    line: "bg-accent-purple/40",
+    dot: "border-accent-cyan bg-accent-cyan/30",
+    line: "bg-accent-cyan/40",
   },
   conflict: {
     dot: "border-accent-red bg-accent-red/30",
@@ -245,10 +245,10 @@ const TYPE_LABEL: Partial<Record<SSEEventType, string>> = {
 };
 
 const TYPE_BADGE: Partial<Record<SSEEventType, string>> = {
-  agent_message: "bg-accent-green/10 text-accent-green/80",
-  agent_action: "bg-accent-orange/10 text-accent-orange/80",
-  world_event: "bg-accent-purple/10 text-accent-purple/80",
-  relationship_change: "bg-accent-purple/10 text-accent-purple/80",
+  agent_message: "bg-accent-purple/10 text-accent-purple/80",
+  agent_action: "bg-accent-green/10 text-accent-green/80",
+  world_event: "bg-accent-orange/10 text-accent-orange/80",
+  relationship_change: "bg-accent-cyan/10 text-accent-cyan/80",
   conflict_detected: "bg-accent-red/10 text-accent-red/80",
   tick_boundary: "bg-bg-secondary/60 text-text-secondary/60",
   thought_stream: "bg-accent-blue/10 text-accent-blue/80",

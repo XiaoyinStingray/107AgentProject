@@ -14,6 +14,7 @@ export interface NarrativeResponse {
   style: string;
   agent_id: string;
   generated_at: string;
+  events_count: number;
 }
 
 /** 后端 NarrativeGenRequest 对应的请求体 */

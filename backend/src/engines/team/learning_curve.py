@@ -32,13 +32,20 @@ def compute_learning_curve(plans: list[dict]) -> dict:
         done = sum(1 for s in steps if s.get("status") == "done") if isinstance(steps, list) else 0
         total = len(steps) if isinstance(steps, list) else 0
         has_report = bool(plan.get("report"))
+        # 优先用 progress_pct，否则从步骤状态计算
+        if isinstance(plan.get("progress_pct"), (int, float)) and plan["progress_pct"] > 0:
+            completion_pct = round(plan["progress_pct"] * 100)
+        elif total > 0:
+            completion_pct = round(done / total * 100)
+        else:
+            completion_pct = 0
 
         points.append({
             "index": i + 1,
             "task": plan.get("task", f"任务{i+1}"),
             "total_steps": total,
             "completed_steps": done,
-            "completion_pct": round(plan.get("progress_pct", 0) * 100) if isinstance(plan.get("progress_pct"), (int, float)) else 0,
+            "completion_pct": completion_pct,
             "has_report": has_report,
             "created_at": str(plan.get("created_at", "")),
         })

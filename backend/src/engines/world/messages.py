@@ -147,6 +147,13 @@ class WorldMessageMixin:
         content = re.sub(
             r"调用工具:\s*\w+\(.*?\)", "", content, flags=re.DOTALL
         ).strip()
+        # Strip DSML tags (AutoGen internal markers)
+        # Support both <||DSML||...> and < | | DSML | | ...> (split pipes with spaces)
+        content = re.sub(r"<\/?\s*\|\s*\|\s*DSML\s*\|\s*\|[^>]*>", "", content, flags=re.DOTALL).strip()
+        content = re.sub(r"<\/?\s*\|\s*\|\s*DSML\s*\|\s*\|", "", content).strip()
+        content = re.sub(r"\|\s*\|\s*DSML\s*\|\s*\|\s*>", "", content).strip()
+        content = re.sub(r"\|\s*\|\s*DSML\s*\|\s*\|", "", content).strip()
+        content = content.replace("tool_calls", "").strip()
         return content
 
     def _build_group_task(self) -> str:
@@ -216,12 +223,27 @@ class WorldMessageMixin:
 
     def _make_message_event(self, source_id: str, content: str) -> SimEvent:
         """Build an agent_message event with the current World metadata."""
+        # 尝试从消息内容中提取 target Agent（模拟面对面说话）
+        target_agent_ids: list[str] = []
+        source_agent = self.agents.get(source_id)
+        if source_agent:
+            # 查找消息中被提及的其他 Agent
+            for agent in self.agents.values():
+                if agent.id == source_id:
+                    continue
+                # 检查消息内容是否包含该 Agent 的名称
+                agent_name = agent.persona.name or agent.id
+                if agent_name and agent_name in content:
+                    target_agent_ids.append(agent.id)
+                    break  # 只取第一个匹配
+
         return SimEvent(
             id=str(uuid.uuid4()),
             world_id=self.world.id,
             tick=self.current_tick,
             type="agent_message",
             source_agent_id=source_id,
+            target_agent_ids=target_agent_ids,
             description=content,
             created_at=datetime.now(timezone.utc).isoformat(),
         )
@@ -274,7 +296,10 @@ class WorldMessageMixin:
         content = getattr(message, "content", "")
         if not content or not isinstance(message, TextMessage):
             return None
-        return self._make_agent_event("thought_stream", agent_id, str(content))
+        cleaned = self._clean_group_content(str(content))
+        if not cleaned:
+            return None
+        return self._make_agent_event("thought_stream", agent_id, cleaned)
 
     def _final_message_to_event(self, response, agent_id: str) -> SimEvent | None:
         """Convert the final AutoGen response into spoken Agent text."""
@@ -282,7 +307,10 @@ class WorldMessageMixin:
         content = getattr(message, "content", "") if message else ""
         if not content:
             return None
-        return self._make_agent_event("agent_message", agent_id, str(content))
+        cleaned = self._clean_group_content(str(content))
+        if not cleaned:
+            return None
+        return self._make_agent_event("agent_message", agent_id, cleaned)
 
     def _make_agent_event(self, event_type: str, agent_id: str, text: str) -> SimEvent:
         """Build a typed Agent event with current World metadata."""

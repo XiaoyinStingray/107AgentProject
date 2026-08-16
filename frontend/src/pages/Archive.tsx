@@ -38,7 +38,7 @@ export default function Archive() {
   // 72: hash → tab
   useEffect(() => {
     const h = location.hash?.replace("#", "");
-    const MAP: Record<string, ArchiveTab> = { templates: "templates", achievements: "achievements", export: "export" };
+    const MAP: Record<string, ArchiveTab> = { highlights: "highlights", templates: "templates", achievements: "achievements", export: "export" };
     if (MAP[h]) setActiveTab(MAP[h]);
   }, [location.hash]);
 
@@ -134,6 +134,9 @@ function HighlightsPanel({
     });
   }, []);
 
+  const navigate = useNavigate();
+  const location = useLocation();
+
   /** 打开/关闭回放面板 */
   const handleToggleReplay = useCallback(async (worldId: string) => {
     if (expandedId === worldId) {
@@ -141,9 +144,18 @@ function HighlightsPanel({
       setEvents([]);
       lastTickRef.current = 0;
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+      // 清除 URL 中的 replay 参数
+      const params = new URLSearchParams(location.search);
+      params.delete("replay");
+      const newSearch = params.toString();
+      navigate({ search: newSearch ? `?${newSearch}` : "" }, { replace: true });
       return;
     }
     setExpandedId(worldId);
+    // 更新 URL 添加 replay 参数
+    const params = new URLSearchParams(location.search);
+    params.set("replay", worldId);
+    navigate({ search: `?${params.toString()}` }, { replace: true });
     requestAnimationFrame(() => {
       document.getElementById(`archive-replay-${worldId}`)?.scrollIntoView?.({
         behavior: "smooth",
@@ -196,11 +208,21 @@ function HighlightsPanel({
   }, [expandedId, fetchAndMapEvents]);
 
   // 展开中的模拟若还在运行 → 每 10s 自动拉增量事件
+  // 若状态变为 paused → 立即拉取一次最新事件
+  const prevStatusRef = useRef<string | null>(null);
   useEffect(() => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     if (!expandedId) return;
     const sim = simulations.find((s) => s.world_id === expandedId);
-    if (!sim || sim.status === "finished") return;
+    if (!sim) return;
+    const prevStatus = prevStatusRef.current;
+    prevStatusRef.current = sim.status;
+    // 状态变为 paused 时立即拉取
+    if (sim.status === "paused" && prevStatus !== "paused" && prevStatus !== null) {
+      void handleRefresh();
+      return;
+    }
+    if (sim.status === "finished") return;
     pollRef.current = setInterval(() => { handleRefresh(); }, 10_000);
     return () => {
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
@@ -280,6 +302,14 @@ function HighlightsPanel({
                     </div>
                   ) : (
                     <div className="max-h-64 overflow-y-auto space-y-1.5">
+                      {/* 消息类型图例 */}
+                      <div className="flex flex-wrap gap-3 text-xs font-mono text-text-secondary/60 mb-2 pb-2 border-b border-border/30">
+                        <span>{"\u{1F4AC}"} 对话</span>
+                        <span>{"\u{1F4AD}"} 思考</span>
+                        <span>{"\u{1F3AC}"} 行动</span>
+                        <span>{"\u{1F30D}"} 世界</span>
+                        <span>{"\u{1F4CC}"} 其他</span>
+                      </div>
                       {events
                         .filter((e) => e.type !== "tick_boundary" && e.type !== "connected" && e.type !== "paused")
                         .map((e, i) => (
@@ -436,10 +466,22 @@ function AchievementsPanel() {
 
   const unlockedCount = mergedAchievements.filter((a) => a.unlocked).length;
 
+  // 重新计算 ach-10 全能选手进度（基于合并后的全部成就）
+  const ach10Index = mergedAchievements.findIndex(a => a.id === "ach-10");
+  if (ach10Index >= 0) {
+    const otherAchievements = mergedAchievements.filter(a => a.id !== "ach-10");
+    const unlockedOthers = otherAchievements.filter(a => a.unlocked).length;
+    mergedAchievements[ach10Index] = {
+      ...mergedAchievements[ach10Index],
+      progress: otherAchievements.length > 0 ? unlockedOthers / otherAchievements.length : 0,
+      unlocked: unlockedOthers === otherAchievements.length && otherAchievements.length > 0,
+    };
+  }
+
   return (
     <div>
       {/* 统计摘要 */}
-      <div className="grid grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         {[
           { label: "Agent 数", value: summary.totalAgents, emoji: "🎭" },
           { label: "模拟次数", value: summary.totalSimulations, emoji: "🏘️" },
@@ -461,7 +503,7 @@ function AchievementsPanel() {
       {mergedAchievements.length === 0 ? (
         <EmptyState title="暂无成就" description="完成操作后将自动解锁成就" />
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           {mergedAchievements.map((ach) => (
             <Card
               key={ach.id}
@@ -476,7 +518,7 @@ function AchievementsPanel() {
               <div className="w-full h-1.5 rounded-full bg-bg-secondary overflow-hidden">
                 <div
                   className={`h-full rounded-full transition-all ${ach.unlocked ? "bg-accent-green" : "bg-accent-blue/50"}`}
-                  style={{ width: `${Math.min(100, ach.progress * 100)}%` }}
+                  style={{ width: `${Math.round(ach.progress * 100)}%` }}
                 />
               </div>
               <span className="text-xs font-mono text-text-secondary mt-1">
