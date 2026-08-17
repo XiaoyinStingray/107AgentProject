@@ -357,6 +357,112 @@ class TestAgentWorkerExecute:
         event_types = [json.loads(e[6:].strip())["type"] for e in events]
         assert "worker.error" in event_types
 
+    def test_delivery_gate_revises_and_rechecks_failed_output(self):
+        """最终产出违反任务约束时，退回修订并在复验通过后完成。"""
+        failed_audit = {
+            "passed": False,
+            "checked_constraints": [{
+                "constraint": "总时长必须为90分钟",
+                "status": "fail",
+                "evidence": "30+60+5=95分钟",
+            }],
+            "issues": ["时间分配合计95分钟，不是90分钟"],
+            "repair_instructions": "把最后5分钟自评并入后60分钟。",
+        }
+        passed_audit = {
+            "passed": True,
+            "checked_constraints": [{
+                "constraint": "总时长必须为90分钟",
+                "status": "pass",
+                "evidence": "30+25+5+25+5=90分钟",
+            }],
+            "issues": [],
+            "repair_instructions": "",
+        }
+        responses = [
+            json.dumps({"decision": "tool_call", "reason": "制定计划", "tool_name": "write_file", "tool_args": {}}),
+            json.dumps({
+                "decision": "tool_call", "reason": "写入初稿", "tool_name": "write_file",
+                "tool_args": {"path": "plan.md", "content": "30分钟答疑 + 60分钟自学 + 5分钟自评"},
+            }),
+            json.dumps({"satisfied": True, "plan_changed": False, "thought": "已写入", "next_action": "done"}),
+            json.dumps(failed_audit, ensure_ascii=False),
+            json.dumps({
+                "decision": "tool_call", "reason": "按验收意见修订时间", "tool_name": "write_file",
+                "tool_args": {"path": "plan.md", "content": "30分钟答疑 + 25分钟复习 + 5分钟休息 + 25分钟练习 + 5分钟自评"},
+            }),
+            json.dumps({"satisfied": True, "plan_changed": False, "thought": "已修订", "next_action": "done"}),
+            json.dumps(passed_audit, ensure_ascii=False),
+        ]
+        worker, ws = _make_worker(responses)
+
+        events = []
+
+        async def collect():
+            async for ev in worker.execute("制定严格90分钟的学习计划并写入 plan.md"):
+                events.append(ev)
+
+        _run(collect())
+
+        assert worker.state == WorkerState.DONE
+        assert ws._files["plan.md"] == "30分钟答疑 + 25分钟复习 + 5分钟休息 + 25分钟练习 + 5分钟自评"
+        payloads = [json.loads(event[6:].strip()) for event in events]
+        audit_reflections = [
+            payload for payload in payloads
+            if payload["type"] == "worker.reflection"
+            and "交付验收" in payload["data"].get("thought", "")
+        ]
+        assert [item["data"]["satisfied"] for item in audit_reflections] == [False, True]
+        summaries = [payload for payload in payloads if payload["type"] == "worker.summary"]
+        assert summaries
+        assert "交付验收通过" in summaries[-1]["data"]["key_findings"][0]
+
+    @pytest.mark.parametrize("status", ["fail", "unverifiable"])
+    def test_delivery_gate_does_not_trust_conflicting_pass_flag(self, status):
+        """存在失败或待核实约束时，即使 LLM 误写 passed=true 也不能放行。"""
+        response = json.dumps({
+            "passed": True,
+            "checked_constraints": [{
+                "constraint": "地点必须为合肥",
+                "status": status,
+                "evidence": "产出写成了上海",
+            }],
+            "issues": [],
+            "repair_instructions": "将地点修正为合肥。",
+        }, ensure_ascii=False)
+        worker, ws = _make_worker([response])
+        ws._files["result.md"] = "活动地点：上海"
+
+        audit = _run(worker._audit_delivery("活动地点必须为合肥"))
+
+        assert audit is not None
+        assert audit["passed"] is False
+
+    def test_deterministic_check_overrides_auditor_arithmetic_mistake(self):
+        """验收 LLM 也算错时，程序计算仍必须拦截错误交付。"""
+        auditor_wrongly_passes = json.dumps({
+            "passed": True,
+            "checked_constraints": [{
+                "constraint": "总时长必须为90分钟",
+                "status": "pass",
+                "evidence": "声称已经核对",
+            }],
+            "issues": [],
+            "repair_instructions": "",
+        }, ensure_ascii=False)
+        worker, ws = _make_worker([auditor_wrongly_passes])
+        ws._files["plan.md"] = (
+            "- 答疑：30分钟\n- 自学：25分钟\n- 练习：25分钟\n"
+            "- 休息：5分钟\n- 自评：10分钟\n"
+            "30 + 25 + 25 + 5 + 10 = 90分钟"
+        )
+
+        audit = _run(worker._audit_delivery("总时长严格等于90分钟"))
+
+        assert audit is not None
+        assert audit["passed"] is False
+        assert any("程序合计 95 分钟" in issue for issue in audit["issues"])
+
 
 class TestAgentWorkerFileLock:
     """文件锁测试。"""

@@ -6,7 +6,9 @@ import Badge from "../shared/Badge";
 export default function FeatureRouteBoundary() {
   const { hash, pathname } = useLocation();
   const itemId = parseFeatureItemId(hash);
-  const selectedItem = itemId === null ? undefined : findItemById(itemId);
+  const legacyItem = itemId === null ? undefined : findItemById(itemId);
+  const semanticItem = findFeatureByAnchor(pathname, hash);
+  const selectedItem = legacyItem ?? semanticItem;
   const selectedSection = selectedItem
     ? MENU_SECTIONS.find((section) => section.title === selectedItem.sectionTitle)
     : undefined;
@@ -38,6 +40,18 @@ export default function FeatureRouteBoundary() {
       </div>
     </div>
   );
+}
+
+/** Resolve the semantic hashes used by the sidebar, scoped to the current module. */
+export function findFeatureByAnchor(pathname: string, hash: string) {
+  const anchor = hash.replace(/^#/, "");
+  if (!anchor || anchor.startsWith("item-")) return undefined;
+  const section = MENU_SECTIONS.find(
+    (candidate) => pathname === candidate.route
+      || pathname.startsWith(`${candidate.route}/`),
+  );
+  const item = section?.items.find((candidate) => candidate.anchor === anchor);
+  return item && section ? { ...item, sectionTitle: section.title } : undefined;
 }
 
 /** 将 `#item-28` 形式的菜单 hash 解析为功能 ID。 */

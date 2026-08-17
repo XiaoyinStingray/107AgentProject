@@ -12,6 +12,7 @@ import { useWorlds, useInjectEvent, useWorldInterventions } from "../api/worlds"
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
 import StatusDot from "../components/shared/StatusDot";
+import { useFeatureAnchor } from "../hooks/useFeatureAnchor";
 
 /* ================================================================
    Step 44 — M7 导演干预台
@@ -20,6 +21,7 @@ import StatusDot from "../components/shared/StatusDot";
    ================================================================ */
 
 export default function DirectorIntervention() {
+  useFeatureAnchor();
   const { data: agents = [] } = useAgents();
   const { data: worlds = [] } = useWorlds();
   const injectEvent = useInjectEvent();
@@ -122,6 +124,7 @@ export default function DirectorIntervention() {
         {/* 左栏：事件注入表单 + P3 占位 */}
         <div className="lg:col-span-2 space-y-4">
           {/* 事件注入表单 */}
+          <div id="section-inject">
           <Card>
             <div className="flex items-center gap-2 mb-4">
               <span className="text-xl select-none">💉</span>
@@ -405,6 +408,7 @@ export default function DirectorIntervention() {
               </div>
             )}
           </Card>
+          </div>
 
           {/* P3 占位面板 */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -427,7 +431,7 @@ export default function DirectorIntervention() {
         </div>
 
         {/* 右栏：干预历史 */}
-        <div className="lg:col-span-1">
+        <div id="section-history" className="lg:col-span-1">
           <Card className="sticky top-4">
             <div className="flex items-center gap-2 mb-4">
               <span className="text-lg select-none">📋</span>

@@ -14,6 +14,7 @@ import {
 import { useScenarios } from "../api/scenarios";
 import ScenarioEditor from "../components/world/ScenarioEditor";
 import { useSSE } from "../hooks/useSSE";
+import { useFeatureAnchor } from "../hooks/useFeatureAnchor";
 import AgentStatusPanel from "../components/world/AgentStatusPanel";
 import ThoughtStream from "../components/agent/ThoughtStream";
 import GoalPanel from "../components/agent/GoalPanel";
@@ -45,6 +46,7 @@ export default function SoloTheater() {
   const [worldId, setWorldId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  useFeatureAnchor(isRunning);
 
   // API Mutations
   const createWorld = useCreateWorld();
@@ -426,7 +428,7 @@ export default function SoloTheater() {
   return (
     <div className="h-full flex flex-col animate-fade-in">
       {/* 顶栏 */}
-      <div className="shrink-0 flex items-center gap-3 px-4 py-2 border-b border-border bg-bg-secondary">
+      <div id="section-controls" className="shrink-0 flex items-center gap-3 px-4 py-2 border-b border-border bg-bg-secondary">
         <span className="text-2xl select-none">
           {scenarios.find((s) => s.name === selectedScenario)?.id ? "📝" : "📚"}
         </span>

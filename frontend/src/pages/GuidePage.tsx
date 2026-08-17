@@ -4,6 +4,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { unlock } from "../game/achievements";
+import { getMenuItemTarget, MENU_SECTIONS } from "../data/menuData";
 
 /* ── 阅读进度 ── */
 const READ_KEY = "guide-read-modules";
@@ -168,7 +169,7 @@ const MODULES: ModuleGuide[] = [
       { emoji: "🏆", label: "产出纪念墙", desc: "展示所有已完成任务的产出——报告、图表、代码。像作品集一样浏览和下载，直观看到 Agent 的工作成果。", id: 65, redirect: "/showcase" },
       { emoji: "🔗", label: "图形化管线编辑器", desc: "拖拽式编排多节点工作流——串联 Agent 形成生产线（采集→分析→写作→审查→发布）。支持回边（审查不通过→回到分析重做）和分支（通过→发布，不通过→驳回）。每个节点可选专属角色和 8 种特殊工具。", id: 60, redirect: "/pipeline-editor" },
       { emoji: "📁", label: "文件浏览器", desc: "查看 Agent 工作区中的所有文件——中间产物、历史快照、最终产出。支持下载、预览和删除操作。", id: 61 },
-      { emoji: "🔀", label: "决策分叉", desc: "在关键节点让 Agent 生成 2-3 个不同方案，你选择后继续执行。适合需要人工判断的探索性任务。", id: 66, redirect: "/worker" },
+      { emoji: "🔀", label: "决策分叉", desc: "在关键节点让 Agent 生成 2-3 个不同方案，你选择后继续执行。适合需要人工判断的探索性任务。", id: 66, anchor: "branches" },
       { emoji: "🛠️", label: "14 种工具", desc: "基础 6 种（搜索/Python/读写文件/列文件/安装包）+ 特殊 8 种（思维导图/图表/时间线/摘要/翻译/数据画像/代码审查/大纲）。可精确控制每个任务启用的工具集。" },
       { emoji: "⚙️", label: "参数设置", desc: "全局调整 Agent 行为——思考温度、决策随机性、最大步数、超时、搭话频率。所有调整即时生效并持久化。" },
     ],
@@ -190,6 +191,12 @@ function useAnimatedEntry(index: number, delay = 80) {
 
 /** 根据 feature 的 anchor/redirect/id 生成正确的跳转路径 */
 function featureLink(mod: ModuleGuide, f: Feature): string | null {
+  if (f.id !== undefined) {
+    for (const section of MENU_SECTIONS) {
+      const item = section.items.find((candidate) => candidate.id === f.id);
+      if (item) return getMenuItemTarget(section, item);
+    }
+  }
   if (f.redirect) return f.redirect;
   if (f.anchor) return `${mod.route}#${f.anchor}`;
   return mod.route;

@@ -123,6 +123,50 @@ REFLECTION_PROMPT_TEMPLATE = """你上一步执行了工具 **{tool_name}**，�
 
 
 # =============================================================================
+# 最终交付验收 Prompt
+# =============================================================================
+
+DELIVERY_AUDITOR_SYSTEM_PROMPT = """你是独立的交付验收员，不负责继续创作，只负责判断最终产出是否满足原任务。
+
+必须遵守：
+1. 先从原任务中提取可验证约束，再逐条检查产出证据。
+2. 数量、总时长、日期、文件名、格式等可计算条件必须实际核算，不能凭感觉判断。
+3. 人名、地点、经历、来源等事实必须能从原任务或产出证据中找到依据；没有依据时标为 unverifiable。
+4. 不要因为文件成功生成就判定任务完成。
+5. 只输出合法 JSON，不要输出 Markdown 或额外说明。"""
+
+
+DELIVERY_AUDIT_PROMPT_TEMPLATE = """请验收下面这次 Agent 交付。
+
+## 原始任务
+{task}
+
+## 最终产出
+{deliverables}
+
+请先提取原任务中的明确要求和完成条件，然后逐条核验。特别注意：
+- 对时间、数量、比例等数字重新计算；标题或汇总中的重复数字不要重复计数。
+- 检查内容是否前后矛盾，是否遗漏“不允许/必须/不要”等限制。
+- 涉及现实事实但当前证据不足时，说明需要哪一种工具或来源核验。
+- 只有所有必要约束都通过时，passed 才能为 true。
+
+只用以下 JSON 格式回复：
+
+{{
+  "passed": true | false,
+  "checked_constraints": [
+    {{
+      "constraint": "从任务提取的一条约束",
+      "status": "pass" | "fail" | "unverifiable",
+      "evidence": "产出中的证据或失败原因"
+    }}
+  ],
+  "issues": ["需要修复的具体问题"],
+  "repair_instructions": "给执行 Agent 的可操作修订指令；通过时为空字符串"
+}}"""
+
+
+# =============================================================================
 # 构建函数
 # =============================================================================
 
@@ -177,4 +221,12 @@ def build_reflection_prompt(tool_name: str, result_summary: str) -> str:
     return REFLECTION_PROMPT_TEMPLATE.format(
         tool_name=tool_name,
         result_summary=result_summary[:1000],
+    )
+
+
+def build_delivery_audit_prompt(task: str, deliverables: str) -> str:
+    """构建最终交付验收 prompt。"""
+    return DELIVERY_AUDIT_PROMPT_TEMPLATE.format(
+        task=task[:8000],
+        deliverables=deliverables[:24000],
     )

@@ -58,15 +58,21 @@ describe("Step 39 AgentModule hash routing", () => {
     },
   );
 
-  it("opens Remix for item-6", () => {
-    renderModule("/agents#item-6");
-    expect(screen.getByText("Remix 页面")).toBeInTheDocument();
-  });
+  it.each(["/agents#remix", "/agents#item-6"])(
+    "opens Remix for %s",
+    (path) => {
+      renderModule(path);
+      expect(screen.getByText("Remix 页面")).toBeInTheDocument();
+    },
+  );
 
-  it("opens templates for item-7", () => {
-    renderModule("/agents#item-7");
-    expect(screen.getByText("模板库页面")).toBeInTheDocument();
-  });
+  it.each(["/agents#models", "/agents#item-7"])(
+    "opens templates for %s",
+    (path) => {
+      renderModule(path);
+      expect(screen.getByText("模板库页面")).toBeInTheDocument();
+    },
+  );
 
   it("hands a template description to the existing foundry once", () => {
     renderModule("/agents#item-1", {

@@ -15,6 +15,7 @@ import {
 } from "../api/worlds";
 import { useSSE } from "../hooks/useSSE";
 import { useThrottledEvents } from "../hooks/useThrottledEvents";
+import { useFeatureAnchor } from "../hooks/useFeatureAnchor";
 import { useSandboxStore } from "../stores/useSandboxStore";
 import type { AgentResponse } from "../types/agent";
 import type { SSEEvent } from "../types/events";
@@ -38,6 +39,7 @@ export default function GroupSandbox() {
   const { data: scenarios = [] } = useScenarios();
   const initializedAgents = useRef(false);
   const [phase, setPhase] = useState<"setup" | "running">("setup");
+  useFeatureAnchor(phase);
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);
   const [selectedScenario, setSelectedScenario] = useState(initialScenario ?? "期末周");
   const [selectedTick, setSelectedTick] = useState<number | null>(null);
@@ -412,7 +414,9 @@ function SandboxRuntime(props: SandboxRuntimeProps) {
         <div className="h-full flex flex-col gap-3">
           <div className="shrink-0 grid grid-cols-2 gap-3">
             <Card className="flex flex-col"><Timeline events={props.events} selectedTick={props.selectedTick} onSelectTick={props.onSelectTick} /></Card>
-            <RelationshipGraph agents={props.agents} relationships={props.relationships} lastRelationshipKey={props.lastRelationshipKey} />
+            <div id="section-relationships" className="h-full min-w-0">
+              <RelationshipGraph className="h-full" agents={props.agents} relationships={props.relationships} lastRelationshipKey={props.lastRelationshipKey} />
+            </div>
           </div>
           <Card className="flex-1 min-h-0 overflow-hidden flex flex-col"><EventFeed events={props.events} selectedTick={props.selectedTick} agents={props.agents} feedFilterIds={props.feedFilterIds} onToggleFeedAgent={props.onToggleFeedAgent} /></Card>
         </div>

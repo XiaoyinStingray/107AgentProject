@@ -114,6 +114,7 @@ async def _persist_worker_state(entry: dict):
         state_file = f"{worker._workspace._root}/worker_state.json"
         state = {
             "run_id": worker.run_id,
+            "agent_id": entry.get("agent_id", ""),
             "agent_name": entry["agent_name"],
             "task": entry["task"],
             "running": entry.get("running", False),
@@ -127,6 +128,40 @@ async def _persist_worker_state(entry: dict):
         Path(state_file).write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding='utf-8')
     except Exception:
         pass  # 持久化失败不阻塞 Worker
+
+
+async def _persist_worker_agent_binding(
+    run_id: str,
+    entry: dict,
+    base_dir: str | None = None,
+):
+    """只补写旧 Worker 历史的 Agent 身份，不破坏原状态字段。"""
+    from pathlib import Path
+    import json as _json
+
+    worker = entry.get("worker")
+    if worker is not None and hasattr(worker._workspace, "root"):
+        state_file = Path(worker._workspace.root) / "worker_state.json"
+    else:
+        state_file = Path(base_dir or (Path.home() / "workspaces")) / run_id / "worker_state.json"
+
+    state: dict = {}
+    if state_file.exists():
+        state = _json.loads(state_file.read_text(encoding="utf-8"))
+    state.update({
+        "run_id": run_id,
+        "agent_id": entry.get("agent_id", ""),
+        "agent_name": entry.get("agent_name", "?"),
+        "task": entry.get("task", state.get("task", "")),
+        "running": entry.get("running", False),
+        "accepted": entry.get("accepted", state.get("accepted", False)),
+        "created_at": entry.get("created_at", state.get("created_at", "")),
+    })
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    temp_file = state_file.with_suffix(".json.tmp")
+    temp_file.write_text(_json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_file.replace(state_file)
+    logger.info(f"Bound restored worker {run_id} to agent {entry.get('agent_id', '')}")
 
 
 async def _restore_workers_from_disk(base_dir: str = None):
@@ -147,6 +182,7 @@ async def _restore_workers_from_disk(base_dir: str = None):
             state["running"] = False  # 重启后标记为非运行
             _active_workers[state["run_id"]] = {
                 "worker": None,
+                "agent_id": state.get("agent_id", ""),
                 "agent_name": state.get("agent_name", "?"),
                 "task": state.get("task", ""),
                 "running": False,
@@ -292,6 +328,7 @@ async def execute_worker_task(req: WorkerExecuteRequest):
                 entry["running"] = False
                 # 持久化到工作区目录（重启后可恢复）
                 await _persist_worker_state(entry)
+                await _save_events_file(entry)
             # 保留 worker 在内存中（用户可查询状态、下载产物）
 
     return StreamingResponse(
@@ -637,6 +674,122 @@ class ForkRequest(BaseModel):
     alternative_decision: str = Field(..., min_length=1, max_length=500, description="替代决策描述")
 
 
+class ForkOptionsRequest(BaseModel):
+    fork_point_step: int = Field(..., ge=1, description="要生成替代路线的决策步骤")
+
+
+class BindWorkerAgentRequest(BaseModel):
+    agent_id: str = Field(..., min_length=1, description="要绑定到旧历史的真实 Agent ID")
+
+
+@router.get("/{run_id}/decisions")
+async def list_worker_decisions(run_id: str):
+    """列出一次 Worker 运行中可用于分叉的真实决策节点。"""
+    entry = _active_workers.get(run_id)
+    if not entry:
+        raise HTTPException(404, f"Worker {run_id!r} 不存在")
+
+    from engines.worker.fork import load_decision_log
+
+    decisions = load_decision_log(run_id)
+    return {
+        "run_id": run_id,
+        "running": entry.get("running", False),
+        "agent_id": entry.get("agent_id", ""),
+        "agent_name": entry.get("agent_name", "?"),
+        "needs_agent_binding": not bool(entry.get("agent_id")),
+        "decisions": decisions,
+    }
+
+
+@router.post("/{run_id}/bind-agent")
+async def bind_worker_agent(run_id: str, req: BindWorkerAgentRequest):
+    """显式把缺少 ID 的旧 Worker 历史绑定回同名 Agent。"""
+    entry = _active_workers.get(run_id)
+    if not entry:
+        raise HTTPException(404, f"Worker {run_id!r} 不存在")
+    if entry.get("running", False):
+        raise HTTPException(409, "运行中的任务不能重新绑定 Agent")
+
+    existing_agent_id = entry.get("agent_id", "")
+    if existing_agent_id and existing_agent_id != req.agent_id:
+        raise HTTPException(409, "这条历史已经绑定到另一个 Agent，不能覆盖")
+
+    try:
+        agent = await _get_or_create_agent(req.agent_id)
+    except AgentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except AgentRestoreError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    historical_name = str(entry.get("agent_name", "")).split(" (Fork @", 1)[0].strip()
+    agent_name = str(getattr(getattr(agent, "persona", None), "name", "")).strip()
+    if historical_name and historical_name != "?" and historical_name.casefold() != agent_name.casefold():
+        raise HTTPException(
+            409,
+            f"历史记录属于“{historical_name}”，不能绑定到“{agent_name or req.agent_id}”",
+        )
+
+    previous_id = entry.get("agent_id", "")
+    previous_name = entry.get("agent_name", "?")
+    entry["agent_id"] = req.agent_id
+    entry["agent_name"] = agent_name or previous_name
+    try:
+        await _persist_worker_agent_binding(run_id, entry)
+    except Exception as exc:
+        entry["agent_id"] = previous_id
+        entry["agent_name"] = previous_name
+        logger.exception(f"Unable to persist Worker binding: {exc}")
+        raise HTTPException(500, "绑定信息保存失败，请重试") from exc
+
+    return {
+        "run_id": run_id,
+        "agent_id": req.agent_id,
+        "agent_name": entry["agent_name"],
+        "bound": True,
+    }
+
+
+@router.post("/{run_id}/fork-options")
+async def create_worker_fork_options(run_id: str, req: ForkOptionsRequest):
+    """让原 Agent 为一个历史决策生成 2-3 条替代路线。"""
+    entry = _active_workers.get(run_id)
+    if not entry:
+        raise HTTPException(404, f"Worker {run_id!r} 不存在")
+    if entry.get("running", False):
+        raise HTTPException(409, "请等待原任务完成后再创建决策分叉")
+
+    from engines.worker.fork import generate_fork_options, load_decision_log
+
+    decisions = load_decision_log(run_id)
+    if not any(step.get("step_index") == req.fork_point_step for step in decisions):
+        raise HTTPException(404, f"决策点 Step {req.fork_point_step} 不存在")
+
+    agent_id = entry.get("agent_id", "")
+    if not agent_id:
+        raise HTTPException(409, "这条旧历史缺少 Agent 信息，请先绑定原 Agent")
+    try:
+        agent = await _get_or_create_agent(agent_id)
+    except AgentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except AgentRestoreError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    options = await generate_fork_options(
+        agent=agent,
+        task=entry.get("task", ""),
+        fork_point_step=req.fork_point_step,
+        decision_log=decisions,
+    )
+    if len(options) < 2:
+        raise HTTPException(502, "候选路线生成失败，你仍可手动填写替代决策")
+    return {
+        "run_id": run_id,
+        "fork_point_step": req.fork_point_step,
+        "options": options,
+    }
+
+
 @router.post("/{run_id}/fork")
 async def fork_worker(run_id: str, req: ForkRequest):
     """从已完成 Worker 的决策点创建分叉——返回 SSE 流。"""
@@ -644,12 +797,15 @@ async def fork_worker(run_id: str, req: ForkRequest):
     if not entry:
         raise HTTPException(404, f"Worker {run_id!r} 不存在")
 
-    worker_obj: AgentWorker | None = entry.get("worker")
-    if worker_obj is None:
-        raise HTTPException(400, f"Worker {run_id!r} 已过期，无法分叉")
+    if entry.get("running", False):
+        raise HTTPException(409, "请等待原任务完成后再创建决策分叉")
+
+    agent_id = entry.get("agent_id", "")
+    if not agent_id:
+        raise HTTPException(409, "这条旧历史缺少 Agent 信息，请先绑定原 Agent")
 
     try:
-        agent = await _get_or_create_agent(entry.get("agent_id", ""))
+        agent = await _get_or_create_agent(agent_id)
     except AgentNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except AgentRestoreError as e:
@@ -657,13 +813,22 @@ async def fork_worker(run_id: str, req: ForkRequest):
 
     from engines.worker.fork import fork_from_checkpoint
 
-    fork_run_id, fork_worker = await fork_from_checkpoint(
-        original_run_id=run_id,
-        fork_point_step=req.fork_point_step,
-        alternative_decision=req.alternative_decision,
-        agent=agent,
-        task=entry["task"],
-    )
+    worker_obj: AgentWorker | None = entry.get("worker")
+    base_dir = None
+    if worker_obj is not None and isinstance(worker_obj._workspace, LocalWorkspace):
+        from pathlib import Path
+        base_dir = str(Path(worker_obj._workspace.root).parent)
+    try:
+        fork_run_id, fork_worker = await fork_from_checkpoint(
+            original_run_id=run_id,
+            fork_point_step=req.fork_point_step,
+            alternative_decision=req.alternative_decision,
+            agent=agent,
+            task=entry["task"],
+            base_dir=base_dir,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     # 注册 fork worker
     _active_workers[fork_run_id] = {
@@ -693,6 +858,8 @@ async def fork_worker(run_id: str, req: ForkRequest):
         finally:
             if fork_entry:
                 fork_entry["running"] = False
+                await _persist_worker_state(fork_entry)
+                await _save_events_file(fork_entry)
 
     return StreamingResponse(
         fork_generator(),

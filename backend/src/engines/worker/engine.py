@@ -50,11 +50,14 @@ from engines.worker.events import (
     PlanStep,
 )
 from engines.worker.prompts import (
+    DELIVERY_AUDITOR_SYSTEM_PROMPT,
     WORKER_SYSTEM_PROMPT,
     RETRY_HINT,
+    build_delivery_audit_prompt,
     build_decision_prompt,
     build_reflection_prompt,
 )
+from engines.worker.delivery_validation import validate_delivery
 from engines.worker.tools import make_worker_tools, ToolSpec
 from engines.worker.workspace import LocalWorkspace, WorkspaceProvider, safe_read
 from engines.worker.recipes import get_recipe, list_recipes as _list_recipes
@@ -215,6 +218,15 @@ class AgentWorker:
         self._files_created: list[str] = []       # 本运行中创建的文件
         self._start_time: float = 0
         self._execution_memory = None             # 任务执行前注入的 Memory 元数据
+        self._task = ""
+
+        # 最终交付验收：首次验收 + 最多两轮自动修订后的复验
+        self._delivery_audit_attempts = 0
+        self._delivery_feedback = ""
+        self._delivery_audit_passed = False
+        self._delivery_audit_summary = ""
+        self._delivery_warning = ""
+        self._delivery_constraints_checked = 0
 
         # 文件锁 — 用户编辑时禁止 Agent 写入
         self._locked_files: set[str] = set()
@@ -245,6 +257,7 @@ class AgentWorker:
             enabled_tools: Step 105 — 精确启用的工具列表（空=全部）
         """
         self._is_follow_up = is_follow_up
+        self._task = task
 
         # Step 100: 加载配方
         if recipe_id:
@@ -340,7 +353,7 @@ class AgentWorker:
                             yield event
 
                     case WorkerState.REFLECTING:
-                        async for event in self._do_reflecting():
+                        async for event in self._do_reflecting(task):
                             yield event
 
                     case WorkerState.DONE:
@@ -567,6 +580,16 @@ class AgentWorker:
             fork_context=fork_context,
         )
 
+        # 最终验收未通过时，把具体问题送回执行循环。Agent 必须先修复，
+        # 不能把“文件已生成”再次误判为“任务已完成”。
+        if self._delivery_feedback:
+            prompt += (
+                "\n\n## 🚧 最终交付验收未通过\n"
+                f"{self._delivery_feedback}\n"
+                "请先读取并修复相关产出；必要时调用搜索或计算工具核验。"
+                "完成修订后系统会再次验收，不要直接重复选择 done。"
+            )
+
         # 调用 LLM
         decision = await self._get_decision(prompt)
         if decision is None:
@@ -642,7 +665,8 @@ class AgentWorker:
             self._transition(WorkerState.EXECUTING)
 
         elif action == "done":
-            self._transition(WorkerState.DONE)
+            async for event in self._attempt_completion(task):
+                yield event
 
         else:
             # 未知 action → 记录但不崩溃
@@ -818,7 +842,7 @@ class AgentWorker:
 
         self._transition(WorkerState.REFLECTING)
 
-    async def _do_reflecting(self) -> AsyncGenerator[str, None]:
+    async def _do_reflecting(self, task: str | None = None) -> AsyncGenerator[str, None]:
         """REFLECTING 状态：Agent 评估上一步结果，决定下一步。"""
         if not self._completed_steps:
             self._transition(WorkerState.DECIDING)
@@ -864,11 +888,231 @@ class AgentWorker:
 
         # 根据反思结果转换状态
         if next_action == "done":
-            self._transition(WorkerState.DONE)
+            async for event in self._attempt_completion(task or self._task):
+                yield event
         elif next_action == "revise":
             self._transition(WorkerState.PLANNING)
         else:  # "continue"
             self._transition(WorkerState.DECIDING)
+
+    async def _collect_delivery_snapshot(self) -> str:
+        """读取最终工作区，给验收员提供真实交付内容而不是工具摘要。"""
+        try:
+            files = await self._workspace.list_files()
+        except Exception as exc:
+            return f"（无法列出工作区文件：{exc}）"
+
+        if not files:
+            return "（工作区没有产出文件）"
+
+        text_suffixes = {
+            ".md", ".txt", ".json", ".csv", ".tsv", ".py", ".js", ".ts",
+            ".tsx", ".jsx", ".html", ".css", ".xml", ".yaml", ".yml",
+        }
+        chunks: list[str] = []
+        remaining = 24000
+
+        for file_info in files[:20]:
+            path = file_info.path
+            header = f"\n### 文件：{path}（{file_info.size} bytes）\n"
+            if remaining <= len(header):
+                break
+            chunks.append(header)
+            remaining -= len(header)
+
+            if Path(path).suffix.lower() not in text_suffixes:
+                note = "（非文本文件，仅核验文件名与大小）\n"
+                chunks.append(note)
+                remaining -= len(note)
+                continue
+
+            try:
+                content = await self._workspace.read_file(path)
+            except Exception as exc:
+                content = f"（读取失败：{exc}）"
+
+            excerpt = str(content)[: min(6000, remaining)]
+            chunks.append(excerpt)
+            remaining -= len(excerpt)
+            if remaining <= 0:
+                break
+
+        if len(files) > 20:
+            chunks.append(f"\n（另有 {len(files) - 20} 个文件未展开）")
+        return "".join(chunks)
+
+    async def _audit_delivery(self, task: str) -> dict | None:
+        """让独立验收 prompt 对原任务与真实产出逐条核验。"""
+        snapshot = await self._collect_delivery_snapshot()
+        deterministic_issues = validate_delivery(task, snapshot)
+        prompt = build_delivery_audit_prompt(task=task, deliverables=snapshot)
+
+        # JSON 格式错误时只补一次格式重试；网络重试由 _call_llm 负责。
+        for parse_attempt in range(2):
+            response = await self._call_auditor_llm(
+                DELIVERY_AUDITOR_SYSTEM_PROMPT,
+                prompt if parse_attempt == 0 else prompt + RETRY_HINT,
+            )
+            if response is None:
+                break
+            audit = _safe_json_parse(response)
+            if audit is not None and isinstance(audit.get("passed"), bool):
+                constraints = audit.get("checked_constraints", [])
+                issues = audit.get("issues", [])
+                if not isinstance(constraints, list):
+                    constraints = []
+                if isinstance(issues, str):
+                    issues = [issues]
+                elif not isinstance(issues, list):
+                    issues = []
+
+                normalized_constraints = []
+                has_blocking_constraint = False
+                for item in constraints[:30]:
+                    if not isinstance(item, dict):
+                        continue
+                    status = str(item.get("status", "unverifiable")).lower()
+                    if status not in {"pass", "fail", "unverifiable"}:
+                        status = "unverifiable"
+                    if status in {"fail", "unverifiable"}:
+                        has_blocking_constraint = True
+                    normalized_constraints.append({
+                        "constraint": str(item.get("constraint", ""))[:500],
+                        "status": status,
+                        "evidence": str(item.get("evidence", ""))[:1000],
+                    })
+
+                # 程序化硬校验优先于 LLM 判断。即使验收 LLM 也算错，
+                # 明确的算式、总时长等错误仍然必须拦截。
+                deterministic_repairs = []
+                for item in deterministic_issues:
+                    has_blocking_constraint = True
+                    normalized_constraints.append({
+                        "constraint": item["constraint"][:500],
+                        "status": "fail",
+                        "evidence": item["evidence"][:1000],
+                    })
+                    issues.append(item["evidence"])
+                    deterministic_repairs.append(item["repair"])
+
+                # 防止 LLM 一边列出 fail，一边误把 passed 写成 true。
+                audit["passed"] = bool(audit["passed"]) and not has_blocking_constraint
+                audit["checked_constraints"] = normalized_constraints
+                audit["issues"] = [str(issue)[:1000] for issue in issues[:20]]
+                llm_repair = str(audit.get("repair_instructions", "")).strip()
+                audit["repair_instructions"] = "\n".join(
+                    part for part in [llm_repair, *deterministic_repairs] if part
+                )[:3000]
+                return audit
+
+        if deterministic_issues:
+            return {
+                "passed": False,
+                "checked_constraints": [{
+                    "constraint": item["constraint"],
+                    "status": "fail",
+                    "evidence": item["evidence"],
+                } for item in deterministic_issues],
+                "issues": [item["evidence"] for item in deterministic_issues],
+                "repair_instructions": "\n".join(
+                    item["repair"] for item in deterministic_issues
+                ),
+            }
+        return None
+
+    async def _attempt_completion(self, task: str) -> AsyncGenerator[str, None]:
+        """完成前验收；失败则把问题送回 Worker，最多自动修订两轮。"""
+        self._delivery_audit_attempts += 1
+        audit = await self._audit_delivery(task)
+
+        if audit is None:
+            # 验收服务不可用时不让旧任务卡死，但明确留下可见警告。
+            self._delivery_warning = "交付验收暂不可用，已保留 Agent 原完成结果"
+            self._delivery_audit_summary = self._delivery_warning
+            logger.warning(
+                "AgentWorker delivery audit unavailable; completing with warning"
+            )
+            yield _sse_event("worker.thought", WorkerThoughtData(
+                step_index=self._step_index,
+                thought=f"[交付验收] ⚠️ {self._delivery_warning}",
+            ).__dict__)
+            yield _sse_event("worker.reflection", WorkerReflectionData(
+                step_index=self._step_index,
+                satisfied=True,
+                plan_changed=False,
+                thought=self._delivery_warning,
+                next_action="done",
+            ).__dict__)
+            self._transition(WorkerState.DONE)
+            return
+
+        constraints = audit.get("checked_constraints", [])
+        self._delivery_constraints_checked = len(constraints)
+        if audit.get("passed"):
+            self._delivery_audit_passed = True
+            self._delivery_feedback = ""
+            self._delivery_warning = ""
+            self._delivery_audit_summary = (
+                f"交付验收通过：已核对 {len(constraints)} 项任务约束"
+            )
+            yield _sse_event("worker.thought", WorkerThoughtData(
+                step_index=self._step_index,
+                thought=f"[交付验收] ✅ {self._delivery_audit_summary}",
+            ).__dict__)
+            yield _sse_event("worker.reflection", WorkerReflectionData(
+                step_index=self._step_index,
+                satisfied=True,
+                plan_changed=False,
+                thought=self._delivery_audit_summary,
+                next_action="done",
+            ).__dict__)
+            self._transition(WorkerState.DONE)
+            return
+
+        issues = audit.get("issues", [])
+        failed_constraints = [
+            item for item in constraints if item.get("status") in {"fail", "unverifiable"}
+        ]
+        issue_lines = [f"- {issue}" for issue in issues]
+        if not issue_lines:
+            issue_lines = [
+                f"- {item.get('constraint', '未满足约束')}：{item.get('evidence', '')}"
+                for item in failed_constraints[:8]
+            ]
+        repair = audit.get("repair_instructions", "") or "逐条修复上述问题并重新保存产出。"
+        feedback = "\n".join(issue_lines + [f"修订要求：{repair}"])
+        self._delivery_feedback = feedback[:5000]
+        self._delivery_audit_summary = (
+            f"交付验收未通过：发现 {max(len(issues), len(failed_constraints), 1)} 个问题"
+        )
+
+        can_revise = self._delivery_audit_attempts < 3
+        thought = self._delivery_audit_summary
+        if can_revise:
+            thought += "，已退回 Agent 自动修订"
+            self._completed_steps.append({
+                "title": f"Step {self._step_index}: 最终交付验收",
+                "result": self._delivery_feedback,
+            })
+            self._transition(WorkerState.DECIDING)
+        else:
+            self._delivery_warning = (
+                f"{self._delivery_audit_summary}，已达到两轮自动修订上限"
+            )
+            thought = self._delivery_warning
+            self._transition(WorkerState.DONE)
+
+        yield _sse_event("worker.thought", WorkerThoughtData(
+            step_index=self._step_index,
+            thought=f"[交付验收] {'🔁' if can_revise else '⚠️'} {thought}\n{feedback}"[:500],
+        ).__dict__)
+        yield _sse_event("worker.reflection", WorkerReflectionData(
+            step_index=self._step_index,
+            satisfied=False,
+            plan_changed=can_revise,
+            thought=thought[:500],
+            next_action="revise" if can_revise else "done",
+        ).__dict__)
 
     async def _handle_done(self) -> list[str]:
         """DONE 状态：返回完成事件列表。"""
@@ -881,24 +1125,30 @@ class AgentWorker:
         except Exception:
             file_paths = self._files_created
 
+        done_reason = "任务已完成"
+        if self._delivery_warning:
+            done_reason = f"任务已完成（{self._delivery_warning}）"
+
         events.append(_sse_event("worker.done", WorkerDoneData(
-            reason="任务已完成",
+            reason=done_reason,
             total_steps=self._step_index,
             files=file_paths,
         ).__dict__))
 
         summary = f"任务完成。共执行 {self._step_index} 步，产生 {len(file_paths)} 个文件。"
+        audit_finding = self._delivery_audit_summary or "未触发最终交付验收"
+        key_findings = [audit_finding, f"产出 {len(file_paths)} 个文件"] + file_paths[:5]
         events.append(_sse_event("worker.summary", WorkerSummaryData(
             deliverable_summary=summary,
             self_rating="3",
-            key_findings=[f"产出 {len(file_paths)} 个文件"] + file_paths[:5],
+            key_findings=key_findings,
             total_duration_ms=total_duration_ms,
         ).__dict__))
 
         # Step 100a: 存储元数据供纪念墙使用
         self._total_duration_ms = total_duration_ms
         self._self_rating = "3"
-        self._key_findings = [f"产出 {len(file_paths)} 个文件"] + file_paths[:3]
+        self._key_findings = [audit_finding, f"产出 {len(file_paths)} 个文件"] + file_paths[:3]
 
         logger.info(f"AgentWorker DONE: {self._step_index} steps, "
                     f"{len(file_paths)} files, {total_duration_ms}ms")
@@ -933,6 +1183,35 @@ class AgentWorker:
         old_state = self._state
         self._state = new_state
         logger.debug(f"AgentWorker: {old_state.value} → {new_state.value}")
+
+    async def _call_auditor_llm(self, system_prompt: str, user_message: str) -> str | None:
+        """绕过人格化 Agent 上下文，直接调用共享模型做独立验收。"""
+        model_client = getattr(self._agent, "model_client", None)
+        if model_client is None:
+            # 单元测试替身和旧 Agent 的兼容路径。
+            return await self._call_llm(system_prompt, user_message)
+
+        from autogen_core.models import SystemMessage, UserMessage
+
+        messages = [
+            SystemMessage(content=system_prompt),
+            UserMessage(content=user_message, source="delivery_auditor"),
+        ]
+        for attempt in range(MAX_LLM_RETRIES):
+            try:
+                result = await model_client.create(messages=messages)
+                content = result.content if hasattr(result, "content") else str(result)
+                if isinstance(content, str):
+                    logger.debug(f"DeliveryAuditor LLM: {len(content)} chars")
+                    return content
+                return str(content)
+            except Exception as exc:
+                logger.warning(
+                    f"DeliveryAuditor LLM attempt {attempt + 1}/{MAX_LLM_RETRIES} failed: {exc}"
+                )
+                if attempt < MAX_LLM_RETRIES - 1:
+                    await asyncio.sleep(2 * (attempt + 1))
+        return None
 
     async def _call_llm(self, system_prompt: str, user_message: str) -> str | None:
         """调用 LLM 并返回文本响应。

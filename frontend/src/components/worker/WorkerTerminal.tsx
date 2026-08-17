@@ -100,7 +100,7 @@ function EventLine({ event }: EventLineProps) {
       return (
         <div className="py-1.5">
           <div className={`${baseClass} text-cyan-400`}>
-            ⚡ Agent {d.agent_name} 开始工作
+            ⚡ Agent {String(d.agent_name)} 开始工作
           </div>
           <div className={`${baseClass} text-text-muted`}>
             任务: {String(d.task).slice(0, 120)}
@@ -149,7 +149,7 @@ function EventLine({ event }: EventLineProps) {
       return (
         <div className={`${baseClass} py-0.5 ml-2`}>
           <span className="text-text-muted">⏳</span>{" "}
-          <span className="text-blue-400">正在执行: {d.tool_name}</span>{" "}
+          <span className="text-blue-400">正在执行: {String(d.tool_name)}</span>{" "}
           <span className="text-text-muted">{String(d.args_summary)}</span>
         </div>
       );

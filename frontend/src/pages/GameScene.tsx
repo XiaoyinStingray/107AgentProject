@@ -34,6 +34,7 @@ import {
   resolveWhisperMoveTarget,
   type LocalAgentCommand,
 } from "../game/whisper";
+import { useFeatureAnchor } from "../hooks/useFeatureAnchor";
 
 /* —— 场景列表 —— */
 const SCENES = [
@@ -185,16 +186,8 @@ export default function GameScenePage() {
 
   const syncMutation = useSyncSceneState();
   // 71: 对话日志（叙事导出用）
-  // hash 跳转到对应面板
-  const checkpointsRef = useRef<HTMLDivElement>(null);
-  const directorRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const hash = window.location.hash?.slice(1);
-    if (hash) {
-      const el = document.getElementById(`section-${hash}`);
-      el?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, []);
+  // 侧栏 hash 跳转到对应面板（同一路由内切换也会重新定位）。
+  useFeatureAnchor();
   const mountedRef = useRef(false);
   const gameRef = useRef<Phaser.Game | null>(null);
   const [gameReady, setGameReady] = useState(false);
@@ -1152,7 +1145,7 @@ export default function GameScenePage() {
 
       {/* 导演面板 (Step 66) */}
       <Card className="p-3">
-        <p className="text-xs font-mono text-text-secondary mb-2" ref={directorRef}>导演模式</p>
+        <p id="section-director" className="text-xs font-mono text-text-secondary mb-2">导演模式</p>
         <DirectorPanel
           weather={weather}
           onWeatherChange={handleWeatherChange}
@@ -1202,7 +1195,7 @@ export default function GameScenePage() {
 
       {/* 存档面板 */}
       <Card className="p-3">
-        <p className="text-xs font-mono text-text-secondary mb-2" ref={checkpointsRef}>存档管理</p>
+        <p id="section-checkpoints" className="text-xs font-mono text-text-secondary mb-2">存档管理</p>
         <CheckpointPanel
           checkpoints={checkpoints}
           count={checkpoints.length}

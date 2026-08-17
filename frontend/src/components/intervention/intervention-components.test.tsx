@@ -29,6 +29,12 @@ vi.mock("../../api/agents", () => ({
   useAgents: () => ({ data: mockAgents, isLoading: false, error: null }),
 }));
 
+// This component suite isolates intervention behavior; hash navigation is
+// covered separately by useFeatureAnchor and Sidebar integration tests.
+vi.mock("../../hooks/useFeatureAnchor", () => ({
+  useFeatureAnchor: () => undefined,
+}));
+
 // 共享可变数组——模拟乐观更新：inject 后立即插入头部
 const _interventionsByWorld = vi.hoisted(() => ({} as Record<string, any[]>));
 

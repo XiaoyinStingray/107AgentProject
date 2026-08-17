@@ -29,7 +29,7 @@ export default function AgentModule() {
     navigate,
   ]);
 
-  if (location.hash === "#item-6") return <RemixPanel />;
-  if (location.hash === "#item-7") return <TemplateBrowser />;
+  if (["#remix", "#item-6"].includes(location.hash)) return <RemixPanel />;
+  if (["#models", "#item-7"].includes(location.hash)) return <TemplateBrowser />;
   return <AgentFoundry initialDescription={initialDescription} />;
 }

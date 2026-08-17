@@ -38,6 +38,88 @@ export interface WorkerExecuteRequest {
   reuse_run_id?: string;  // 追加对话时复用已有工作区
 }
 
+export interface WorkerDecisionStep {
+  step_index: number;
+  action: string;
+  reason: string;
+  tool_name: string;
+  result_summary: string;
+  timestamp: string;
+}
+
+export interface WorkerForkOption {
+  title: string;
+  decision: string;
+  rationale: string;
+}
+
+export interface WorkerForkRequest {
+  fork_point_step: number;
+  alternative_decision: string;
+}
+
+export interface WorkerDecisionLog {
+  run_id: string;
+  running: boolean;
+  agent_id: string;
+  agent_name: string;
+  needs_agent_binding: boolean;
+  decisions: WorkerDecisionStep[];
+}
+
+async function readApiError(response: Response): Promise<string> {
+  const text = await response.text();
+  try {
+    const payload = JSON.parse(text);
+    return String(payload?.detail || payload?.message || response.statusText);
+  } catch {
+    return text || response.statusText;
+  }
+}
+
+export async function getWorkerDecisionLog(runId: string): Promise<WorkerDecisionLog> {
+  const response = await fetch(`/api/workers/${runId}/decisions`);
+  if (!response.ok) throw new Error(await readApiError(response));
+  const payload = await response.json();
+  return {
+    run_id: String(payload?.run_id || runId),
+    running: Boolean(payload?.running),
+    agent_id: String(payload?.agent_id || ""),
+    agent_name: String(payload?.agent_name || "?"),
+    needs_agent_binding: Boolean(payload?.needs_agent_binding ?? !payload?.agent_id),
+    decisions: Array.isArray(payload?.decisions) ? payload.decisions : [],
+  };
+}
+
+export async function bindWorkerAgent(runId: string, agentId: string) {
+  const response = await fetch(`/api/workers/${runId}/bind-agent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ agent_id: agentId }),
+  });
+  if (!response.ok) throw new Error(await readApiError(response));
+  return response.json() as Promise<{
+    run_id: string;
+    agent_id: string;
+    agent_name: string;
+    bound: boolean;
+  }>;
+}
+
+export async function generateWorkerForkOptions(
+  runId: string,
+  forkPointStep: number,
+): Promise<WorkerForkOption[]> {
+  const response = await fetch(`/api/workers/${runId}/fork-options`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fork_point_step: forkPointStep }),
+  });
+  if (!response.ok) throw new Error(await readApiError(response));
+  const payload = await response.json();
+  return Array.isArray(payload?.options) ? payload.options : [];
+}
+
 // =============================================================================
 // useWorkerExecute hook — POST SSE 流式消费
 // =============================================================================
@@ -58,34 +140,32 @@ export function useWorkerExecute() {
   });
   const abortRef = useRef<AbortController | null>(null);
 
-  const execute = useCallback(async (req: WorkerExecuteRequest) => {
+  const consume = useCallback(async (
+    url: string,
+    body: Record<string, unknown>,
+    initialEvents: WorkerEvent[] = [],
+  ) => {
     const controller = new AbortController();
     abortRef.current = controller;
 
-    setState((prev) => ({
+    setState({
       connected: true,
-      events: req.reuse_run_id
-        ? [...prev.events, {
-            type: "worker.started" as WorkerEventType,
-            data: { run_id: req.reuse_run_id, agent_name: "", task: `--- 追加: ${req.task.slice(0, 60)} ---`, workspace: "" },
-            timestamp: new Date().toISOString(),
-          }]
-        : [],
+      events: initialEvents,
       done: false,
       error: null,
-    }));
+    });
 
     try {
-      const response = await fetch("/api/workers/execute", {
+      const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(req),
+        body: JSON.stringify(body),
         signal: controller.signal,
       });
 
       if (!response.ok) {
-        const text = await response.text();
-        setState((prev) => ({ ...prev, connected: false, error: text }));
+        const message = await readApiError(response);
+        setState((prev) => ({ ...prev, connected: false, error: message }));
         return;
       }
 
@@ -142,6 +222,24 @@ export function useWorkerExecute() {
     }
   }, []);
 
+  const execute = useCallback(async (req: WorkerExecuteRequest) => {
+    const initialEvents = req.reuse_run_id
+      ? [...state.events, {
+          type: "worker.started" as WorkerEventType,
+          data: { run_id: req.reuse_run_id, agent_name: "", task: `--- 追加: ${req.task.slice(0, 60)} ---`, workspace: "" },
+          timestamp: new Date().toISOString(),
+        }]
+      : [];
+    await consume("/api/workers/execute", req as unknown as Record<string, unknown>, initialEvents);
+  }, [consume, state.events]);
+
+  const fork = useCallback(async (runId: string, req: WorkerForkRequest) => {
+    await consume(
+      `/api/workers/${runId}/fork`,
+      req as unknown as Record<string, unknown>,
+    );
+  }, [consume]);
+
   const cancel = useCallback(() => {
     abortRef.current?.abort();
   }, []);
@@ -164,7 +262,7 @@ export function useWorkerExecute() {
     });
   }, []);
 
-  return { ...state, execute, cancel, reset, hydrate };
+  return { ...state, execute, fork, cancel, reset, hydrate };
 }
 
 // =============================================================================

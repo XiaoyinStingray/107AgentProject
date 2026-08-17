@@ -28,8 +28,8 @@ export const MENU_SECTIONS: MenuSection[] = [
     items: [
       { id: 8, emoji: "🎬", label: "场景投放", priority: "P0" },
       { id: 9, emoji: "👁️", label: "思维流实时展示", priority: "P0" },
-      { id: 14, emoji: "⏸️", label: "暂停/干预", priority: "P2" },
-      { id: 13, emoji: "🔍", label: "决策回放", priority: "P2" },
+      { id: 14, emoji: "⏸️", label: "暂停/干预", priority: "P2", anchor: "controls" },
+      { id: 13, emoji: "🔍", label: "决策回放", priority: "P2", redirect: "/archive#highlights" },
     ],
   },
   {
@@ -37,7 +37,7 @@ export const MENU_SECTIONS: MenuSection[] = [
     items: [
       { id: 15, emoji: "🏘️", label: "群体投放", priority: "P0" },
       { id: 16, emoji: "💬", label: "Agent 间实时对话", priority: "P1" },
-      { id: 20, emoji: "🌐", label: "关系网络图", priority: "P2" },
+      { id: 20, emoji: "🌐", label: "关系网络图", priority: "P2", anchor: "relationships" },
     ],
   },
   {
@@ -78,8 +78,8 @@ export const MENU_SECTIONS: MenuSection[] = [
   {
     title: "M7 干预台", route: "/intervention",
     items: [
-      { id: 43, emoji: "💉", label: "事件注入", priority: "P2" },
-      { id: 48, emoji: "📋", label: "干预历史", priority: "P2" },
+      { id: 43, emoji: "💉", label: "事件注入", priority: "P2", anchor: "inject" },
+      { id: 48, emoji: "📋", label: "干预历史", priority: "P2", anchor: "history" },
     ],
   },
   {
@@ -113,8 +113,8 @@ export const MENU_SECTIONS: MenuSection[] = [
       { id: 59, emoji: "⚡", label: "终端工作台", priority: "P0" },
       { id: 65, emoji: "🏆", label: "产出纪念墙", priority: "P0", redirect: "/showcase" },
       { id: 60, emoji: "🔗", label: "管道编辑器", priority: "P2", redirect: "/pipeline-editor" },
-      { id: 61, emoji: "📁", label: "文件浏览器", priority: "P2" },
-      { id: 66, emoji: "🔀", label: "决策分叉", priority: "P2", redirect: "/worker" },
+      { id: 61, emoji: "📁", label: "文件浏览器", priority: "P2", anchor: "files" },
+      { id: 66, emoji: "🔀", label: "决策分叉", priority: "P2", anchor: "branches" },
     ],
   },
 ];
@@ -125,4 +125,11 @@ export function findItemById(id: number): (SubItem & { sectionTitle: string }) |
     if (found) return { ...found, sectionTitle: section.title };
   }
   return undefined;
+}
+
+/** Build the one canonical sidebar target for a feature entry. */
+export function getMenuItemTarget(section: MenuSection, item: SubItem): string {
+  if (item.redirect) return item.redirect;
+  if (item.anchor) return `${section.route}#${item.anchor}`;
+  return section.route;
 }

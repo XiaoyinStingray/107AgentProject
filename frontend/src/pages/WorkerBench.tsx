@@ -10,12 +10,14 @@ import { useState, useCallback, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useWorkerExecute } from "../api/workers";
 import WorkerTerminal from "../components/worker/WorkerTerminal";
+import DecisionForkPanel from "../components/worker/DecisionForkPanel";
 import WorkspacePanel from "../components/worker/WorkspacePanel";
 import WorkspaceSelector, {
   type WorkspaceConfig,
 } from "../components/worker/WorkspaceSelector";
 import { useAgents } from "../api/agents";
 import { unlock } from "../game/achievements";
+import { useFeatureAnchor } from "../hooks/useFeatureAnchor";
 
 // =============================================================================
 // 常量
@@ -42,6 +44,7 @@ class ErrorCatcher extends React.Component<{children: React.ReactNode}, {err: st
 }
 
 export default function WorkerBench() {
+  useFeatureAnchor();
   const { data: agents = [] } = useAgents();
   const [searchParams] = useSearchParams();
   const [task, setTask] = useState("");
@@ -98,7 +101,7 @@ export default function WorkerBench() {
     { value: "executor", label: "⚡ 执行者" },
   ];
 
-  const { events, connected, done, error, execute, cancel, reset, hydrate } =
+  const { events, connected, done, error, execute, fork, cancel, reset, hydrate } =
     useWorkerExecute();
 
   // 双重保险：done 状态可能未及时更新，从 events 推断
@@ -215,6 +218,28 @@ export default function WorkerBench() {
       if (resp.ok) setHistory(await resp.json());
     } catch {}
   }, []);
+
+  const handleSelectHistoryRun = useCallback(async (runId: string) => {
+    const selectedHistory = history.find((item) => item.run_id === runId);
+    setCurrentRunId(runId);
+    setAccepted(selectedHistory?.accepted ?? false);
+    try {
+      const response = await fetch(`/api/workers/${runId}/events`);
+      if (response.ok) {
+        const payload = await response.json();
+        if (payload.events?.length > 0) hydrate(payload.events);
+      }
+    } catch { /* 决策面板仍可读取持久化决策日志 */ }
+  }, [history, hydrate]);
+
+  const handleFork = useCallback((runId: string, stepIndex: number, alternativeDecision: string) => {
+    setAccepted(false);
+    setReconnectNotice(`正在从 Step ${stepIndex} 创建新路线…`);
+    void fork(runId, {
+      fork_point_step: stepIndex,
+      alternative_decision: alternativeDecision,
+    });
+  }, [fork]);
 
   // 挂载时加载历史
   useEffect(() => { loadHistory(); }, [loadHistory]);
@@ -569,6 +594,16 @@ export default function WorkerBench() {
         )}
       </div>
 
+      <DecisionForkPanel
+        runs={history}
+        currentRunId={currentRunId}
+        connected={connected}
+        currentAgentId={effectiveAgentId}
+        currentAgentName={selectedAgent?.name ?? ""}
+        onSelectRun={(runId) => { void handleSelectHistoryRun(runId); }}
+        onFork={handleFork}
+      />
+
       {/* ── 主体区域 ── */}
       <div className="flex-1 flex min-h-0">
         {/* 中央: 终端 */}
@@ -612,14 +647,7 @@ export default function WorkerBench() {
               ) : (
                 history.map((h) => (
                   <button key={h.run_id}
-                    onClick={async () => {
-                      setCurrentRunId(h.run_id); setAccepted(h.accepted);
-                      try {
-                        const evResp = await fetch(`/api/workers/${h.run_id}/events`);
-                        if (evResp.ok) { const evData = await evResp.json(); if (evData.events?.length > 0) hydrate(evData.events); }
-                      } catch {}
-                      loadHistory(); // 确保 accepted 状态同步
-                    }}
+                    onClick={() => { void handleSelectHistoryRun(h.run_id); loadHistory(); }}
                     className={`w-full text-left px-3 py-2 border-b border-border/30 hover:bg-bg-primary/50 transition-colors ${h.accepted ? "bg-emerald-500/5" : ""}`}>
                     <div className="flex items-center gap-1.5">
                       <span className={`w-2 h-2 rounded-full shrink-0 ${h.running ? "bg-emerald-400 animate-pulse" : h.accepted ? "bg-emerald-400" : "bg-text-muted/60"}`} />
@@ -644,7 +672,7 @@ export default function WorkerBench() {
           </div>
 
           {/* 文件面板 */}
-          <div className="flex-1 flex flex-col min-h-0">
+          <div id="section-files" className="flex-1 flex flex-col min-h-0">
             <div className="px-3 py-2 border-b border-border/50 bg-bg-secondary/50 shrink-0">
               <span className="text-[10px] font-mono text-text-muted font-semibold">📁 文件</span>
               {currentRunId && <span className="text-[10px] font-mono text-text-muted/50 ml-2">{currentRunId.slice(0, 8)}</span>}

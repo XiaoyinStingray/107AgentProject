@@ -18,7 +18,7 @@ import {
   Settings,
 } from "lucide-react";
 import Badge from "../shared/Badge";
-import { MENU_SECTIONS } from "../../data/menuData";
+import { getMenuItemTarget, MENU_SECTIONS } from "../../data/menuData";
 
 /* ── 教程阅读进度 ── */
 function getGuideReadCount(): number { try { return JSON.parse(localStorage.getItem("guide-read-modules") || "[]").length; } catch { return 0; } }
@@ -143,15 +143,7 @@ export default function Sidebar() {
                     <button
                       key={item.id}
                       onClick={() => {
-                        const it = item as any;
-                        if (it.redirect) {
-                          navigate(it.redirect);
-                        } else if (it.anchor) {
-                          navigate(`${section.route}#${it.anchor}`, { replace: true });
-                        } else {
-                          // 无锚点单页面：强制跳转
-                          window.location.href = section.route;
-                        }
+                        navigate(getMenuItemTarget(section, item), { replace: true });
                       }}
                       className="
                         w-full flex items-center gap-2 pl-10 pr-3 py-1.5 text-sm

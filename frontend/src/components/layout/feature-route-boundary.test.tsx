@@ -35,6 +35,7 @@ function renderBoundary(initialEntry: string) {
           <Route path="agents" element={<div>铸造厂正文</div>} />
           <Route path="sandbox" element={<div>群体沙盒正文</div>} />
           <Route path="arena" element={<div>竞技场正文</div>} />
+          <Route path="archive" element={<div>档案馆正文</div>} />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -85,6 +86,18 @@ describe("Step 28 FeatureRouteBoundary", () => {
     expect(screen.getByText("竞技场正文")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("当前功能：大乱斗");
     expect(screen.getByText("P2")).toBeInTheDocument();
+  });
+
+  it("announces semantic sidebar hashes on their current module", () => {
+    renderBoundary("/agents#remix");
+    expect(screen.getByText("铸造厂正文")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("当前功能：Agent Remix");
+  });
+
+  it("resolves a redirected replay target to the archive feature", () => {
+    renderBoundary("/archive#highlights");
+    expect(screen.getByText("档案馆正文")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("当前功能：精彩回放");
   });
 
   it("ignores a feature hash that belongs to another module", () => {
