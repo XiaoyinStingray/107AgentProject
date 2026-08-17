@@ -15,12 +15,12 @@ import Phaser from "phaser";
 // ── 常量 ──
 
 const TILE = 64;
-const MIN_STROKE_LENGTH = 40;
-const MIN_POINTS = 10;
-const LINE_MAX_DEVIATION = 15;
-const CIRCLE_CLOSE_DIST = 30;
-const CIRCLE_MIN_AREA = 1000;
-const CIRCLE_MIN_ROUNDNESS = 0.6;
+const MIN_STROKE_LENGTH = 30;   // 40→30 降低最小笔画长度
+const MIN_POINTS = 6;           // 10→6 降低最小采样点
+const LINE_MAX_DEVIATION = 20;  // 15→20 放宽直线容差
+const CIRCLE_CLOSE_DIST = 40;   // 30→40 放宽圆闭合距离
+const CIRCLE_MIN_AREA = 600;    // 1000→600 降低最小面积
+const CIRCLE_MIN_ROUNDNESS = 0.4; // 0.6→0.4 放宽圆度要求
 const CROSS_ANGLE_MIN = 30;
 const CROSS_ANGLE_MAX = 150;
 const GRAFFITI_FADE_DELAY = 5000;
@@ -139,6 +139,7 @@ export class GraffitiLayer {
 
   private finishStroke(): void {
     if (this.points.length < MIN_POINTS) {
+      this.showUnrecognized();
       this.clearAfterDelay();
       return;
     }
@@ -146,6 +147,7 @@ export class GraffitiLayer {
     const smoothed = this.smoothPoints(this.points);
     const totalLength = this.strokeLength(smoothed);
     if (totalLength < MIN_STROKE_LENGTH) {
+      this.showUnrecognized();
       this.clearAfterDelay();
       return;
     }
@@ -154,9 +156,26 @@ export class GraffitiLayer {
     if (result.type) {
       this.onShape?.(result);
       this.drawResult(result);
+    } else {
+      this.showUnrecognized();
     }
 
     this.clearAfterDelay();
+  }
+
+  /** 识别失败时显示淡灰色提示 */
+  private showUnrecognized(): void {
+    const g = this.graphics;
+    if (!g || this.points.length < 2) return;
+    // 用淡灰色重绘笔画，表示未识别
+    g.clear();
+    g.lineStyle(2, 0x888888, 0.3);
+    g.beginPath();
+    g.moveTo(this.points[0].x, this.points[0].y);
+    for (let i = 1; i < this.points.length; i++) {
+      g.lineTo(this.points[i].x, this.points[i].y);
+    }
+    g.strokePath();
   }
 
   // ── Phaser Graphics 绘制 ──

@@ -229,6 +229,7 @@ async def generate_proactive_topic(scene_id: str, body: ProactiveTopicRequest):
     # 尝试 LLM 生成
     try:
         from llm.client import create_model_client
+        from autogen_core.models import UserMessage
         client = create_model_client()
         prompt = (
             f"你是{body.agent_name}，你在「{body.scene}」场景中。"
@@ -236,11 +237,9 @@ async def generate_proactive_topic(scene_id: str, body: ProactiveTopicRequest):
             f"要自然、带点好奇、不要像客服、不要超过20个字。"
         )
         result = await client.create(
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.9,
-            max_tokens=60,
+            messages=[UserMessage(content=prompt, source="proactive_topic")],
         )
-        llm_topic = result.content.strip().strip("\"'")
+        llm_topic = str(result.content).strip().strip("\"'")
         if llm_topic and len(llm_topic) > 2:
             logger.info(f"[proactive-topic] LLM: {llm_topic[:40]}")
             return ProactiveTopicResponse(topic=llm_topic, source="llm")
@@ -266,6 +265,7 @@ class ChatOptionsRequest(BaseModel):
     agent_emotion: str = "neutral"
     topic: str
     scene: str
+    history: list[dict[str, str]] = []  # 对话历史 [{"speaker": "agent"|"user", "text": "..."}]
 
 
 class ChatOptionsResponse(BaseModel):
@@ -301,16 +301,27 @@ async def generate_chat_options(scene_id: str, body: ChatOptionsRequest):
 
     try:
         from llm.client import create_model_client
+        from autogen_core.models import UserMessage
         client = create_model_client("act")
+
+        # 构建对话历史文本
+        history_text = ""
+        if body.history:
+            history_text = "\n\n当前对话历史：\n"
+            for msg in body.history[-6:]:  # 最近 6 条
+                speaker = "Agent" if msg.get("speaker") == "agent" else "用户"
+                history_text += f"{speaker}：{msg.get('text', '')}\n"
 
         prompt = (
             f"你是一个对话选项生成器。\n"
-            f"Agent「{body.agent_name}」({body.agent_emotion})主动搭话说：「{body.topic}」\n"
-            f"请生成3个用户可选的回复，分别对应友善、冷淡、挑衅三种语气。\n"
+            f"Agent「{body.agent_name}」({body.agent_emotion})主动搭话说：「{body.topic}」"
+            f"{history_text}"
+            f"\n请根据以上对话内容，生成3个用户可选的回复，分别对应友善、冷淡、挑衅三种语气。\n"
             f"\n要求：\n"
-            f"- userText（用户说的话）：最多15字\n"
-            f"- agentReaction（Agent看到后的回应）：最多25字，符合Agent性格\n"
+            f"- userText（用户说的话）：最多15字，要贴合当前对话内容\n"
+            f"- agentReaction（Agent看到后的回应）：最多25字，符合Agent性格和当前情绪\n"
             f"- agentEmotion 用英文：happy/sad/angry/excited/neutral\n"
+            f"- 选项要随对话进展而变化，不要重复之前的选项\n"
             f"- 输出严格JSON数组，不要任何多余文字\n"
             f"\n格式：\n"
             f'[{{"label":"选项简短标题","tone":"友善","userText":"...","agentReaction":"...","agentEmotion":"happy"}},'
@@ -318,11 +329,9 @@ async def generate_chat_options(scene_id: str, body: ChatOptionsRequest):
             f'{{"tone":"挑衅","userText":"...","agentReaction":"...","agentEmotion":"angry"}}]'
         )
         result = await client.create(
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.9,
-            max_tokens=200,
+            messages=[UserMessage(content=prompt, source="chat_options")],
         )
-        text = result.content.strip()
+        text = str(result.content).strip()
         # 提取 JSON 数组
         import re, json
         match = re.search(r"\[[\s\S]*\]", text)

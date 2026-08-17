@@ -5,7 +5,7 @@
  * 支持 LLM 生成的情绪化选项 + 自定义输入。
  */
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import type { AgentSpriteData } from "../../game/sprites/AgentSprite";
 
 // ── 类型 ──
@@ -32,12 +32,14 @@ interface Props {
   onEnd: (history: ChatRound[]) => void;
   /** LLM 生成 Agent 对自定义输入的反应 */
   onCustomReply?: (userText: string) => Promise<{ agentReaction: string; agentEmotion: string }>;
+  /** 请求刷新选项（传入当前对话历史） */
+  onRefreshOptions?: (history: Array<{ speaker: string; text: string }>) => void;
 }
 
 // ── 组件 ──
 
 export default function ProactiveChat({
-  agent, topic, options, onEnd, onCustomReply,
+  agent, topic, options: initialOptions, onEnd, onCustomReply, onRefreshOptions,
 }: Props) {
   const [rounds, setRounds] = useState<ChatRound[]>([
     { speaker: "agent", text: topic },
@@ -45,7 +47,13 @@ export default function ProactiveChat({
   const [currentRound, setCurrentRound] = useState(0);
   const [selectedOption, setSelectedOption] = useState<ChatOption | null>(null);
   const [agentResponding, setAgentResponding] = useState(false);
+  const [currentOptions, setCurrentOptions] = useState<ChatOption[]>(initialOptions);
   const roundsRef = useRef<ChatRound[]>([{ speaker: "agent", text: topic }]);
+
+  // 当父组件传入新选项时更新
+  useEffect(() => {
+    setCurrentOptions(initialOptions);
+  }, [initialOptions]);
 
   // 自定义输入
   const [customMode, setCustomMode] = useState(false);
@@ -78,9 +86,13 @@ export default function ProactiveChat({
       const nextRound = currentRound + 1;
       setCurrentRound(nextRound);
 
-      // 达到最大轮数——不自动关闭，等用户手动退出
+      // Agent 回应后，请求刷新选项
+      if (onRefreshOptions && nextRound < maxRounds) {
+        const history = withAgent.map(r => ({ speaker: r.speaker, text: r.text }));
+        onRefreshOptions(history);
+      }
     }, 800 + Math.random() * 700);
-  }, [currentRound]);
+  }, [currentRound, onRefreshOptions]);
 
   // 自定义输入提交
   const handleCustomSubmit = useCallback(async () => {
@@ -220,7 +232,7 @@ export default function ProactiveChat({
         {currentRound < maxRounds && !selectedOption && !agentResponding && !customMode && (
           <div className="px-5 py-3 border-t border-border space-y-1.5">
             <p className="text-[10px] font-mono text-text-secondary mb-1">选择你的回复：</p>
-            {options.map((opt) => (
+            {currentOptions.map((opt) => (
               <button
                 key={opt.id}
                 type="button"

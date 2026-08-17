@@ -359,10 +359,10 @@ export class MapScene extends Phaser.Scene {
     // 3.5 装饰层（地板花纹 + 墙面挂饰）
     this.placeDecors(d);
 
-    // 4. 天气（含导演面板预设）
+    // 4. 天气（含导演面板预设）— 室内场景不渲染天气特效
     const weatherType = this.pendingWeather ?? d.weather;
     this.pendingWeather = null;
-    if (weatherType === "sakura" || weatherType === "rain") {
+    if (!d.indoor && (weatherType === "sakura" || weatherType === "rain")) {
       this.startWeather(weatherType, W, H);
     }
 
@@ -537,7 +537,8 @@ export class MapScene extends Phaser.Scene {
     this.weatherParticles = [];
     if (this.mapData) {
       this.mapData.weather = type as any;
-      if (type === "sakura" || type === "rain") {
+      // 室内场景不渲染天气特效
+      if (!this.mapData.indoor && (type === "sakura" || type === "rain")) {
         this.startWeather(type, this.mapData.width, this.mapData.height);
       }
     } else {
@@ -1409,8 +1410,8 @@ export class MapScene extends Phaser.Scene {
    * ================================================================ */
 
   private static readonly SCAN_INTERVAL = 3000;  // 扫描间隔 ms
-  private static readonly PROXIMITY = 5;         // 触发对话的 tile 距离
-  private static readonly COOLDOWN = 8000;       // 同对冷却 ms
+  private static readonly PROXIMITY = 7;         // 触发对话的 tile 距离（5→7 减少沉默）
+  private static readonly COOLDOWN = 5000;       // 同对冷却 ms（8s→5s 减少沉默）
   private static readonly ROUND_DELAY = 1200;    // 每轮间隔 ms
   private static readonly WHISPER_TIMEOUT = 20_000;
 

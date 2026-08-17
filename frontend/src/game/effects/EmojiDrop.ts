@@ -29,6 +29,9 @@ const EMOJI_REACTIONS: Record<string, EmojiReaction> = {
   "👻": { emotion: "surprised", burst: true, animation: "startled" },
 };
 
+// 负面 emoji（只有这些会触发"友尽"）
+const NEGATIVE_EMOJIS = new Set(["😡", "💣", "👻"]);
+
 // ── 常量 ──
 
 const TILE = 64;
@@ -189,17 +192,19 @@ export class EmojiDrop {
         return;
       }
 
-      // 记录击中
-      const hits = (this.agentHitCounts.get(hitAgent.agentId) ?? 0) + 1;
-      this.agentHitCounts.set(hitAgent.agentId, hits);
+      // 记录击中（只有负面 emoji 才计入友尽计数）
+      if (NEGATIVE_EMOJIS.has(emoji)) {
+        const hits = (this.agentHitCounts.get(hitAgent.agentId) ?? 0) + 1;
+        this.agentHitCounts.set(hitAgent.agentId, hits);
 
-      // 连砸检测
-      if (hits >= FRIENDLY_BLOCK_COUNT) {
-        this.agentBlockedUntil.set(hitAgent.agentId, now + FRIENDLY_BLOCK_DURATION);
-        this.agentHitCounts.set(hitAgent.agentId, 0);
-        this.showAgentBlocked(hitAgent);
-        this.fadeAndDestroy(text);
-        return;
+        // 连砸检测
+        if (hits >= FRIENDLY_BLOCK_COUNT) {
+          this.agentBlockedUntil.set(hitAgent.agentId, now + FRIENDLY_BLOCK_DURATION);
+          this.agentHitCounts.set(hitAgent.agentId, 0);
+          this.showAgentBlocked(hitAgent);
+          this.fadeAndDestroy(text);
+          return;
+        }
       }
 
       // 正常反应

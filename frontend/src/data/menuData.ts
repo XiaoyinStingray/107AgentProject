@@ -18,9 +18,9 @@ export const MENU_SECTIONS: MenuSection[] = [
     title: "M1 铸造厂", route: "/agents",
     items: [
       { id: 1, emoji: "🎭", label: "创建 Agent", priority: "P0", anchor: "foundry" },
-      { id: 6, emoji: "🔄", label: "Agent Remix", priority: "P2", anchor: "remix" },
+      { id: 6, emoji: "🔄", label: "Agent Remix", priority: "P2", anchor: "item-6" },
       { id: 4, emoji: "🎯", label: "目标系统", priority: "P1", anchor: "goals" },
-      { id: 7, emoji: "📦", label: "模板库", priority: "P2", anchor: "models" },
+      { id: 7, emoji: "📦", label: "模板库", priority: "P2", anchor: "item-7" },
     ],
   },
   {
