@@ -163,11 +163,14 @@ function pickTopic(scene: string, mbti?: string): { topic: string; category: Pro
   const pool = TOPIC_POOL[scene]?.[group] ?? DEFAULT_TOPICS[group];
   const topic = pool[Math.floor(Math.random() * pool.length)];
 
-  // 根据话题内容推断类别
-  if (topic.includes("？") || topic.includes("你知道") || topic.includes("有没有")) return { topic, category: "curious" };
-  if (topic.includes("一起") || topic.includes("要不要") || topic.includes("加我")) return { topic, category: "invite" };
-  if (topic.includes("无聊") || topic.includes("崩了") || topic.includes("失败")) return { topic, category: "complain" };
-  if (topic.includes("帮") || topic.includes("借") || topic.includes("问题")) return { topic, category: "help" };
+  // 根据话题内容推断类别（扩展覆盖面 + 调整优先级）
+  // invite 优先于 curious，因为 "想" 同时匹配两者
+  if (topic.includes("帮") || topic.includes("借") || topic.includes("问题") || topic.includes("怎么") || topic.includes("教我")) return { topic, category: "help" };
+  if (topic.includes("一起") || topic.includes("要不要") || topic.includes("加我") || topic.includes("去吧") || topic.includes("来") ||
+      topic.includes("想听") || topic.includes("想看") || topic.includes("想知") || topic.includes("好吗") || topic.includes("愿意") ||
+      topic.includes("陪你") || topic.includes("带你")) return { topic, category: "invite" };
+  if (topic.includes("无聊") || topic.includes("崩了") || topic.includes("失败") || topic.includes("烦") || topic.includes("累") || topic.includes("不想")) return { topic, category: "complain" };
+  if (topic.includes("？") || topic.includes("你知道") || topic.includes("有没有") || topic.includes("为什么") || topic.includes("觉得")) return { topic, category: "curious" };
   return { topic, category: "chat" };
 }
 

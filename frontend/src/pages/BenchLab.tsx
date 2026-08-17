@@ -12,16 +12,6 @@ import CompareView from "../components/bench/CompareView";
 export default function BenchLab() {
   const { hash } = useLocation();
 
-  // 侧边栏锚点跳转：监听 hash 变化滚动到对应区域
-  useEffect(() => {
-    if (!hash) return;
-    const id = hash.replace("#", "");
-    const el = document.getElementById(id);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  }, [hash]);
-
   const { data: runs = [] } = useBenchRuns();
   const createRun = useCreateBenchRun();
   const deleteRun = useDeleteBenchRun();
@@ -32,9 +22,50 @@ export default function BenchLab() {
   const [model, setModel] = useState("deepseek-v4-flash");
   const [msg, setMsg] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const { data: detail } = useBenchRun(selectedRunId);
+  const { data: detail, refetch: refetchDetail } = useBenchRun(selectedRunId);
 
   const [testing, setTesting] = useState(false);
+
+  // BUG-M10-001: 独立测试连通按钮
+  const handleTestApi = async () => {
+    if (!apiKey || !baseUrl || !model) { setMsg("请先填写完整配置"); return; }
+    setTesting(true); setMsg("正在测试 API 连通性…");
+    try {
+      const testRes = await fetch("/api/bench/test-api", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: apiKey, base_url: baseUrl, model }),
+      });
+      const testData = await testRes.json();
+      if (!testData.ok) { setMsg(`API 连接失败: ${testData.error}`); } else {
+        setMsg(`✅ API 连通 (${testData.elapsed}s)，可以开始评测`);
+      }
+    } catch { setMsg("API 测试请求失败"); }
+    setTesting(false);
+  };
+
+  // BUG-M10-002: runs 列表更新时强制刷新 detail（解决评测完成后仍显示"进行中"）
+  useEffect(() => {
+    if (!selectedRunId) return;
+    const run = runs.find((r) => r.id === selectedRunId);
+    if (run && run.status !== "running") {
+      // 列表已显示完成，但 detail 可能还缓存着 running → 强制 refetch
+      void refetchDetail();
+    }
+  }, [runs, selectedRunId, refetchDetail]);
+
+  // BUG-M10-003: hash 锚点跳转 + 目标不存在时的回退
+  useEffect(() => {
+    if (!hash) return;
+    const id = hash.replace("#", "");
+    const el = document.getElementById(id);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      // 目标元素尚未渲染（如排行榜需要 ≥2 条 done 记录），回退到历史评测区
+      const fallback = document.getElementById("runs");
+      if (fallback) fallback.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [hash]);
 
   // 对比 + 盲测
   const [compareA, setCompareA] = useState<string>("");
@@ -81,6 +112,8 @@ export default function BenchLab() {
       setSelectedRunId(result.id);
       setApiKey("");
       setMsg(`评测已启动 (${result.total_tasks} 条任务)…`);
+      // BUG-M10-011: 3 秒后自动清除启动提示
+      setTimeout(() => setMsg(null), 3000);
     } catch { setMsg("启动失败"); }
     setTesting(false);
   };
@@ -103,11 +136,19 @@ export default function BenchLab() {
           <input type="text" value={model} onChange={(e) => setModel(e.target.value)}
             placeholder="Model" className="bg-bg-secondary border border-border rounded px-3 py-2 text-xs font-mono text-text-primary focus:outline-none focus:border-accent-orange" />
         </div>
-        <button type="button" disabled={createRun.isPending || testing || !apiKey}
-          onClick={() => handleStart()}
-          className="px-6 py-2 rounded-lg bg-accent-orange text-bg-primary font-mono text-sm hover:bg-accent-orange/90 disabled:opacity-40 transition-colors">
-          {testing ? "测试中…" : createRun.isPending ? "启动中…" : "▶ 开始评测"}
-        </button>
+        <div className="flex flex-wrap gap-2 items-center">
+          {/* BUG-M10-001: 独立测试连通按钮 */}
+          <button type="button" disabled={testing || !apiKey}
+            onClick={handleTestApi}
+            className="px-4 py-2 rounded-lg border border-accent-green/60 text-accent-green font-mono text-sm hover:bg-accent-green/10 disabled:opacity-40 transition-colors">
+            🔌 测试连通
+          </button>
+          <button type="button" disabled={createRun.isPending || testing || !apiKey}
+            onClick={() => handleStart()}
+            className="px-6 py-2 rounded-lg bg-accent-orange text-bg-primary font-mono text-sm hover:bg-accent-orange/90 disabled:opacity-40 transition-colors">
+            {testing ? "测试中…" : createRun.isPending ? "启动中…" : "▶ 开始评测"}
+          </button>
+        </div>
         <p className="text-xs text-text-secondary/50 font-mono mt-2">
           标准化套件：3 Agent × 3 场景 × 3 次重复 = 27 条评测 · 6 并发 · 预计 ~3 分钟
         </p>
@@ -115,7 +156,7 @@ export default function BenchLab() {
       </Card>
 
       {/* 69: 自定义套件 + 模板 */}
-      <CustomSuitePanel onStart={(cfg) => handleStart(cfg)} createPending={createRun.isPending} testing={testing} />
+      <CustomSuitePanel onStart={(cfg) => handleStart(cfg)} createPending={createRun.isPending} testing={testing} setMsg={setMsg} apiKey={apiKey} />
 
       {/* 70: 劣化检测 */}
       <DegradationPanel />
@@ -179,6 +220,14 @@ export default function BenchLab() {
             <h3 className="text-sm font-mono text-text-primary">{detail?.name ?? selectedRun?.name}</h3>
             <Badge label={(detail?.status ?? selectedRun?.status) === "running" ? "运行中" : (detail?.status === "failed" ? "失败" : (detail?.status as string) === "cancelled" ? "已取消" : "完成")} variant={detail?.status === "done" ? "P1" : "P2"} />
             {detail && <span className="text-xs text-text-secondary/50 font-mono">{detail.completed_tasks}/{detail.total_tasks}</span>}
+            {/* BUG-M10-002: 手动刷新按钮 */}
+            {detail && (
+              <button type="button" onClick={() => { void refetchDetail(); }}
+                className="px-2 py-0.5 text-xs font-mono rounded border border-border text-text-secondary hover:text-accent-orange transition-colors"
+                title="刷新状态">
+                🔄 刷新
+              </button>
+            )}
             {detail?.status === "running" && (
               <button onClick={() => { cancelRun.mutate(selectedRunId!); }}
                 className="px-2 py-0.5 text-xs font-mono rounded border border-accent-red/40 text-accent-red hover:bg-accent-red/10">
@@ -347,19 +396,48 @@ function TrendView({ runs }: { runs: { id: string; name: string; llm_model: stri
   const models = [...new Set(runs.map((r) => r.llm_model))];
   const data = runs.filter((r) => r.llm_model === model && r.scores).sort((a, b) => a.created_at.localeCompare(b.created_at)).map((r) => ({ date: r.created_at.slice(0, 10), score: dim === "综合" ? avgScore(r.scores) : (r.scores?.[dim] ?? 0) }));
   if (data.length < 2) return null;
-  const maxS = Math.max(...data.map((d) => d.score), 1);
-  const h = 120, w = 400, pad = 30;
-  const pts = data.map((d, i) => `${pad + (i / Math.max(data.length - 1, 1)) * (w - pad * 2)},${h - pad - (d.score / maxS) * (h - pad * 2)}`).join(" ");
+  // BUG-M10-009: Y轴固定 0-100 刻度，数据点与坐标轴对应
+  const MAX_SCORE = 100;
+  const h = 140, pad = 30;
   const declining = data.length >= 3 && data.slice(-3).every((d, i, arr) => i === 0 || d.score < arr[i - 1].score);
 
   return (
-    <Card className="p-4 mt-6">
+    <Card className="p-4 mt-6 overflow-x-auto">
       <h3 className="text-sm font-mono text-text-primary mb-3">📈 趋势</h3>
       <div className="flex gap-2 mb-3">
         <select value={model} onChange={(e) => setModel(e.target.value)} className="bg-bg-secondary border border-border rounded px-2 py-1 text-xs font-mono text-text-primary">{models.map((m) => <option key={m} value={m}>{m}</option>)}</select>
         <select value={dim} onChange={(e) => setDim(e.target.value)} className="bg-bg-secondary border border-border rounded px-2 py-1 text-xs font-mono text-text-primary"><option value="综合">综合分</option>{DIMS.map((d) => <option key={d} value={d}>{d}</option>)}</select>
       </div>
-      <svg width={w} height={h} className="select-none"><polyline points={pts} fill="none" stroke="rgb(249,115,22)" strokeWidth={2} />{data.map((d, i) => (<circle key={i} cx={pad + (i / Math.max(data.length - 1, 1)) * (w - pad * 2)} cy={h - pad - (d.score / maxS) * (h - pad * 2)} r={3} fill="rgb(249,115,22)" />))}</svg>
+      <div className="overflow-x-auto">
+        <svg viewBox={`0 0 ${Math.max(400, data.length * 80 + pad * 2)} ${h}`} className="w-full min-w-[400px] select-none" preserveAspectRatio="xMidYMid meet">
+          {/* Y 轴网格线 + 标签 */}
+          {[0, 25, 50, 75, 100].map((v) => {
+            const y = h - pad - (v / 100) * (h - pad * 2);
+            return (
+              <g key={v}>
+                <line x1={pad} y1={y} x2={Math.max(400, data.length * 80 + pad * 2) - pad} y2={y} stroke="rgb(63,63,70)" strokeWidth={0.5} strokeDasharray="2,2" />
+                <text x={pad - 4} y={y + 3} textAnchor="end" fill="rgb(113,113,122)" fontSize={9} fontFamily="monospace">{v}</text>
+              </g>
+            );
+          })}
+          {/* 数据线 */}
+          <polyline
+            points={data.map((d, i) => `${pad + (i / Math.max(data.length - 1, 1)) * (Math.max(400, data.length * 80 + pad * 2) - pad * 2)},${h - pad - (d.score / MAX_SCORE) * (h - pad * 2)}`).join(" ")}
+            fill="none" stroke="rgb(249,115,22)" strokeWidth={2}
+          />
+          {/* 数据点 + 数值标注 */}
+          {data.map((d, i) => {
+            const x = pad + (i / Math.max(data.length - 1, 1)) * (Math.max(400, data.length * 80 + pad * 2) - pad * 2);
+            const y = h - pad - (d.score / MAX_SCORE) * (h - pad * 2);
+            return (
+              <g key={i}>
+                <circle cx={x} cy={y} r={3} fill="rgb(249,115,22)" />
+                <text x={x} y={y - 8} textAnchor="middle" fill="rgb(249,115,22)" fontSize={9} fontFamily="monospace">{d.score.toFixed(0)}</text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
       <div className="flex justify-between text-[10px] font-mono text-text-secondary/50 mt-1">{data.map((d, i) => <span key={i}>{d.date.slice(5)}</span>)}</div>
       {declining && <p className="text-xs font-mono text-accent-red mt-2">⚠️ {dim}连续下降，可能退化</p>}
     </Card>
@@ -371,8 +449,8 @@ function TrendView({ runs }: { runs: { id: string; name: string; llm_model: stri
    69: 自定义套件 + 模板管理（合并组件）
    ================================================================ */
 
-function CustomSuitePanel({ onStart, createPending, testing }: {
-  onStart: (cfg: any) => void; createPending: boolean; testing: boolean;
+function CustomSuitePanel({ onStart, createPending, testing, setMsg, apiKey }: {
+  onStart: (cfg: any) => void; createPending: boolean; testing: boolean; setMsg: (m: string | null) => void; apiKey: string;
 }) {
   const [show, setShow] = useState(false);
   const { data: templates = [] } = useBenchTemplates();
@@ -402,9 +480,19 @@ function CustomSuitePanel({ onStart, createPending, testing }: {
   };
 
   const applyTemplate = (t: any) => {
-    if (t.agents?.length) setSelAgents(new Set(t.agents.map((a: any) => a.id)));
-    if (t.scenarios?.length) setSelScenarios(new Set(t.scenarios.map((s: any) => s.name)));
+    // BUG-M10-004/005: 套用模板时过滤掉当前不存在的 Agent/场景
+    const availableIds = new Set(agentOptions.map((a: any) => a.id));
+    const validAgentIds = (t.agents || []).filter((a: any) => availableIds.has(a.id)).map((a: any) => a.id);
+    const validScenarioNames = (t.scenarios || []).filter((s: any) => BUILTIN_SCENARIOS.includes(s.name)).map((s: any) => s.name);
+    if (validAgentIds.length > 0) setSelAgents(new Set(validAgentIds));
+    if (validScenarioNames.length > 0) setSelScenarios(new Set(validScenarioNames));
     if (t.repeats) setRepeats(t.repeats);
+    // 提示用户哪些项无法套用
+    const missingA = (t.agents || []).length - validAgentIds.length;
+    const missingS = (t.scenarios || []).length - validScenarioNames.length;
+    if (missingA > 0 || missingS > 0) {
+      setMsg(`⚠️ 模板中有 ${missingA} 个 Agent / ${missingS} 个场景已不可用，已自动跳过`);
+    }
   };
 
   const toggleAgent = (id: string) => setSelAgents((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -470,7 +558,7 @@ function CustomSuitePanel({ onStart, createPending, testing }: {
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <button disabled={createPending || testing || selAgents.size === 0 || selScenarios.size === 0}
+          <button disabled={createPending || testing || !apiKey || selAgents.size === 0 || selScenarios.size === 0}
             onClick={() => onStart(currentConfig)}
             className="px-4 py-1.5 text-xs font-mono rounded bg-accent-orange text-bg-primary disabled:opacity-40">
             ▶ 启动 ({selAgents.size}A × {selScenarios.size}S × {repeats})
@@ -555,16 +643,23 @@ function DegradationPanel() {
 
   return (
     <Card className="mb-6">
-      <h2 className="text-sm font-mono text-text-primary mb-3">📉 劣化检测</h2>
+      <h2 className="text-sm font-mono text-text-primary mb-1">📉 劣化检测</h2>
+      {/* BUG-M10-012: 添加说明文字 */}
+      <p className="text-[11px] font-mono text-text-secondary/50 mb-3">
+        对比最近 3 次 vs 之前 3 次评测，综合分下降 &gt;5 分标记为 📉 劣化，上升 &gt;5 分为 📈 改进，变化 ≤5 分为 ➡️ 稳定
+      </p>
       {Object.entries(data).map(([model, d]) => (
         <div key={model} className="flex items-center gap-3 py-1 border-b border-border/30 last:border-0">
           <span className="text-xs font-mono text-text-primary">{model}</span>
           <span className={`text-xs font-mono ${d.declining ? "text-accent-red" : "text-text-secondary/50"}`}>{d.trend}</span>
           {d.points.length >= 2 && (
-            <div className="flex-1 flex items-end gap-0.5 h-8">
+            <div className="flex-1 flex items-end gap-5 h-64">
               {d.points.map((p, i) => (
-                <div key={i} className="flex-1 bg-accent-orange/30 rounded-t" style={{ height: `${Math.max(4, p.overall)}%` }}
-                  title={`#${i + 1}: ${p.overall}`} />
+                <div key={i} className="flex-1 flex flex-col items-center justify-end h-full">
+                  <span className="text-[10px] font-mono text-text-secondary/60 mb-0.5">{p.overall}</span>
+                  <div className="w-full bg-accent-orange/30 rounded-t" style={{ height: `${Math.max(8, p.overall)}%` }}
+                    title={`#${i + 1}: ${p.overall}`} />
+                </div>
               ))}
             </div>
           )}

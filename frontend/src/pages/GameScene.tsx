@@ -176,7 +176,7 @@ export default function GameScenePage() {
   // ── Step 99c: 涂鸦模式 ──
   const [graffitiEnabled, setGraffitiEnabled] = useState(false);
 
-  // ── Step 99b: Emoji 模式 ──
+  // ─ Step 99b: Emoji 模式 ─
   const [emojiMode, setEmojiMode] = useState(false);
   const [selectedEmoji, setSelectedEmoji] = useState("❤️");
   const EMOJI_PALETTE = ["❤️", "😡", "🌸", "💣", "🎵", "👻"];
@@ -891,7 +891,7 @@ export default function GameScenePage() {
   return (
     <div className="h-full flex animate-fade-in">
       {/* ── 左侧控制栏 ── */}
-      <div className="w-72 shrink-0 overflow-y-auto p-4 space-y-3 border-r border-border">
+      <div className="w-80 shrink-0 overflow-y-auto p-4 space-y-3 border-r border-border">
         <h1 className="text-lg font-mono text-accent-orange">M11 游戏化场景</h1>
         <AudioControls />
 
@@ -1081,6 +1081,20 @@ export default function GameScenePage() {
               );
               return llm ?? { agentReaction: "嗯…好的。", agentEmotion: "neutral" };
             }}
+            onRefreshOptions={async (history) => {
+              const llmOptions = await generateChatOptionsLLM(
+                chatActive.trigger.topic,
+                chatActive.trigger.agent.name,
+                chatActive.trigger.agent.emotion,
+                mapId,
+                history,
+              );
+              if (llmOptions) {
+                setChatActive((prev) => prev && prev.trigger === chatActive.trigger
+                  ? { ...prev, options: llmOptions }
+                  : prev);
+              }
+            }}
           />
         )}
       </div>
@@ -1110,148 +1124,167 @@ export default function GameScenePage() {
         />
       )}
 
-      {/* Agent 投放面板 */}
-      <Card className="mt-4 p-3">
-        <p className="text-xs font-mono text-text-secondary mb-2">
-          投放 Agent（{agents.length}/{agentPool.length}）
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {agentPool.map((def) => {
-            const deployed = agents.find((a) => a.agentId === def.agentId);
-            return (
+      {/* ─ 底部控制面板组 ── */}
+      <div className="mt-4 flex items-stretch gap-3 flex-1 min-h-0">
+        {/* Agent 投放面板 */}
+        <Card className="w-72 shrink-0 flex flex-col max-h-full">
+          <div className="px-3 py-2 text-xs font-mono text-text-secondary shrink-0 border-b border-border">
+            投放 Agent（{agents.length}/{agentPool.length}）
+          </div>
+          <div className="overflow-y-auto px-3 pb-3 flex-1">
+            <div className="flex flex-col gap-1.5">
+              {agentPool.map((def) => {
+                const deployed = agents.find((a) => a.agentId === def.agentId);
+                return (
+                  <button
+                    key={def.agentId}
+                    type="button"
+                    onClick={() =>
+                      deployed ? removeAgent(def.agentId) : deployAgent(def)
+                    }
+                    className={`w-full text-left px-3 py-1.5 text-xs font-mono rounded border transition-colors flex items-center gap-2 ${
+                      deployed
+                        ? "border-accent-green/60 bg-accent-green/10 text-accent-green"
+                        : "border-border text-text-secondary hover:border-text-secondary/40"
+                    }`}
+                  >
+                    <span
+                      className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
+                      style={{ backgroundColor: def.color }}
+                    />
+                    <span className="flex-1 truncate">{def.name}</span>
+                    <span className="shrink-0 text-[10px]">{deployed ? "✓" : "+"}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </Card>
+
+        {/* 导演面板 (Step 66) */}
+        <Card className="w-80 shrink-0 flex flex-col">
+          <div id="section-director" className="px-3 py-2 text-xs font-mono text-text-secondary shrink-0 border-b border-border">
+            导演模式
+          </div>
+          <div className="p-3 flex-1">
+            <DirectorPanel
+              weather={weather}
+              onWeatherChange={handleWeatherChange}
+              onGodVoice={handleGodVoice}
+              onMoodAll={handleMoodAll}
+              paused={paused || autoPaused}
+            />
+
+            {/* Step 99c: 涂鸦指令开关 */}
+            <div className="mt-2 pt-2 border-t border-border space-y-1.5">
               <button
-                key={def.agentId}
                 type="button"
-                onClick={() =>
-                  deployed ? removeAgent(def.agentId) : deployAgent(def)
-                }
-                className={`px-3 py-1 text-xs font-mono rounded border transition-colors ${
-                  deployed
-                    ? "border-accent-green/60 bg-accent-green/10 text-accent-green"
+                onClick={handleToggleGraffiti}
+                className={`w-full px-3 py-1.5 text-xs font-mono rounded border transition-colors ${
+                  graffitiEnabled
+                    ? "border-accent-blue/60 bg-accent-blue/10 text-accent-blue"
                     : "border-border text-text-secondary hover:border-text-secondary/40"
                 }`}
               >
-                <span
-                  className="inline-block w-2.5 h-2.5 rounded-full mr-1.5 align-middle"
-                  style={{ backgroundColor: def.color }}
-                />
-                {def.name}
-                {deployed ? " ✓" : " +"}
+                ✏️ 涂鸦指令 {graffitiEnabled ? "开" : "关"}
               </button>
-            );
-          })}
-        </div>
-      </Card>
+              {graffitiEnabled && (
+                <p className="text-[10px] font-mono text-text-secondary">
+                  按住画线→跟随 / 画圈→聚集 / 画叉→散开
+                </p>
+              )}
 
-      {/* 导演面板 (Step 66) */}
-      <Card className="p-3">
-        <p id="section-director" className="text-xs font-mono text-text-secondary mb-2">导演模式</p>
-        <DirectorPanel
-          weather={weather}
-          onWeatherChange={handleWeatherChange}
-          onGodVoice={handleGodVoice}
-          onMoodAll={handleMoodAll}
-          paused={paused || autoPaused}
-        />
-
-        {/* Step 99c: 涂鸦指令开关 */}
-        <div className="mt-2 pt-2 border-t border-border space-y-1.5">
-          <button
-            type="button"
-            onClick={handleToggleGraffiti}
-            className={`w-full px-3 py-1.5 text-xs font-mono rounded border transition-colors ${
-              graffitiEnabled
-                ? "border-accent-blue/60 bg-accent-blue/10 text-accent-blue"
-                : "border-border text-text-secondary hover:border-text-secondary/40"
-            }`}
-          >
-            ✏️ 涂鸦指令 {graffitiEnabled ? "开" : "关"}
-          </button>
-          {graffitiEnabled && (
-            <p className="text-[10px] font-mono text-text-secondary">
-              按住画线→跟随 / 画圈→聚集 / 画叉→散开
-            </p>
-          )}
-
-          {/* Step 99b: Emoji 模式开关 */}
-          <button
-            type="button"
-            onClick={handleToggleEmojiMode}
-            className={`w-full px-3 py-1.5 text-xs font-mono rounded border transition-colors ${
-              emojiMode
-                ? "border-accent-orange/60 bg-accent-orange/10 text-accent-orange"
-                : "border-border text-text-secondary hover:border-text-secondary/40"
-            }`}
-          >
-            🎯 Emoji 投掷 {emojiMode ? "开" : "关"}
-          </button>
-          {emojiMode && (
-            <p className="text-[10px] font-mono text-text-secondary">
-              选 emoji → 点画布投掷 → Agent 反应
-            </p>
-          )}
-        </div>
-      </Card>
-
-      {/* 存档面板 */}
-      <Card className="p-3">
-        <p id="section-checkpoints" className="text-xs font-mono text-text-secondary mb-2">存档管理</p>
-        <CheckpointPanel
-          checkpoints={checkpoints}
-          count={checkpoints.length}
-          max={30}
-          paused={paused}
-          busy={sceneControlPending}
-          onSave={handleSaveCheckpoint}
-          onLoad={handleLoadCheckpoint}
-          onDelete={handleDeleteCheckpoint}
-          onTogglePause={handleTogglePause}
-        />
-        {sceneControlError && (
-          <p
-            role="alert"
-            className="mt-2 text-[10px] font-mono text-red-400"
-          >
-            {sceneControlError}
-          </p>
-        )}
-      </Card>
-
-      {/* 已投放 Agent 情绪控制 */}
-      {agents.length > 0 && (
-        <Card className="mt-4 p-3">
-          <p className="text-xs font-mono text-text-secondary mb-2">情绪控制</p>
-          <div className="flex flex-col gap-2">
-            {agents.map((agent) => (
-              <div key={agent.agentId} className="flex items-center gap-2">
-                <span
-                  className="inline-block w-3 h-3 rounded-full shrink-0"
-                  style={{ backgroundColor: agent.color }}
-                />
-                <span className="text-xs font-mono text-text-primary w-10 shrink-0">
-                  {agent.name}
-                </span>
-                {(["neutral","happy","anxious","angry","sad","surprised","confused","tired","excited"] as Emotion[]).map(
-                  (em) => (
-                    <button
-                      key={em}
-                      type="button"
-                      onClick={() => setAgentEmotion(agent.agentId, em)}
-                      className={`px-2 py-0.5 text-[10px] font-mono rounded border transition-colors ${
-                        agent.emotion === em
-                          ? "border-accent-orange/60 bg-accent-orange/10 text-accent-orange"
-                          : "border-border text-text-secondary hover:border-text-secondary/40"
-                      }`}
-                    >
-                      {em}
-                    </button>
-                  ),
-                )}
-              </div>
-            ))}
+              {/* Step 99b: Emoji 模式开关 */}
+              <button
+                type="button"
+                onClick={handleToggleEmojiMode}
+                className={`w-full px-3 py-1.5 text-xs font-mono rounded border transition-colors ${
+                  emojiMode
+                    ? "border-accent-orange/60 bg-accent-orange/10 text-accent-orange"
+                    : "border-border text-text-secondary hover:border-text-secondary/40"
+                }`}
+              >
+                🎯 Emoji 投掷 {emojiMode ? "开" : "关"}
+              </button>
+              {emojiMode && (
+                <p className="text-[10px] font-mono text-text-secondary">
+                  选 emoji → 点画布投掷 → Agent 反应
+                </p>
+              )}
+            </div>
           </div>
         </Card>
-      )}
+
+        {/* 存档面板 */}
+        <Card className="w-80 shrink-0 flex flex-col">
+          <div id="section-checkpoints" className="px-3 py-2 text-xs font-mono text-text-secondary shrink-0 border-b border-border">
+            存档管理
+          </div>
+          <div className="p-3 flex-1">
+            <CheckpointPanel
+              checkpoints={checkpoints}
+              count={checkpoints.length}
+              max={30}
+              paused={paused}
+              busy={sceneControlPending}
+              onSave={handleSaveCheckpoint}
+              onLoad={handleLoadCheckpoint}
+              onDelete={handleDeleteCheckpoint}
+              onTogglePause={handleTogglePause}
+            />
+            {sceneControlError && (
+              <p
+                role="alert"
+                className="mt-2 text-[10px] font-mono text-red-400"
+              >
+                {sceneControlError}
+              </p>
+            )}
+          </div>
+        </Card>
+
+        {/* 已投放 Agent 情绪控制 */}
+        {agents.length > 0 && (
+          <Card className="w-[720px] shrink-0 flex flex-col">
+            <div className="px-3 py-2 text-xs font-mono text-text-secondary shrink-0 border-b border-border">
+              情绪控制
+            </div>
+            <div className="p-3 overflow-y-auto flex-1">
+              <div className="flex flex-col gap-2">
+                {agents.map((agent) => (
+                  <div key={agent.agentId} className="flex items-center gap-2">
+                    <span
+                      className="inline-block w-3 h-3 rounded-full shrink-0"
+                      style={{ backgroundColor: agent.color }}
+                    />
+                    <span className="text-xs font-mono text-text-primary w-10 shrink-0">
+                      {agent.name}
+                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      {(["neutral","happy","anxious","angry","sad","surprised","confused","tired","excited"] as Emotion[]).map(
+                        (em) => (
+                          <button
+                            key={em}
+                            type="button"
+                            onClick={() => setAgentEmotion(agent.agentId, em)}
+                            className={`px-2 py-0.5 text-[10px] font-mono rounded border transition-colors ${
+                              agent.emotion === em
+                                ? "border-accent-orange/60 bg-accent-orange/10 text-accent-orange"
+                                : "border-border text-text-secondary hover:border-text-secondary/40"
+                            }`}
+                          >
+                            {em}
+                          </button>
+                        ),
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Card>
+        )}
+      </div>
 
     </div>
   );

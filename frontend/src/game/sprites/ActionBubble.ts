@@ -78,8 +78,9 @@ export class ActionBubble extends Phaser.GameObjects.Container {
       ease: "Back.easeOut",
     });
 
-    // 2.5s 后淡出
-    this.fadeTimer = this.scene.time.delayedCall(2500, () => {
+    // 根据文本长度动态计算可见时间（最少 3500ms）
+    const visibleMs = Math.max(3500, 1800 + this.text.text.length * 60);
+    this.fadeTimer = this.scene.time.delayedCall(visibleMs, () => {
       this.fadeTween = this.scene.tweens.add({
         targets: this,
         alpha: 0,

@@ -22,7 +22,7 @@ export default function Home() {
       </p>
 
       {/* 快捷入口 */}
-      <div className="grid grid-cols-6 gap-4 mb-8">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-8">
         {QUICK_ENTRIES.map((entry) => (
           <Card
             key={entry.label}
@@ -30,15 +30,15 @@ export default function Home() {
             onClick={() => navigate(entry.route)}
             className="flex items-center gap-3"
           >
-            <span className="text-2xl">{entry.emoji}</span>
+            <span className="text-2xl shrink-0">{entry.emoji}</span>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <p className="text-sm font-mono text-text-primary truncate">
+                <p className="text-sm font-mono text-text-primary leading-tight break-words">
                   {entry.label}
                 </p>
                 <Badge label={entry.tier} variant={entry.tier} />
               </div>
-              <p className="text-sm text-text-secondary mt-0.5">
+              <p className="text-sm text-text-secondary mt-0.5 break-words">
                 {entry.desc}
               </p>
             </div>
@@ -57,7 +57,7 @@ export default function Home() {
           </p>
         </Card>
       ) : (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {agents.map((agent) => (
             <Card key={agent.id} hover onClick={() => navigate(`/agents/${agent.id}`)}>
               <div className="flex items-center gap-2 mb-2">

@@ -14,6 +14,7 @@ Phase 25: 扩展支持多 Agent 协作。
 import json
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -164,7 +165,7 @@ async def _persist_worker_agent_binding(
     logger.info(f"Bound restored worker {run_id} to agent {entry.get('agent_id', '')}")
 
 
-async def _restore_workers_from_disk(base_dir: str = None):
+async def _restore_workers_from_disk(base_dir: str | None = None):
     """从磁盘恢复已完成/运行中的 Worker（服务重启后调用）。"""
     from pathlib import Path
     import json as _json
@@ -195,7 +196,7 @@ async def _restore_workers_from_disk(base_dir: str = None):
             pass
 
 
-async def _get_or_create_agent(agent_id: str) -> "LifeAgent":
+async def _get_or_create_agent(agent_id: str) -> Any:
     """Compatibility wrapper around the shared execution Agent loader.
 
     A real ID is restored from SQLite.  Only ``worker-default`` may create a
@@ -203,6 +204,13 @@ async def _get_or_create_agent(agent_id: str) -> "LifeAgent":
     """
     from engines.agent_factory.loader import load_agent_for_execution
 
+    # 尝试从活跃世界中获取
+    from api.sse import _active_worlds
+    for engine in _active_worlds.values():
+        if agent_id in engine.agents:
+            return engine.agents[agent_id]
+
+    # 使用统一的 Agent 加载器
     return await load_agent_for_execution(agent_id)
 
 
@@ -606,7 +614,7 @@ async def test_ssh_connection(req: TestConnectionRequest):
     return TestConnectionResponse(
         success=success,
         message=message,
-        latency_ms=latency,
+        latency_ms=int(latency),
         location=f"云端: {req.user}@{req.host}:{req.path}",
     )
 

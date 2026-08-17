@@ -115,7 +115,10 @@ export default function DuelArena() {
         }
       }
     } catch (err: any) {
-      if (err.name !== "AbortError") console.error("Duel error:", err);
+      if (err.name !== "AbortError") {
+        console.error("Duel error:", err);
+        setLogsA((p) => [...p, `❌ 连接错误: ${err.message || '未知错误'}`]);
+      }
     }
     setRunning(false);
   }, [agentAId, agentBId, task]);
@@ -216,8 +219,7 @@ export default function DuelArena() {
       {result && (
         <Card className="p-4 border-accent-green/40 bg-accent-green/5">
           <p className="text-sm font-mono text-accent-green font-semibold mb-2">
-            🏆 {"胜者: "}
-            {result.winner === "a" ? nameA : result.winner === "b" ? nameB : "平局"}
+            🏆 {result.winner === "draw" ? "平局" : `胜者: ${result.winner === "a" ? nameA : nameB}`}
           </p>
           <p className="text-xs font-mono text-text-secondary">{result.summary}</p>
         </Card>

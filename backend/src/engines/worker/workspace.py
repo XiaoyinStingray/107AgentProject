@@ -56,6 +56,11 @@ class WorkspaceProvider(ABC):
     实现类负责拼接绝对路径并做安全校验（拒绝路径穿越到 root 之外）。
     """
 
+    @property
+    def root(self) -> str:
+        """工作区根目录；旧实现未声明时保持向后兼容。"""
+        return getattr(self, "_root", "")
+
     @abstractmethod
     async def write_file(self, path: str, content: str) -> str:
         """写入文件。返回写入后的绝对路径（仅用于日志，不暴露给 Agent）。
@@ -393,6 +398,11 @@ class CloudWorkspace(WorkspaceProvider):
         self._MAX_RECONNECT = 1
 
         logger.info(f"CloudWorkspace created: {user}@{host}:{port}{path}")
+
+    @property
+    def root(self) -> str:
+        """工作区的根目录绝对路径。"""
+        return self._root
 
     async def _ensure_connected(self):
         """确保 SSH 连接活跃。如果断开则自动重连。"""

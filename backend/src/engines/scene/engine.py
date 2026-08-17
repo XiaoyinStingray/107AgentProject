@@ -287,6 +287,16 @@ def _extract_whisper_instruction(message: str) -> str:
     return instruction.split(" | ", 1)[0].strip()[:300]
 
 
+import re
+
+# DSML 标签清洗（支持标准格式和空格变体）
+_DSML_RE = re.compile(r"<\!?\s*\|\|\s*\|\|\s*\|\|\s*\|\|>?")
+
+def _clean_dsml(text: str) -> str:
+    """移除 LLM 输出中可能混入的 DSML 标签。"""
+    return _DSML_RE.sub("", text).strip()
+
+
 async def generate_dialogue_llm(
     from_name: str,
     to_name: str,
@@ -372,9 +382,10 @@ async def generate_dialogue_llm(
         )
         text = response.content if isinstance(response.content, str) else str(response.content)
 
-        text = text.strip().strip('"').strip("'").strip("「").strip("」")
+        text = _clean_dsml(text)
+        text = text.strip().strip('"').strip("'").strip("\u300c").strip("\u300d")
         detected = detect_emotion(text)
-        logger.info(f"[dialogue] ✅ LLM: {text[:50]}")
+        logger.info(f"[dialogue] \u2705 LLM: {text[:50]}")
         return {"message": text[:60], "emotion": detected, "source": "llm"}
 
     except Exception as e:

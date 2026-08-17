@@ -48,11 +48,11 @@ STD_AGENTS = [
 # 标准场景
 STD_SCENARIOS = [
     Scenario(name="期末周", description="期末考试周，图书馆座位紧张，压力山大",
-             time_span="一周", initial_events=["图书馆7点开门"], environment_params={"stress_level": "high"}),
+             time_range="1-7", initial_events=["图书馆7点开门"], environment_params={"stress_level": "high"}),
     Scenario(name="新生报到", description="开学第一天，新生涌入校园，机会与混乱并存",
-             time_span="一天", initial_events=["校车到达"], environment_params={"social_chance": "high"}),
+             time_range="1-3", initial_events=["校车到达"], environment_params={"social_chance": "high"}),
     Scenario(name="毕业选择", description="大四下学期，每个人都面临人生关键决策",
-             time_span="一个月", initial_events=["招聘会开始"], environment_params={"decision_pressure": "high"}),
+             time_range="1-30", initial_events=["招聘会开始"], environment_params={"decision_pressure": "high"}),
 ]
 
 REPEAT_COUNT = 3
@@ -96,7 +96,7 @@ async def run_bench_suite(
     def _to_scenario(s):
         if isinstance(s, Scenario): return s
         return Scenario(name=s.get("name", ""), description=s.get("description", ""),
-                        time_span=s.get("time_span", "1-8"),
+                        time_range=s.get("time_range", "1-8"),
                         initial_events=s.get("initial_events", []),
                         environment_params=s.get("environment_params", {}))
 
@@ -191,12 +191,18 @@ async def _run_single_test(agent_tpl: dict, scenario, rep: int,
     """运行一条评测：创建 Agent → 注入场景 → run 8 ticks → 计算指标。"""
     from engines.agent_factory.factory import AgentFactory
 
+    # BUG-M10-010: 自定义 Agent 可能缺少 mbti/big_five/narrative/decision_style
+    _mbti = agent_tpl.get("mbti", "INTJ")
+    _big_five = agent_tpl.get("big_five", {"openness": 0.5, "conscientiousness": 0.5, "extraversion": 0.5, "agreeableness": 0.5, "neuroticism": 0.5})
+    _narrative = agent_tpl.get("narrative", agent_tpl.get("name", "Agent") + " 是一个 AI 角色。")
+    _decision_style = agent_tpl.get("decision_style", "综合分析型")
+
     # 用模板创建 Agent
     persona = Persona(
-        name=agent_tpl["name"], mbti=agent_tpl["mbti"],
-        big_five=agent_tpl["big_five"], narrative=agent_tpl["narrative"],
+        name=agent_tpl["name"], mbti=_mbti,
+        big_five=_big_five, narrative=_narrative,
     )
-    background = Background(narrative=agent_tpl["narrative"], decision_style=agent_tpl["decision_style"])
+    background = Background(hometown="", education="", key_events=[])
     factory = AgentFactory(model_client)
     agent = factory.create_from_persona(
         agent_id=f"bench-{str(uuid.uuid4())[:8]}",
@@ -262,7 +268,7 @@ async def _run_single_test(agent_tpl: dict, scenario, rep: int,
 
     scores = calculate_metrics(
         events,
-        {"mbti": agent_tpl["mbti"], "big_five": agent_tpl["big_five"]},
+        {"mbti": _mbti, "big_five": _big_five},
     )
     logger.info(
         f"Bench task finished: {agent_tpl['name']} × {scenario.name} #{rep}, "

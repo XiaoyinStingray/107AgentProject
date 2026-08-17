@@ -44,10 +44,10 @@ export default function CheckpointPanel({
               : "border-accent-orange/60 bg-accent-orange/10 text-accent-orange"
           } disabled:opacity-40 disabled:cursor-not-allowed`}
         >
-          {busy ? "同步中…" : paused ? "▶ 继续" : "⏸ 暂停"}
+          {busy ? "同步中…" : paused ? "▶ 继续场景" : "⏸ 暂停场景"}
         </button>
         <span className="text-text-secondary">
-          {paused ? "已暂停" : "运行中"}
+          {paused ? "⏸ 已暂停" : "▶ 运行中"}
         </span>
       </div>
 

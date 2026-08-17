@@ -88,11 +88,11 @@ def _sse_event(event_type: str, data: dict) -> str:
     from dataclasses import asdict, is_dataclass
     serializable_data = {}
     for key, value in (data.items() if isinstance(data, dict) else data.__dict__.items()):
-        if is_dataclass(value):
+        if is_dataclass(value) and not isinstance(value, type):
             serializable_data[key] = asdict(value)
         elif isinstance(value, list):
             serializable_data[key] = [
-                asdict(v) if is_dataclass(v) else v for v in value
+                asdict(v) if is_dataclass(v) and not isinstance(v, type) else v for v in value
             ]
         else:
             serializable_data[key] = value
@@ -175,8 +175,8 @@ class AgentWorker:
     def __init__(
         self,
         agent,           # LifeAgent 实例
-        workspace: WorkspaceProvider = None,
-        base_dir: str = None,
+        workspace: WorkspaceProvider | None = None,
+        base_dir: str | None = None,
     ):
         """创建 Worker。
 
@@ -827,10 +827,10 @@ class AgentWorker:
         # 检查错误级别
         if not success:
             strategy = get_error_strategy("tool_unexpected_output")
-            if strategy.level == ErrorLevel.RETRYABLE:
+            if strategy is not None and strategy.level == ErrorLevel.RETRYABLE:
                 # 自动重试（简单策略：给 Agent 反映）
                 pass  # Agent 在下一轮 DECIDING 中会看到上一步失败，自己决定是否重试
-            elif strategy.level == ErrorLevel.FATAL:
+            elif strategy is not None and strategy.level == ErrorLevel.FATAL:
                 self._transition(WorkerState.ERROR)
                 yield _sse_event("worker.error", WorkerErrorData(
                     step_index=self._step_index,

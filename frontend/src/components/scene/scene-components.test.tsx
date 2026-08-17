@@ -42,7 +42,7 @@ describe("CheckpointPanel", () => {
 
     expect(screen.queryByPlaceholderText("存档名称…")).toBeNull();
     expect(screen.queryByRole("button", { name: "加载" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "⏸ 暂停" }));
+    fireEvent.click(screen.getByRole("button", { name: "⏸ 暂停场景" }));
     expect(onTogglePause).toHaveBeenCalledOnce();
 
     rerender(
