@@ -5,12 +5,12 @@
  */
 import { useState, useCallback, useEffect } from "react";
 import { useAgents } from "../api/agents";
-import { useTeams, useCreateTeam, useDeleteTeam, useSuggestRoles, useExecuteTeam, useTeamPlan, useEvaluateTeam } from "../api/teams";
+import { useTeams, useCreateTeam, useDeleteTeam, useSuggestRoles, useExecuteTeam, useTeamPlan, useEvaluateTeam, useRecoverTeamStep } from "../api/teams";
 import { usePublishTeam } from "../api/market";
 import { unlock } from "../game/achievements";
 import { useTeamSSE } from "../hooks/useTeamSSE";
 import { useTeamStore } from "../stores/useTeamStore";
-import type { TeamRole, SuggestedRole } from "../types/team";
+import type { TeamRecoveryAction, TeamRole, SuggestedRole } from "../types/team";
 import { teamOutcomeLabel, teamOutcomeVariant } from "../utils/teamOutcome";
 import Card from "../components/shared/Card";
 import Badge from "../components/shared/Badge";
@@ -19,6 +19,7 @@ import StepTimeline from "../components/team/StepTimeline";
 import RoleEvolutionBadge from "../components/team/RoleEvolutionBadge";
 import TeamHistory from "../components/team/TeamHistory";
 import { ReportViewer } from "../components/team/ReportViewer";
+import RecoveryGuide from "../components/team/RecoveryGuide";
 import MarketPanel from "./team/MarketPanel";
 import VersusPanel from "./team/VersusPanel";
 import LearningCurve from "./team/LearningCurve";
@@ -30,6 +31,7 @@ export default function TeamDashboard() {
   const deleteTeam = useDeleteTeam();
   const executeTeam = useExecuteTeam();
   const evaluateTeam = useEvaluateTeam();
+  const recoverTeamStep = useRecoverTeamStep();
   const publishTeam = usePublishTeam();
 
   // Team 执行状态
@@ -41,6 +43,8 @@ export default function TeamDashboard() {
   const [showMarket, setShowMarket] = useState(false);
   const [showVersus, setShowVersus] = useState(false);
   const [publishMsg, setPublishMsg] = useState<string | null>(null);
+  const [pendingRecoveryAction, setPendingRecoveryAction] = useState<TeamRecoveryAction | null>(null);
+  const [recoveryMsg, setRecoveryMsg] = useState<string | null>(null);
 
   // ── 重入恢复: 已完成/执行中的 Team 没有活跃 SSE 时，从 DB Plan 恢复状态 ──
   const activeTeam = teams.find((t) => t.id === activeTeamId);
@@ -48,6 +52,11 @@ export default function TeamDashboard() {
     activeTeamId && activeTeam && !connected ? activeTeamId : null
   );
   const agentNames = Object.fromEntries(agents.map((a) => [a.id, a.name]));
+  const recoverableSteps = (teamPlan?.steps ?? []).filter(
+    (step) => step.status === "error"
+      && Boolean(step.result?.recoverable)
+      && (step.result?.files?.length ?? 0) > 0,
+  );
 
   // 从 DB Plan 恢复到 store（重入场景）
   useEffect(() => {
@@ -191,6 +200,34 @@ export default function TeamDashboard() {
     store.reset();
   }, [store]);
 
+  const handleRecovery = useCallback(async (
+    action: TeamRecoveryAction,
+    stepId: string,
+  ) => {
+    if (!activeTeamId) return;
+    if (
+      action === "accept"
+      && !window.confirm("确认接受当前产物？系统会保留警告记录，并把该步骤标为完成。")
+    ) return;
+
+    setPendingRecoveryAction(action);
+    setRecoveryMsg(null);
+    setErrorMsg(null);
+    try {
+      const response = await recoverTeamStep.mutateAsync({
+        teamId: activeTeamId,
+        stepId,
+        action,
+      });
+      setRecoveryMsg(response.message);
+      store.reset();
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : "恢复操作失败");
+    } finally {
+      setPendingRecoveryAction(null);
+    }
+  }, [activeTeamId, recoverTeamStep, store]);
+
   // ── 角色预览组件 ──
   const RolePreview = roles.length > 0 && (
     <div className="mb-4 space-y-2">
@@ -265,6 +302,17 @@ export default function TeamDashboard() {
                 return (
                 /* 报告视图 */
                 <div className="space-y-4">
+                <RecoveryGuide
+                  steps={recoverableSteps}
+                  pendingAction={pendingRecoveryAction}
+                  message={recoveryMsg}
+                  onAction={handleRecovery}
+                />
+                {recoveryMsg && recoverableSteps.length === 0 && (
+                  <p className="rounded border border-accent-green/30 bg-accent-green/5 px-3 py-2 text-xs text-accent-green">
+                    {recoveryMsg}
+                  </p>
+                )}
                 <div className="flex items-center gap-2">
                   <span className="text-lg"></span>
                   <h3 className="text-sm font-mono text-accent-green">{currentReport.title}</h3>

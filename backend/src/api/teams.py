@@ -259,7 +259,7 @@ async def suggest_roles(body: dict) -> list[dict]:
     for p in agent_profiles:
         bf = p["big_five"]
         profiles_text += (
-            f"- {p['name']}（{p['mbti']}）\n"
+            f"- ID: {p['id']} | 姓名: {p['name']}（{p['mbti']}）\n"
             f"  大五人格: O:{bf.get('openness',0)} C:{bf.get('conscientiousness',0)} "
             f"E:{bf.get('extraversion',0)} A:{bf.get('agreeableness',0)} N:{bf.get('neuroticism',0)}\n"
             f"  决策风格: {p['decision_style']}\n"
@@ -342,15 +342,63 @@ async def suggest_roles(body: dict) -> list[dict]:
                 "reason": f"{reason}（规则推荐）",
             })
 
-    # 验证结构
-    validated = []
+    # 验证并归一化身份。LLM 偶尔会把姓名填进 agent_id；这里必须映射回
+    # 本次所选 Agent 的真实 UUID，避免角色在执行阶段全部退化为“成员”。
+    profile_by_id = {p["id"]: p for p in agent_profiles}
+    ids_by_name: dict[str, list[str]] = {}
+    for p in agent_profiles:
+        ids_by_name.setdefault(str(p["name"]).strip(), []).append(p["id"])
+
+    normalized_by_id: dict[str, dict] = {}
     for r in llm_roles:
-        if isinstance(r, dict) and "agent_id" in r and "role" in r:
-            validated.append({
-                "agent_id": r["agent_id"],
-                "role": r["role"],
-                "reason": r.get("reason", ""),
-            })
+        if not isinstance(r, dict) or not str(r.get("role", "")).strip():
+            continue
+        raw_identity = str(r.get("agent_id", "")).strip()
+        resolved_id = raw_identity if raw_identity in profile_by_id else ""
+        if not resolved_id:
+            name_matches = ids_by_name.get(raw_identity, [])
+            if len(name_matches) == 1:
+                resolved_id = name_matches[0]
+        if not resolved_id or resolved_id in normalized_by_id:
+            continue
+        normalized_by_id[resolved_id] = {
+            "agent_id": resolved_id,
+            "role": str(r["role"]).strip(),
+            "reason": str(r.get("reason", "")).strip(),
+        }
+
+    # LLM 漏掉某位成员时只为该成员使用规则兜底，并保证返回顺序与输入一致。
+    mbti_role_map = {
+        "INTJ": ("技术架构师", "INTJ 擅长系统思维和长期规划"),
+        "INTP": ("算法工程师", "INTP 擅长抽象推理和逻辑分析"),
+        "ENTJ": ("项目经理", "ENTJ 擅长领导统筹和战略决策"),
+        "ENTP": ("产品经理", "ENTP 擅长创意发散和机会洞察"),
+        "INFJ": ("技术写作", "INFJ 擅长深度理解和表达"),
+        "INFP": ("UI/UX 设计师", "INFP 擅长共情和审美表达"),
+        "ENFJ": ("产品经理", "ENFJ 擅长沟通协调和团队激励"),
+        "ENFP": ("市场研究员", "ENFP 擅长探索新领域和用户共情"),
+        "ISTJ": ("后端开发", "ISTJ 擅长严谨实现和流程遵循"),
+        "ISFJ": ("测试工程师", "ISFJ 擅长细致检查和品质保障"),
+        "ESTJ": ("DevOps 工程师", "ESTJ 擅长运维管理和效率优化"),
+        "ESFJ": ("项目经理", "ESFJ 擅长协调资源和人际支持"),
+        "ISTP": ("前端开发", "ISTP 擅长动手实践和即时调试"),
+        "ISFP": ("UI/UX 设计师", "ISFP 擅长视觉表达和细节打磨"),
+        "ESTP": ("全栈开发", "ESTP 擅长快速试错和多面手能力"),
+        "ESFP": ("市场研究员", "ESFP 擅长现场感知和人脉拓展"),
+    }
+    for p in agent_profiles:
+        if p["id"] in normalized_by_id:
+            continue
+        role, reason = mbti_role_map.get(
+            p.get("mbti", ""), ("全栈开发", "综合能力均衡，可胜任多种角色")
+        )
+        normalized_by_id[p["id"]] = {
+            "agent_id": p["id"],
+            "role": role,
+            "reason": f"{reason}（规则推荐）",
+        }
+
+    validated = [normalized_by_id[p["id"]] for p in agent_profiles]
     return validated
 
 
@@ -790,6 +838,111 @@ async def get_team_plan_history(
 
 class ScoreRequest(BaseModel):
     task: str = ""
+
+
+class TeamRecoveryRequest(BaseModel):
+    step_id: str
+
+
+async def _run_team_recovery(
+    action: str,
+    team_id: str,
+    body: TeamRecoveryRequest,
+    db: AsyncSession,
+):
+    """执行一个显式恢复动作；不会创建新 Plan 或重跑整支团队。"""
+    if team_id in _active_team_runs:
+        raise HTTPException(status_code=409, detail="团队仍在执行中，请完成后再调整")
+
+    team_result = await db.execute(select(TeamRow).where(TeamRow.id == team_id))
+    team_row = team_result.scalar_one_or_none()
+    if not team_row:
+        raise HTTPException(status_code=404, detail="Team 不存在")
+    if team_row.status == "executing":
+        raise HTTPException(status_code=409, detail="团队仍在执行中，请稍后再试")
+
+    plan_result = await db.execute(
+        select(PlanRow)
+        .where(PlanRow.team_id == team_id)
+        .order_by(PlanRow.created_at.desc())
+        .limit(1)
+    )
+    plan_row = plan_result.scalar_one_or_none()
+    if not plan_row:
+        raise HTTPException(status_code=404, detail="该 Team 还没有可恢复的执行计划")
+
+    model_client = None
+    if action != "accept":
+        try:
+            from api.agents import get_agent_factory
+
+            model_client = get_agent_factory().model_client
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="LLM 暂不可用，无法执行该恢复操作") from exc
+
+    from engines.team.recovery import TeamRecoveryError, recover_team_step
+
+    try:
+        return await recover_team_step(
+            action=action,
+            team_row=team_row,
+            plan_row=plan_row,
+            step_id=body.step_id,
+            db=db,
+            model_client=model_client,
+        )
+    except TeamRecoveryError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        await db.rollback()
+        # 单步骤重试中途异常时，不能把团队永久留在 executing。
+        try:
+            team_result = await db.execute(select(TeamRow).where(TeamRow.id == team_id))
+            persisted_team = team_result.scalar_one_or_none()
+            plan_result = await db.execute(select(PlanRow).where(PlanRow.id == plan_row.id))
+            persisted_plan = plan_result.scalar_one_or_none()
+            if persisted_team:
+                persisted_team.status = "finished"
+                db.add(persisted_team)
+            if persisted_plan:
+                persisted_plan.status = "finished"
+                db.add(persisted_plan)
+            await db.commit()
+        except Exception:
+            await db.rollback()
+        logger.exception(f"Team recovery failed: action={action}, team={team_id}, error={exc}")
+        raise HTTPException(status_code=500, detail=f"恢复操作失败：{str(exc)[:200]}") from exc
+
+
+@router.post("/{team_id}/recovery/reaudit")
+async def reaudit_team_step(
+    team_id: str,
+    body: TeamRecoveryRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """重新验收已保留的步骤产物，不重新执行 Agent。"""
+    return await _run_team_recovery("reaudit", team_id, body, db)
+
+
+@router.post("/{team_id}/recovery/retry")
+async def retry_team_step(
+    team_id: str,
+    body: TeamRecoveryRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """仅重试一个失败步骤，保留其他步骤结果。"""
+    return await _run_team_recovery("retry", team_id, body, db)
+
+
+@router.post("/{team_id}/recovery/accept")
+async def accept_team_step(
+    team_id: str,
+    body: TeamRecoveryRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """用户明确接受当前产物，并将该步骤标为完成。"""
+    return await _run_team_recovery("accept", team_id, body, db)
 
 
 @router.post("/{team_id}/score")

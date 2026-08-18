@@ -214,6 +214,18 @@ class TestStepResult:
         assert sr.files == ["out.md"]
         assert sr.steps_used == 5
 
+    def test_recoverable_partial_result_is_explicit(self):
+        sr = StepResult(
+            step_id="s1",
+            success=False,
+            files=["step_1/work/files/output.md"],
+            error="产物已保存，等待重新验收",
+            recoverable=True,
+        )
+
+        assert sr.success is False
+        assert sr.recoverable is True
+
 
 # =====================================================================
 # TeamEngine._find_agent_name
@@ -260,3 +272,29 @@ async def test_compile_report_calls_partial_execution_partial(tmp_path):
 
     assert "执行状态：部分完成：1/2 步完成，1 步失败" in report["content"]
     assert "Request timed out" in report["content"]
+
+
+@pytest.mark.asyncio
+async def test_compile_report_distinguishes_recoverable_partial_step(tmp_path):
+    engine = TeamEngine(
+        team={"id": "t1", "name": "测试团队", "description": "测试任务", "roles": []},
+        db=None,  # type: ignore[arg-type]
+    )
+    engine._workspace_root = str(tmp_path)
+    engine._agents = [{"id": "a1", "name": "岳书妍", "role": "协调整合师"}]
+
+    report = await engine._compile_report([
+        StepResult(step_id="s1", step_title="调研", success=True),
+        StepResult(
+            step_id="s2",
+            step_title="整合",
+            success=False,
+            files=["step_2/work/files/output.md"],
+            error="验收修订格式解析失败",
+            recoverable=True,
+        ),
+    ])
+
+    assert "1 步已有产物、待调整" in report["content"]
+    assert "🟡 整合" in report["content"]
+    assert "可恢复，产物已保留" in report["content"]

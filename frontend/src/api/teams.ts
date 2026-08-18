@@ -7,7 +7,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { client } from "./client";
 import { teamKeys } from "./queryKeys";
-import type { TeamCreate, TeamSummary, TeamDetail, SuggestedRole, TeamPlan, TeamExecuteResponse, TeamFileResponse } from "../types/team";
+import type { TeamCreate, TeamSummary, TeamDetail, SuggestedRole, TeamPlan, TeamExecuteResponse, TeamFileResponse, TeamRecoveryAction, TeamRecoveryResponse } from "../types/team";
 
 export function useTeams() {
   return useQuery({
@@ -62,6 +62,28 @@ export function useEvaluateTeam() {
   return useMutation({
     mutationFn: (teamId: string) =>
       client.post<{ evaluation: string }>(`/teams/${teamId}/evaluate`),
+  });
+}
+
+export function useRecoverTeamStep() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      teamId,
+      stepId,
+      action,
+    }: {
+      teamId: string;
+      stepId: string;
+      action: TeamRecoveryAction;
+    }) => client.post<TeamRecoveryResponse>(
+      `/teams/${teamId}/recovery/${action}`,
+      { step_id: stepId },
+    ),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: teamKeys.all });
+      qc.invalidateQueries({ queryKey: teamKeys.detail(variables.teamId) });
+    },
   });
 }
 

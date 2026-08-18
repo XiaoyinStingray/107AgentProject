@@ -14,6 +14,7 @@ import type { TeamPlan, TeamSummary } from "../../../types/team";
 const hookState = vi.hoisted(() => ({
   execute: vi.fn(),
   evaluate: vi.fn(),
+  recover: vi.fn(),
   clear: vi.fn(),
   disconnect: vi.fn(),
   pause: vi.fn(),
@@ -75,6 +76,7 @@ vi.mock("../../../api/teams", () => ({
   useSuggestRoles: () => ({ mutateAsync: vi.fn(), isPending: false, isError: false }),
   useExecuteTeam: () => ({ mutateAsync: hookState.execute, isPending: false }),
   useEvaluateTeam: () => ({ mutateAsync: hookState.evaluate, isPending: false }),
+  useRecoverTeamStep: () => ({ mutateAsync: hookState.recover, isPending: false }),
   useTeamPlan: () => ({ data: hookState.plan }),
   useTeamHistory: () => ({ data: [], isLoading: false }),
   useLearningCurve: () => ({ data: null }),
@@ -135,6 +137,13 @@ describe("TeamDashboard", () => {
     hookState.events = [];
     hookState.execute.mockResolvedValue(MOCK_PLAN);
     hookState.evaluate.mockResolvedValue({ evaluation: "协作质量：9/10" });
+    hookState.recover.mockResolvedValue({
+      action: "reaudit",
+      step_id: "s1",
+      status: "passed",
+      message: "已有产物重新验收通过，无需重跑该步骤",
+      plan: MOCK_PLAN,
+    });
     hookState.pause.mockResolvedValue({});
     hookState.start.mockResolvedValue({});
   });
@@ -249,6 +258,59 @@ describe("TeamDashboard", () => {
       expect(revokeObjectURL).toHaveBeenCalledWith("blob:team-report");
     });
     anchorClick.mockRestore();
+  });
+
+  it("shows recovery guide for a recoverable step and reaudits only that step", async () => {
+    hookState.plan = {
+      ...MOCK_PLAN,
+      outcome: "partial",
+      failed_steps: 1,
+      steps: [{
+        ...MOCK_PLAN.steps[0],
+        status: "error",
+        result: {
+          files: ["step_1_输出方案/work/files/output.md"],
+          error: "本步骤产物已保存，但最终格式解析失败",
+          recoverable: true,
+          artifact_status: "preserved",
+        },
+      }],
+    };
+    renderDashboard();
+    fireEvent.click(screen.getByRole("button", { name: /执行/ }));
+
+    expect(await screen.findByText("恢复与调整指南")).toBeInTheDocument();
+    expect(screen.getByText("产物已保留")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /重新验收已有产物/ }));
+    await waitFor(() => {
+      expect(hookState.recover).toHaveBeenCalledWith({
+        teamId: "t1",
+        stepId: "s1",
+        action: "reaudit",
+      });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /仅重试当前步骤/ }));
+    await waitFor(() => {
+      expect(hookState.recover).toHaveBeenCalledWith({
+        teamId: "t1",
+        stepId: "s1",
+        action: "retry",
+      });
+    });
+
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: /接受当前结果并继续/ }));
+    await waitFor(() => {
+      expect(hookState.recover).toHaveBeenCalledWith({
+        teamId: "t1",
+        stepId: "s1",
+        action: "accept",
+      });
+    });
+    expect(confirm).toHaveBeenCalledOnce();
+    confirm.mockRestore();
   });
 
   it("shows an execute failure instead of failing silently", async () => {

@@ -4,6 +4,7 @@ Team API 路由 单元测试 — Step 51。
 
 import json
 import tempfile
+from types import SimpleNamespace
 
 import pytest
 from contextlib import asynccontextmanager
@@ -354,6 +355,38 @@ class TestSuggestRoles:
         assert "role" in data[0]
         assert "reason" in data[0]
         assert isinstance(data[0]["agent_id"], str)
+
+    def test_suggest_roles_maps_returned_name_back_to_selected_agent_id(
+        self, client, monkeypatch
+    ):
+        """LLM 把姓名写入 agent_id 时，接口仍返回真实 UUID。"""
+        import api.agents
+
+        aid = _create_agent(client)
+        agent_name = client.get(f"/api/agents/{aid}").json()["name"]
+
+        class NameReturningModelClient:
+            async def create(self, messages, **kwargs):
+                return _FakeCreateResult(json.dumps([{
+                    "agent_id": agent_name,
+                    "role": "协调整合师",
+                    "reason": "善于协调成员",
+                }], ensure_ascii=False))
+
+        monkeypatch.setattr(
+            api.agents,
+            "get_agent_factory",
+            lambda: SimpleNamespace(model_client=NameReturningModelClient()),
+        )
+
+        resp = client.post("/api/teams/suggest-roles", json={"agent_ids": [aid]})
+
+        assert resp.status_code == 200
+        assert resp.json() == [{
+            "agent_id": aid,
+            "role": "协调整合师",
+            "reason": "善于协调成员",
+        }]
 
     def test_suggest_roles_empty_ids_rejected(self, client):
         """空 agent_ids 拒绝。"""

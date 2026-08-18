@@ -153,6 +153,16 @@ def _safe_json_parse(text: str) -> dict | None:
     return None
 
 
+def _is_user_deliverable_path(path: str) -> bool:
+    """排除 Team 注入的上下文和上游参考文件，只保留本步骤产物。"""
+    normalized = str(path).replace("\\", "/").lstrip("./")
+    return not (
+        normalized == "CONTEXT.md"
+        or normalized.startswith("shared/")
+        or normalized.startswith("upstream/")
+    )
+
+
 # =============================================================================
 # AgentWorker
 # =============================================================================
@@ -227,6 +237,12 @@ class AgentWorker:
         self._delivery_audit_summary = ""
         self._delivery_warning = ""
         self._delivery_constraints_checked = 0
+
+        # 终止信息单独保存，避免同一错误先报“可恢复”、随后又被通用
+        # ERROR handler 覆盖成“致命且不可恢复”。
+        self._terminal_error_type = "fatal"
+        self._terminal_error_message = "Worker 遇到致命错误已终止"
+        self._terminal_error_recoverable = False
 
         # 文件锁 — 用户编辑时禁止 Agent 写入
         self._locked_files: set[str] = set()
@@ -593,14 +609,21 @@ class AgentWorker:
         # 调用 LLM
         decision = await self._get_decision(prompt)
         if decision is None:
-            # 已经处理了重试，仍然失败 → ERROR
+            # 验收/修订阶段已经产生文件时，格式解析失败不等于工作成果丢失。
+            # 保留为可恢复的部分完成，供后续“重新验收/仅重试本步骤”使用。
+            has_deliverables = await self._has_user_deliverables()
+            if self._delivery_feedback and has_deliverables:
+                self._terminal_error_type = "delivery_finalize_parse_failure"
+                self._terminal_error_message = (
+                    "本步骤产物已保存，但 Agent 在验收修订阶段连续输出了无法解析的格式；"
+                    "可重新验收已有产物或仅重试本步骤。"
+                )
+                self._terminal_error_recoverable = True
+            else:
+                self._terminal_error_type = "json_parse_failure"
+                self._terminal_error_message = "Agent JSON 解析连续失败"
+                self._terminal_error_recoverable = False
             self._transition(WorkerState.ERROR)
-            yield _sse_event("worker.error", WorkerErrorData(
-                step_index=self._step_index,
-                error_type="json_parse_failure",
-                message="Agent JSON 解析连续失败",
-                recoverable=False,
-            ).__dict__)
             return
 
         action = decision.get("decision", "done")
@@ -902,6 +925,7 @@ class AgentWorker:
         except Exception as exc:
             return f"（无法列出工作区文件：{exc}）"
 
+        files = [f for f in files if _is_user_deliverable_path(f.path)]
         if not files:
             return "（工作区没有产出文件）"
 
@@ -1121,7 +1145,7 @@ class AgentWorker:
 
         try:
             files = await self._workspace.list_files()
-            file_paths = [f.path for f in files]
+            file_paths = [f.path for f in files if _is_user_deliverable_path(f.path)]
         except Exception:
             file_paths = self._files_created
 
@@ -1154,13 +1178,24 @@ class AgentWorker:
                     f"{len(file_paths)} files, {total_duration_ms}ms")
         return events
 
+    async def _has_user_deliverables(self) -> bool:
+        """是否已有本轮可保留的用户产物（排除系统/上游上下文文件）。"""
+        try:
+            files = await self._workspace.list_files()
+        except Exception:
+            return bool(self._files_created)
+        for file_info in files:
+            if _is_user_deliverable_path(file_info.path):
+                return True
+        return False
+
     async def _handle_error(self) -> list[str]:
         """ERROR 状态：返回错误事件列表。"""
         events = [_sse_event("worker.error", WorkerErrorData(
             step_index=self._step_index,
-            error_type="fatal",
-            message="Worker 遇到致命错误已终止",
-            recoverable=False,
+            error_type=self._terminal_error_type,
+            message=self._terminal_error_message,
+            recoverable=self._terminal_error_recoverable,
         ).__dict__)]
         self._transition(WorkerState.DONE)
         return events

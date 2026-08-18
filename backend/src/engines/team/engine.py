@@ -37,6 +37,7 @@ class StepResult:
     steps_used: int = 0
     duration_secs: float = 0.0
     error: str = ""
+    recoverable: bool = False
 
 
 def _now_iso() -> str:
@@ -231,7 +232,9 @@ class TeamEngine:
                     shutil.rmtree(shared_dst)
                 shutil.copytree(shared_src, shared_dst)
 
-            # 复制上游步骤产出 → worker 可见的 files/
+            # 复制上游步骤产出 → worker 可见的 files/upstream/<步骤>/。
+            # 不再把多个步骤的 output.md 平铺到当前根目录，避免相互覆盖，
+            # 也避免 Agent/用户误把上一步产物当成本步骤最终交付。
             for prev_r in step_results:
                 if prev_r.success:
                     prev_idx = self._find_step_index(steps, prev_r.step_id)
@@ -239,11 +242,12 @@ class TeamEngine:
                     prev_files_dir = Path(self._workspace_root) / prev_step_dir_name / "work" / "files"
                     if prev_files_dir.exists():
                         for f_path in prev_r.files:
-                            # f_path 现在是相对于 run root 的路径，提取文件名部分
-                            fname = f_path.split("/")[-1] if "/" in f_path else f_path
-                            src_file = prev_files_dir / fname
+                            marker = "/work/files/"
+                            source_rel = f_path.split(marker, 1)[-1] if marker in f_path else f_path
+                            src_file = prev_files_dir / source_rel
                             if src_file.exists():
-                                dst_file = worker_files_dir / fname
+                                upstream_dir = f"step_{prev_idx + 1}_{_safe_dirname(prev_r.step_title)}"
+                                dst_file = worker_files_dir / "upstream" / upstream_dir / source_rel
                                 dst_file.parent.mkdir(parents=True, exist_ok=True)
                                 try:
                                     shutil.copy2(src_file, dst_file)
@@ -264,11 +268,11 @@ class TeamEngine:
                 f"# 可用文件\n"
                 f"- 上下文文件: shared/TASK.md, shared/TEAM.json\n"
                 f"- 你的上下文: CONTEXT.md\n"
-                f"- 上游产出文件（如有）已复制到当前工作区\n"
+                f"- 上游产出文件（如有）位于 upstream/，仅供参考\n"
                 f"- 使用 list_files 查看所有可用文件，使用 read_file 读取内容\n\n"
                 f"# 要求\n"
                 f"1. 专注完成你的子任务，产出可直接使用的文件交付物\n"
-                f"2. 完成后将最终产出写入文件（如 output.md）\n"
+                f"2. 完成后将本步骤最终产出写入当前根目录的 output.md；不要覆盖 upstream/ 中的文件\n"
             )
 
             # === 获取 Agent ===
@@ -304,6 +308,7 @@ class TeamEngine:
             steps_used = 0
             success = False
             error_msg = ""
+            error_recoverable = False
             start_time = time.monotonic()
 
             try:
@@ -326,7 +331,9 @@ class TeamEngine:
                         steps_used = (parsed.get("data") or {}).get("total_steps", 0) or 0
                         success = True
                     elif etype == "worker.error":
-                        error_msg = (parsed.get("data") or {}).get("message", "") or ""
+                        error_data = parsed.get("data") or {}
+                        error_msg = error_data.get("message", "") or ""
+                        error_recoverable = bool(error_data.get("recoverable", False))
 
                     yield _prefix_worker_sse(raw_event, sid)
 
@@ -349,7 +356,8 @@ class TeamEngine:
                 }, step_id=sid)
 
             sr = StepResult(sid, title, aid, aname, success, files_created,
-                            output_summary, steps_used, round(duration, 1), error_msg)
+                            output_summary, steps_used, round(duration, 1), error_msg,
+                            error_recoverable)
             step_results.append(sr)
             completed[sid] = sr
 
@@ -357,6 +365,8 @@ class TeamEngine:
                 "files": files_created, "output_summary": output_summary,
                 "steps_used": steps_used, "duration_secs": round(duration, 1),
                 "error": error_msg or None,
+                "recoverable": error_recoverable,
+                "artifact_status": "preserved" if error_recoverable and files_created else None,
             })
 
             # ── 角色演化 ──
@@ -372,6 +382,7 @@ class TeamEngine:
         total_dur = round(sum(r.duration_secs for r in step_results), 1)
         completed_count = sum(1 for r in step_results if r.success)
         failed_count = len(step_results) - completed_count
+        recoverable_count = sum(1 for r in step_results if not r.success and r.recoverable)
         outcome = (
             "partial" if completed_count and failed_count
             else "failed" if failed_count
@@ -382,6 +393,7 @@ class TeamEngine:
             "total_steps": len(steps),
             "completed_steps": completed_count,
             "failed_steps": failed_count,
+            "recoverable_steps": recoverable_count,
         })
 
         yield _make_sse("team_done", {
@@ -392,7 +404,8 @@ class TeamEngine:
             "total_steps": len(steps),
             "steps": [
                 {"step_title": r.step_title, "success": r.success,
-                 "files": r.files, "duration_secs": r.duration_secs}
+                 "files": r.files, "duration_secs": r.duration_secs,
+                 "recoverable": r.recoverable, "error": r.error or None}
                 for r in step_results
             ],
             "report": report,
@@ -509,8 +522,20 @@ class TeamEngine:
 
         completed_count = sum(1 for result in step_results if result.success)
         failed_count = len(step_results) - completed_count
+        recoverable_count = sum(
+            1 for result in step_results if not result.success and result.recoverable
+        )
         if failed_count and completed_count:
-            result_summary = f"部分完成：{completed_count}/{len(step_results)} 步完成，{failed_count} 步失败"
+            if recoverable_count:
+                hard_failed_count = failed_count - recoverable_count
+                suffix = f"{recoverable_count} 步已有产物、待调整"
+                if hard_failed_count:
+                    suffix += f"，{hard_failed_count} 步失败"
+                result_summary = (
+                    f"部分完成：{completed_count}/{len(step_results)} 步完成，{suffix}"
+                )
+            else:
+                result_summary = f"部分完成：{completed_count}/{len(step_results)} 步完成，{failed_count} 步失败"
         elif failed_count:
             result_summary = f"执行失败：{failed_count} 步失败"
         else:
@@ -531,7 +556,7 @@ class TeamEngine:
 
         parts.append("\n## 执行结果\n")
         for i, r in enumerate(step_results):
-            icon = "✅" if r.success else "❌"
+            icon = "✅" if r.success else "🟡" if r.recoverable else "❌"
             parts.append(f"### {icon} {r.step_title}")
             parts.append(f"- 负责人: {r.assignee_name} | 耗时: {r.duration_secs:.1f}s | Worker步数: {r.steps_used}")
 
@@ -545,7 +570,11 @@ class TeamEngine:
                         continue
                     rel = str(fpath.relative_to(output_dir))
                     # 跳过系统文件
-                    if rel.startswith("shared/") or rel == "CONTEXT.md":
+                    if (
+                        rel.startswith("shared/")
+                        or rel.startswith("upstream/")
+                        or rel == "CONTEXT.md"
+                    ):
                         continue
                     if fpath.suffix in (".md", ".txt", ".json", ".py", ".c", ".html", ".csv", ".ts", ".js", ".yaml", ".yml"):
                         try:
@@ -566,7 +595,8 @@ class TeamEngine:
                     parts.append(f"\n无产出文件")
 
             if r.error:
-                parts.append(f"\n> ⚠️ 错误: {r.error}")
+                label = "可恢复，产物已保留" if r.recoverable else "错误"
+                parts.append(f"\n> ⚠️ {label}: {r.error}")
             parts.append("")
 
         content = "\n".join(parts)

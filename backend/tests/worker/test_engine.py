@@ -417,6 +417,68 @@ class TestAgentWorkerExecute:
         assert summaries
         assert "交付验收通过" in summaries[-1]["data"]["key_findings"][0]
 
+    def test_delivery_revision_parse_failure_preserves_artifact_as_recoverable(self):
+        """已有交付物时，验收修订阶段格式失败应标为可恢复而非致命失败。"""
+        failed_audit = {
+            "passed": False,
+            "checked_constraints": [{
+                "constraint": "报告需要补充来源",
+                "status": "fail",
+                "evidence": "当前产物没有来源说明",
+            }],
+            "issues": ["当前产物没有来源说明"],
+            "repair_instructions": "补充来源说明。",
+        }
+        responses = [
+            json.dumps({"decision": "tool_call", "reason": "先完成报告"}),
+            json.dumps({
+                "decision": "tool_call",
+                "reason": "写入报告",
+                "tool_name": "write_file",
+                "tool_args": {"path": "output.md", "content": "# 已完成的调研报告"},
+            }),
+            json.dumps({
+                "satisfied": True,
+                "plan_changed": False,
+                "thought": "报告已写入",
+                "next_action": "done",
+            }),
+            json.dumps(failed_audit, ensure_ascii=False),
+            "这是一段无法解析的修订说明",
+            "仍然不是 JSON",
+        ]
+        worker, ws = _make_worker(responses)
+        events = []
+
+        async def collect():
+            async for event in worker.execute("完成调研并写入 output.md"):
+                events.append(json.loads(event[6:].strip()))
+
+        _run(collect())
+
+        errors = [event for event in events if event["type"] == "worker.error"]
+        assert ws._files["output.md"] == "# 已完成的调研报告"
+        assert len(errors) == 1
+        assert errors[0]["data"]["error_type"] == "delivery_finalize_parse_failure"
+        assert errors[0]["data"]["recoverable"] is True
+        assert "产物已保存" in errors[0]["data"]["message"]
+        assert not any(event["type"] == "worker.done" for event in events)
+
+    def test_delivery_snapshot_excludes_context_and_upstream_files(self):
+        worker, ws = _make_worker([])
+        ws._files = {
+            "CONTEXT.md": "系统上下文",
+            "shared/TASK.md": "团队任务",
+            "upstream/step_1/output.md": "上一步结果",
+            "output.md": "本步骤最终结果",
+        }
+
+        snapshot = _run(worker._collect_delivery_snapshot())
+
+        assert "本步骤最终结果" in snapshot
+        assert "上一步结果" not in snapshot
+        assert "系统上下文" not in snapshot
+
     @pytest.mark.parametrize("status", ["fail", "unverifiable"])
     def test_delivery_gate_does_not_trust_conflicting_pass_flag(self, status):
         """存在失败或待核实约束时，即使 LLM 误写 passed=true 也不能放行。"""

@@ -61,6 +61,10 @@ export interface PlanStep {
     steps_used?: number;
     duration_secs?: number;
     error?: string | null;
+    recoverable?: boolean;
+    artifact_status?: "preserved" | "reaudited" | "retried" | "accepted" | null;
+    accepted_with_warning?: boolean;
+    recovery_history?: Array<{ action: string; message: string; at: string }>;
   };
 }
 
@@ -164,4 +168,19 @@ export interface TeamFileResponse {
   path: string;
   content: string;
   size: number;
+}
+
+export type TeamRecoveryAction = "reaudit" | "retry" | "accept";
+
+export interface TeamRecoveryResponse {
+  action: TeamRecoveryAction;
+  step_id: string;
+  status: "passed" | "accepted" | "needs_adjustment";
+  message: string;
+  audit?: {
+    passed: boolean;
+    issues?: string[];
+    repair_instructions?: string;
+  };
+  plan: TeamPlan;
 }
