@@ -11,13 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from engines.agent_factory.factory import LifeAgent
 from engines.agent_factory.memory import MemoryRetriever
+from engines.world.dialogue_guard import DialogueAssessment, DialogueProgressGuard
 from engines.world.goals import WorldGoalMixin
 from engines.world.instructions import (
     AgentInstruction,
     build_private_instruction_context,
 )
 from engines.world.messages import END_TICK_TOKEN, WorldMessageMixin
-from engines.world.state import WorldStateMixin, _resolve_agent_id
+from engines.world.state import WorldPersistenceError, WorldStateMixin, _resolve_agent_id
 from engines.world.streaming import WorldStreamingMixin
 from models.event import SimEvent
 from models.world import WorldResponse
@@ -25,7 +26,7 @@ from models.world import WorldResponse
 if TYPE_CHECKING:
     from engines.scene.engine import SceneBridge
 
-__all__ = ["WorldEngine", "_resolve_agent_id"]
+__all__ = ["WorldEngine", "WorldPersistenceError", "_resolve_agent_id"]
 
 
 class WorldEngine(
@@ -81,6 +82,12 @@ class WorldEngine(
         self._pause_event: asyncio.Event | None = None
         # 连续空 tick 计数——供 context builder 注入破冰提示
         self.consecutive_empty_ticks: int = 0
+        # 跨 Tick 对话推进保护：重复检测、自然收束与起始发言轮换。
+        self._dialogue_guard = DialogueProgressGuard()
+        self.dialogue_stagnation_hint = ""
+        self._last_tick_speaker_id: str | None = None
+        # 增量 Memory 固化最多只允许一个后台任务；任务内部使用独立 DB session。
+        self._incremental_consolidation_task: asyncio.Task | None = None
 
         self._reset_agent_contexts(agents)
         self._name_to_id = self._build_name_map(agents)
@@ -155,6 +162,25 @@ class WorldEngine(
         )
         return tick_events
 
+    def _annotate_dialogue_event(self, event: SimEvent) -> SimEvent:
+        """Record the latest speaker and annotate repeated/closing dialogue."""
+        if event.type == "agent_message" and event.source_agent_id:
+            self._last_tick_speaker_id = event.source_agent_id
+            if len(self.agents) > 1:
+                self._dialogue_guard.annotate_message(event)
+        return event
+
+    def assess_dialogue_progress(
+        self,
+        tick_events: list[SimEvent],
+    ) -> DialogueAssessment:
+        """Update the one-tick recovery hint or request natural termination."""
+        if len(self.agents) <= 1:
+            return DialogueAssessment()
+        assessment = self._dialogue_guard.assess_tick(tick_events)
+        self.dialogue_stagnation_hint = assessment.hint
+        return assessment
+
     async def run(self, max_ticks: int = 30) -> list[SimEvent]:
         """Run ticks until the limit or a paused World is reached。
 
@@ -167,6 +193,7 @@ class WorldEngine(
                 break
             all_events.extend(await self.tick())
         # === State 4 D1+D2: Episode 结束 → 记忆固化 + 指纹持久化 ===
+        await self._wait_for_incremental_consolidation()
         await self._consolidate_memories(all_events)
         await self._persist_fingerprints()
         return all_events
@@ -367,7 +394,7 @@ class WorldEngine(
                 data={"tone": msg.get("tone", "neutral"), "message": WorldMessageMixin._clean_group_content(content)},
                 created_at=datetime.now(timezone.utc).isoformat(),
             )
-            events.append(event)
+            events.append(self._annotate_dialogue_event(event))
         return events
 
     def _build_thought_events(self) -> list[SimEvent]:
@@ -440,8 +467,7 @@ class WorldEngine(
 
         # === State 4 D1: 增量记忆固化（每 10 tick，fire-and-forget 不阻塞 SSE） ===
         if self.current_tick > 0 and self.current_tick % 10 == 0:
-            import asyncio as _asyncio
-            _asyncio.ensure_future(self._incremental_consolidation(tick_events))
+            self._schedule_incremental_consolidation(tick_events)
 
         self.current_tick += 1
         self.world.current_tick = self.current_tick
@@ -487,19 +513,28 @@ class WorldEngine(
         from sqlalchemy import update as _upd
         from models.agent_orm import AgentRow
 
-        for agent_id, agent in self.agents.items():
-            if not hasattr(agent, "_notes") or not agent._notes:
-                continue
-            try:
+        try:
+            for agent_id, agent in self.agents.items():
+                if not hasattr(agent, "_notes") or not agent._notes:
+                    continue
                 notes_json = _json.dumps(agent._notes, ensure_ascii=False)
                 await self._db.execute(
                     _upd(AgentRow)
                     .where(AgentRow.id == agent_id)
                     .values(notes_json=notes_json)
                 )
-            except Exception as e:
-                logger.warning(f"Failed to persist notes for {agent_id[:8]}: {e}")
-        await self._db.commit()
+            await self._db.commit()
+        except Exception as error:
+            try:
+                await self._db.rollback()
+            except Exception as rollback_error:
+                logger.error(
+                    "Agent notes rollback failed after persistence error: "
+                    f"{rollback_error}"
+                )
+            raise WorldPersistenceError(
+                "Agent 状态保存失败，实验已自动暂停"
+            ) from error
 
     # ── State 4 D2: 指纹持久化 ────────────────────────────────
 
@@ -525,18 +560,63 @@ class WorldEngine(
     # ── State 4 D1: 增量记忆固化 ─────────────────────────────
 
     async def _incremental_consolidation(self, tick_events: list[SimEvent]) -> None:
-        """每 10 tick 做一次轻量记忆固化。"""
+        """每 10 tick 用独立 DB session 做一次轻量记忆固化。"""
         if not self._act_model_client:
             return
+        from db import async_session
         from engines.agent_factory.memory import MemoryConsolidator
-        consolidator = MemoryConsolidator(self._act_model_client, self._db)
-        recent = self.events[-50:] + tick_events
-        start = max(0, self.current_tick - 10)
-        for agent_id in self.agents:
-            try:
-                await consolidator.consolidate(agent_id, recent, (start, self.current_tick))
-            except Exception as e:
-                logger.debug(f"Incremental consolidation skipped for {agent_id[:8]}: {e}")
+        async with async_session() as consolidation_db:
+            consolidator = MemoryConsolidator(
+                self._act_model_client,
+                consolidation_db,
+            )
+            recent = self.events[-50:] + tick_events
+            start = max(0, self.current_tick - 10)
+            for agent_id in self.agents:
+                try:
+                    await consolidator.consolidate(
+                        agent_id,
+                        recent,
+                        (start, self.current_tick),
+                    )
+                except Exception as error:
+                    logger.debug(
+                        "Incremental consolidation skipped for "
+                        f"{agent_id[:8]}: {error}"
+                    )
+
+    def _schedule_incremental_consolidation(
+        self,
+        tick_events: list[SimEvent],
+    ) -> None:
+        """Schedule one isolated Memory job without overlapping the previous one."""
+        current = self._incremental_consolidation_task
+        if current is not None and not current.done():
+            logger.debug(
+                "Incremental consolidation still running; skipped this interval"
+            )
+            return
+        task = asyncio.create_task(
+            self._incremental_consolidation(list(tick_events))
+        )
+        self._incremental_consolidation_task = task
+        task.add_done_callback(self._log_incremental_consolidation_result)
+
+    @staticmethod
+    def _log_incremental_consolidation_result(task: asyncio.Task) -> None:
+        """Consume background exceptions so they never break the World stream."""
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            logger.debug("Incremental consolidation cancelled")
+        except Exception as error:
+            logger.warning(f"Incremental consolidation failed: {error}")
+
+    async def _wait_for_incremental_consolidation(self) -> None:
+        """Wait for an in-flight Memory job before non-streaming finalization."""
+        task = self._incremental_consolidation_task
+        if task is not None and not task.done():
+            await task
 
     def _make_tick_boundary(self, tick: int) -> SimEvent:
         """Build the terminal boundary event for one streamed tick."""

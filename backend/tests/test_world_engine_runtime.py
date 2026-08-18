@@ -1,5 +1,8 @@
 """WorldEngine persistence, LLM execution, and runtime loop tests."""
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import pytest
 
 from tests.world_engine_fixtures import (
@@ -210,6 +213,21 @@ class TestGroupIdentityProtocol:
 
         assert world_engine._select_addressed_speaker([message]) is None
 
+    def test_first_speaker_rotates_across_ticks(self, db_session):
+        from engines.world.engine import WorldEngine
+
+        chen = make_agent("a1", "陈默")
+        song = make_agent("a2", "宋明远")
+        su = make_agent("a3", "苏瑶")
+        world_engine = WorldEngine(make_world(), [chen, song, su], db_session)
+        world_prompt = [FakeMessage("继续当前场景。", "world")]
+
+        assert world_engine._select_addressed_speaker(world_prompt) == chen.autogen_agent.name
+        world_engine._make_message_event(chen.id, "我先整理第一章。")
+        assert world_engine._select_addressed_speaker(world_prompt) == song.autogen_agent.name
+        world_engine._make_message_event(song.id, "我来核对公式。")
+        assert world_engine._select_addressed_speaker(world_prompt) == su.autogen_agent.name
+
     def test_group_chat_uses_selector_and_role_descriptions(self, db_session):
         from engines.world.engine import WorldEngine
 
@@ -325,6 +343,106 @@ class TestPersistEvents:
         from engines.world.engine import WorldEngine
 
         await WorldEngine(make_world(), [], db_session)._persist_events([])
+
+    @pytest.mark.asyncio
+    async def test_persist_is_idempotent_for_duplicate_event_ids(self, db_session):
+        from sqlalchemy import text
+
+        from engines.world.engine import WorldEngine
+        from models.event import SimEvent
+
+        world_engine = WorldEngine(make_world(), [], db_session)
+        events = [SimEvent(
+            id="evt-idempotent",
+            world_id="world-1",
+            tick=0,
+            type="agent_message",
+            source_agent_id="a1",
+            description="只保存一次",
+            created_at="2026-01-01",
+        )]
+
+        await world_engine._persist_events(events)
+        await world_engine._persist_events(events)
+        result = await db_session.execute(
+            text("SELECT COUNT(*) FROM events WHERE id = 'evt-idempotent'")
+        )
+
+        assert result.scalar_one() == 1
+
+    @pytest.mark.asyncio
+    async def test_persist_failure_rolls_back_and_raises_safe_error(self):
+        from engines.world.engine import WorldEngine, WorldPersistenceError
+        from models.event import SimEvent
+
+        broken_db = SimpleNamespace(
+            execute=AsyncMock(side_effect=RuntimeError("disk unavailable")),
+            commit=AsyncMock(),
+            rollback=AsyncMock(),
+        )
+        world_engine = WorldEngine(make_world(), [], broken_db)
+        event = SimEvent(
+            id="evt-failure",
+            world_id="world-1",
+            tick=0,
+            type="agent_message",
+            description="无法保存",
+            created_at="2026-01-01",
+        )
+
+        with pytest.raises(WorldPersistenceError, match="自动暂停"):
+            await world_engine._persist_events([event])
+
+        broken_db.rollback.assert_awaited_once()
+
+
+class TestIncrementalMemoryIsolation:
+    @pytest.mark.asyncio
+    async def test_incremental_consolidation_uses_its_own_db_session(
+        self,
+        db_session,
+        monkeypatch,
+    ):
+        import db as db_module
+        import engines.agent_factory.memory as memory_module
+        from engines.world.engine import WorldEngine
+
+        isolated_db = object()
+        observed_sessions = []
+
+        class SessionContext:
+            async def __aenter__(self):
+                return isolated_db
+
+            async def __aexit__(self, exc_type, exc, traceback):
+                return False
+
+        class FakeConsolidator:
+            def __init__(self, _model_client, session):
+                observed_sessions.append(session)
+
+            async def consolidate(self, _agent_id, _events, _tick_range):
+                return []
+
+        monkeypatch.setattr(db_module, "async_session", lambda: SessionContext())
+        monkeypatch.setattr(
+            memory_module,
+            "MemoryConsolidator",
+            FakeConsolidator,
+        )
+
+        agent = make_agent("a1", "小明")
+        world_engine = WorldEngine(
+            make_world(),
+            [agent],
+            db_session,
+            act_model_client=object(),
+        )
+
+        await world_engine._incremental_consolidation([])
+
+        assert observed_sessions == [isolated_db]
+        assert observed_sessions[0] is not db_session
 
 
 class TestSoloTick:

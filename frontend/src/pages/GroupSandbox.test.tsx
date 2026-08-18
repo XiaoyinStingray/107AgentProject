@@ -130,6 +130,31 @@ describe("Step 33 GroupSandbox", () => {
       "DeepSeek unavailable",
     );
   });
+
+  it("keeps the final frame and clearly marks an automatically finished World", async () => {
+    vi.mocked(useSSE).mockReturnValue({
+      events: [
+        { type: "agent_message", tick: 7, agent_id: "agent-1", message: "明天见。" },
+        { type: "session_end", tick: 8, reason: "natural_completion" },
+      ],
+      totalEventCount: 2,
+      connected: true,
+      relationships: {},
+      lastRelationshipKey: null,
+      hydrateRelationships,
+      connect: vi.fn(),
+      disconnect,
+      clear,
+    });
+
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /3 Agents/ }));
+
+    expect(await screen.findByText("✅ 对话已自然结束")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("参与者已经完成交流");
+    expect(screen.queryByRole("button", { name: /暂停/ })).not.toBeInTheDocument();
+    await waitFor(() => expect(disconnect).toHaveBeenCalled());
+  });
 });
 
 const testQueryClient = new QueryClient({

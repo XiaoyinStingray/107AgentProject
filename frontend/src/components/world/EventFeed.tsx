@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { SSEEvent, SSEEventType } from "../../types/events";
 import type { EventFeedProps } from "../../types/sandbox";
+import { getSessionEndCopy } from "./sessionEnd";
 
 /**
  * 群体沙盒事件流。
@@ -21,6 +22,11 @@ export default function EventFeed({
       (selectedTick === null || event.tick === selectedTick) &&
       (feedFilterIds.length === 0 || !event.agent_id || feedFilterIds.includes(event.agent_id)),
   );
+  const sessionEndEvent = [...events].reverse().find(
+    (event) =>
+      event.type === "session_end" &&
+      (selectedTick === null || event.tick === selectedTick),
+  );
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [userScrolledUp, setUserScrolledUp] = useState(false);
@@ -31,7 +37,6 @@ export default function EventFeed({
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       if (e.deltaY < 0) setUserScrolledUp(true);
-      else setUserScrolledUp(false);
     };
     const onTouch = () => setUserScrolledUp(true);
     el.addEventListener("wheel", onWheel, { passive: true });
@@ -42,16 +47,13 @@ export default function EventFeed({
     };
   }, []);
 
-  // 新事件到达 → 自动滚底（仅当用户已在底部附近时触发）
+  // 新事件到达 → 自动滚底（除非用户主动上滚暂停跟随）
   useEffect(() => {
     if (userScrolledUp) return;
     const el = containerRef.current;
     if (!el) return;
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    if (distanceFromBottom < 150) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [events, userScrolledUp]);
+    el.scrollTop = el.scrollHeight;
+  }, [feedEvents.length, sessionEndEvent, userScrolledUp]);
 
   return (
     <>
@@ -87,13 +89,14 @@ export default function EventFeed({
 
       <div
         ref={containerRef}
+        data-testid="event-feed-scroll"
         className={`flex-1 min-h-0 overflow-y-auto p-4 ${className}`}
       >
-        {feedEvents.length === 0 ? (
+        {feedEvents.length === 0 && !sessionEndEvent ? (
           <p className="text-xs font-mono text-text-secondary/60 text-center py-8">
             {events.length === 0 ? "等待事件…" : "当前 Tick 没有事件"}
           </p>
-        ) : (
+        ) : feedEvents.length > 0 ? (
           <div className="space-y-2">
             {feedEvents.map((event, index) => (
               <EventRow
@@ -102,14 +105,18 @@ export default function EventFeed({
               />
             ))}
           </div>
-        )}
+        ) : null}
+
+        {sessionEndEvent && <SessionEndCard event={sessionEndEvent} />}
 
         {userScrolledUp && (
           <button
             onClick={() => {
               setUserScrolledUp(false);
-              const el = containerRef.current;
-              if (el) el.scrollTop = el.scrollHeight;
+              requestAnimationFrame(() => {
+                const el = containerRef.current;
+                if (el) el.scrollTop = el.scrollHeight;
+              });
             }}
             className="
               sticky bottom-2 left-1/2 -translate-x-1/2
@@ -123,6 +130,25 @@ export default function EventFeed({
         )}
       </div>
     </>
+  );
+}
+
+function SessionEndCard({ event }: { event: SSEEvent }) {
+  const copy = getSessionEndCopy(event.reason);
+  return (
+    <section
+      role="status"
+      className="mt-3 rounded-lg border border-accent-green/35 bg-accent-green/10 px-4 py-3"
+    >
+      <div className="flex items-center gap-2">
+        <span aria-hidden="true">✅</span>
+        <strong className="text-sm font-mono text-accent-green">{copy.title}</strong>
+        <span className="ml-auto text-xs font-mono text-text-secondary/60">
+          Tick #{event.tick}
+        </span>
+      </div>
+      <p className="mt-1 text-xs font-mono text-text-secondary">{copy.detail}</p>
+    </section>
   );
 }
 

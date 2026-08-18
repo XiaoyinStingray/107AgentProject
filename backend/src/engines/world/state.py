@@ -1,10 +1,12 @@
 """World context, action, relationship, and persistence mixin."""
 
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from engines.world.relationships import (
     apply_relationship_changes,
@@ -20,6 +22,10 @@ from models.event import Event, SimEvent
 RECENT_EVENT_COUNT = 3
 EVENT_DESCRIPTION_CHAR_LIMIT = 240
 RECENT_EVENT_CONTEXT_CHAR_LIMIT = 800
+
+
+class WorldPersistenceError(RuntimeError):
+    """Raised when a World tick cannot be stored safely."""
 
 
 def _resolve_agent_id(
@@ -94,6 +100,9 @@ class WorldStateMixin:
         icebreaker = self._build_icebreaker_context()
         if icebreaker:
             context += icebreaker
+        stagnation_hint = getattr(self, "dialogue_stagnation_hint", "")
+        if stagnation_hint:
+            context += stagnation_hint
         return context
 
     def _build_tick_pressure_context(self) -> str:
@@ -392,23 +401,42 @@ class WorldStateMixin:
         if not events:
             return
 
-        for event in events:
-            orm = Event.from_sim_event(event)
-            try:
-                self._db.add(orm)
-                await self._db.flush()
-            except Exception:
-                # 重复 ID 或约束冲突 → 跳过，不中断后续事件
-                await self._db.rollback()
-                logger.warning(
-                    f"_persist_events: skipped duplicate event {event.id[:8]} "
-                    f"(tick={event.tick}, type={event.type})"
-                )
-        # 全部成功后统一提交（避免 rollback 后再 commit 导致事务状态冲突）
+        rows = [
+            {
+                "id": event.id,
+                "world_id": event.world_id,
+                "tick": event.tick,
+                "type": event.type,
+                "source_agent_id": event.source_agent_id,
+                "target_agent_ids": json.dumps(
+                    event.target_agent_ids,
+                    ensure_ascii=False,
+                ),
+                "description": event.description,
+                "data": json.dumps(event.data, ensure_ascii=False),
+                "created_at": event.created_at,
+            }
+            for event in events
+        ]
         try:
+            statement = (
+                sqlite_insert(Event)
+                .values(rows)
+                .on_conflict_do_nothing(index_elements=["id"])
+            )
+            await self._db.execute(statement)
             await self._db.commit()
-        except Exception:
-            await self._db.rollback()
+        except Exception as error:
+            try:
+                await self._db.rollback()
+            except Exception as rollback_error:
+                logger.error(
+                    "World event rollback failed after persistence error: "
+                    f"{rollback_error}"
+                )
+            raise WorldPersistenceError(
+                "事件保存失败，实验已自动暂停"
+            ) from error
 
     def inject_event(
         self,
