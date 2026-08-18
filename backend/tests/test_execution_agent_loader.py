@@ -79,7 +79,7 @@ async def test_real_agent_restores_identity_instead_of_generic_worker():
 
     agent = await load_agent_for_execution(
         "agent-yue-shuyan",
-        db=FakeAsyncSession(_yue_shuyan_row()),
+        db=FakeAsyncSession(_yue_shuyan_row()),  # type: ignore[arg-type]
         model_client=MockModelClient(),
     )
 
@@ -101,7 +101,7 @@ async def test_only_explicit_worker_default_builds_generic_worker():
 
     agent = await load_agent_for_execution(
         "worker-default",
-        db=FakeAsyncSession(None),
+        db=FakeAsyncSession(None),  # type: ignore[arg-type]
         model_client=MockModelClient(),
     )
 
@@ -118,7 +118,7 @@ async def test_missing_or_blank_agent_id_never_silently_degrades(agent_id):
     with pytest.raises(AgentNotFoundError, match="不存在|未指定"):
         await load_agent_for_execution(
             agent_id,
-            db=FakeAsyncSession(None),
+            db=FakeAsyncSession(None),  # type: ignore[arg-type]
             model_client=MockModelClient(),
         )
 
@@ -138,7 +138,7 @@ async def test_m9_uses_shared_loader_and_caches_restored_agent(monkeypatch):
     monkeypatch.setattr(loader, "load_agent_for_execution", fake_load)
     db = object()
     client = object()
-    engine = TeamEngine({"id": "team-1", "agent_ids": []}, db)
+    engine = TeamEngine({"id": "team-1", "agent_ids": []}, db)  # type: ignore[arg-type]
     engine._model_client = client
 
     first = await engine._get_agent_instance("agent-yue-shuyan")

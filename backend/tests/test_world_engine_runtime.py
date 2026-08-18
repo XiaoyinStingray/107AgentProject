@@ -380,7 +380,7 @@ class TestPersistEvents:
             commit=AsyncMock(),
             rollback=AsyncMock(),
         )
-        world_engine = WorldEngine(make_world(), [], broken_db)
+        world_engine = WorldEngine(make_world(), [], broken_db)  # type: ignore[arg-type]
         event = SimEvent(
             id="evt-failure",
             world_id="world-1",

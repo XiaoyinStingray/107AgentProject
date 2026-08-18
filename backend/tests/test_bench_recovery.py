@@ -65,7 +65,7 @@ async def test_running_run_is_failed_without_losing_progress(session):
     assert interrupted.status == "failed"
     assert interrupted.llm_api_key == ""
     assert interrupted.completed_tasks == 6
-    assert "6/27" in interrupted.report
+    assert "6/27" in str(interrupted.report)
     assert completed.status == "done"
     assert completed.report == "原报告"
     result = await session.execute(

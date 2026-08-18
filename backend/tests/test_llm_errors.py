@@ -17,7 +17,7 @@ def _status_response(status_code: int) -> httpx.Response:
 def test_classify_authentication_error():
     error = AuthenticationError(
         "Authentication Fails",
-        response=_status_response(401),
+        response=_status_response(401),  # type: ignore[arg-type]
         body={"error": "invalid key"},
     )
 
@@ -32,7 +32,7 @@ def test_classify_authentication_error():
 def test_classify_rate_limit_error():
     error = RateLimitError(
         "Rate limit reached",
-        response=_status_response(429),
+        response=_status_response(429),  # type: ignore[arg-type]
         body={"error": "insufficient balance"},
     )
 
@@ -55,7 +55,7 @@ def test_middleware_returns_structured_authentication_error():
     async def requires_llm():
         raise AuthenticationError(
             "Authentication Fails",
-            response=_status_response(401),
+            response=_status_response(401),  # type: ignore[arg-type]
             body={"error": "invalid key"},
         )
 
