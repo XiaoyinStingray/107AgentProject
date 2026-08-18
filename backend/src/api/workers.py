@@ -444,10 +444,16 @@ async def read_worker_file(run_id: str, path: str):
     if worker is None:
         # 磁盘恢复的条目——直接从文件系统读
         from pathlib import Path
-        file_path = Path.home() / "workspaces" / run_id / "files" / path
-        if not file_path.exists():
+        ws_root = Path.home() / "workspaces" / run_id / "files"
+        if not ws_root.exists():
+            raise HTTPException(status_code=404, detail="工作区不存在")
+        # 路径穿越检查
+        resolved = (ws_root / path).resolve()
+        if not str(resolved).startswith(str(ws_root.resolve())):
+            raise HTTPException(status_code=403, detail="不允许访问工作区外的文件")
+        if not resolved.exists() or not resolved.is_file():
             raise HTTPException(status_code=404, detail=f"文件不存在: {path}")
-        content = file_path.read_text(encoding='utf-8')
+        content = resolved.read_text(encoding='utf-8')
         return {"path": path, "content": content, "size": len(content)}
     try:
         content = await worker._workspace.read_file(path)

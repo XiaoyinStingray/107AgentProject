@@ -352,10 +352,11 @@ async def _world_event_generator(
                 assess_progress = getattr(engine, "assess_dialogue_progress", None)
                 if len(engine.agents) > 1 and callable(assess_progress):
                     assessment = assess_progress(tick_events)
-                if assessment is not None and assessment.should_finish:
+                if assessment is not None and getattr(assessment, "should_finish", False):
+                    _reason = getattr(assessment, "reason", "")
                     logger.info(
                         f"SSE: dialogue guard finished world {world_id} "
-                        f"(reason={assessment.reason}, tick={engine.current_tick})"
+                        f"(reason={_reason}, tick={engine.current_tick})"
                     )
                     engine.world.status = "finished"
                     await _finish_engine_simulation(engine)
@@ -365,7 +366,7 @@ async def _world_event_generator(
                         "type": "session_end",
                         "world_id": world_id,
                         "tick": engine.current_tick,
-                        "reason": assessment.reason,
+                        "reason": _reason,
                     })
                     break
 

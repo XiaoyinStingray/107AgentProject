@@ -8,6 +8,7 @@ Agent 路由 — CRUD API for LifeAgent（SQLite 持久化版）。
     DELETE /api/agents/{id}   删除 Agent
 """
 
+import asyncio
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -105,7 +106,10 @@ async def _ensure_unique_name(db: AsyncSession, name: str, factory) -> str:
     # 重名——让 LLM 重新取名
     logger.info(f"Agent 重名检测: {name!r} 已存在，正在重新取名...")
     try:
-        new_name = await factory.persona_builder.regenerate_name(list(existing_names))
+        new_name = await asyncio.wait_for(
+            factory.persona_builder.regenerate_name(list(existing_names)),
+            timeout=10.0,
+        )
         logger.info(f"Agent 重名检测: {name!r} → {new_name!r}")
         return new_name
     except Exception as e:
@@ -132,7 +136,14 @@ async def create_agent(
     await _ensure_agent_capacity(db)
 
     try:
-        agent = await factory.create_from_description(req.description)
+        agent = await asyncio.wait_for(
+            factory.create_from_description(req.description),
+            timeout=30.0,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504, detail="Agent 创建超时，请稍后重试"
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

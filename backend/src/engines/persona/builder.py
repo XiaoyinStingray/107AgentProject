@@ -291,7 +291,11 @@ class PersonaBuilder:
         ]
 
         logger.debug(f"PersonaBuilder._call_llm: retry={retry}")
-        response = await self._client.create(messages=messages)
+        import asyncio
+        response = await asyncio.wait_for(
+            self._client.create(messages=messages),
+            timeout=20.0,
+        )
         return response.content
 
     @staticmethod

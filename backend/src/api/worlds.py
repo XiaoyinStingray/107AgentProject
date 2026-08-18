@@ -341,6 +341,14 @@ async def finish_world(
 
     # 停止 SSE 引擎
     sse_reset(world_id)
+    # 关闭引擎持有的 DB session，防止泄漏
+    if engine is not None:
+        _db_session = getattr(engine, "_db", None)
+        if _db_session is not None:
+            try:
+                await _db_session.close()
+            except Exception:
+                pass
 
     world.status = "finished"
     await _sync_world_to_db(world)
@@ -542,6 +550,13 @@ async def delete_world(
         if engine.simulation_id:
             await finish_simulation(engine.simulation_id, engine.current_tick)
         sse_reset(world_id)
+        # 关闭引擎持有的 DB session，防止泄漏
+        _db_session = getattr(engine, "_db", None)
+        if _db_session is not None:
+            try:
+                await _db_session.close()
+            except Exception:
+                pass
 
     # 从 SQLite 移除
     await db.execute(delete(WorldRow).where(WorldRow.id == world_id))
@@ -570,7 +585,16 @@ async def reset_world_endpoint(
 
     # 先同步 goal 状态（引擎还在），再注销引擎
     await _sync_agent_goals_to_db(world_id)
+    engine = _active_worlds.get(world_id)
     sse_reset(world_id)
+    # 关闭引擎持有的 DB session，防止泄漏
+    if engine is not None:
+        _db_session = getattr(engine, "_db", None)
+        if _db_session is not None:
+            try:
+                await _db_session.close()
+            except Exception:
+                pass
     world.status = "idle"
     world.current_tick = 0
     await _sync_world_to_db(world)

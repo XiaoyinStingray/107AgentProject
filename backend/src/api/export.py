@@ -211,8 +211,11 @@ async def _collect_agent_names(world_id: str, db: AsyncSession) -> dict[str, str
     result = await db.execute(select(AgentRow))
     for row in result.scalars().all():
         if row.id not in names:
-            persona = json.loads(row.persona_json)
-            names[row.id] = persona.get("name", "") or row.id[:8]
+            try:
+                persona = json.loads(row.persona_json)
+                names[row.id] = persona.get("name", "") or row.id[:8]
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                names[row.id] = row.id[:8]
     return names
 
 

@@ -197,11 +197,18 @@ class WorldMessageMixin:
             "使用 observe 观察周围环境。"
         )
         try:
-            response = await agent.autogen_agent.on_messages(
-                [TextMessage(content=prompt, source="world")],
-                cancellation_token=CancellationToken(),
+            import asyncio
+            response = await asyncio.wait_for(
+                agent.autogen_agent.on_messages(
+                    [TextMessage(content=prompt, source="world")],
+                    cancellation_token=CancellationToken(),
+                ),
+                timeout=30.0,
             )
             return self._extract_events_from_response(response, agent.id)
+        except asyncio.TimeoutError:
+            logger.warning(f"WorldEngine._run_solo_tick: agent={agent.id} timed out")
+            return [self._make_error_event(agent.id, "LLM 调用超时，跳过本轮")]
         except Exception as error:
             logger.error(f"WorldEngine._run_solo_tick: agent={agent.id} error: {error}")
             return [self._make_error_event(agent.id, str(error))]

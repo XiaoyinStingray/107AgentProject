@@ -57,7 +57,7 @@ def detect_emotion(text: str) -> Optional[str]:
             scores[emotion] = count
     if not scores:
         return None
-    return max(scores, key=scores.get)
+    return max(scores, key=lambda k: scores[k])
 
 
 # ── 66-S: 随机场景事件 ──
