@@ -18,6 +18,7 @@ import WorkspaceSelector, {
 import { useAgents } from "../api/agents";
 import { unlock } from "../game/achievements";
 import { useFeatureAnchor } from "../hooks/useFeatureAnchor";
+import { useQuery } from "@tanstack/react-query";
 
 // =============================================================================
 // 常量
@@ -101,7 +102,19 @@ export default function WorkerBench() {
     { value: "executor", label: "⚡ 执行者" },
   ];
 
-  const { events, connected, done, error, execute, fork, cancel, reset, hydrate } =
+  // Step 100: 配方选择
+  const { data: recipes = [] } = useQuery({
+    queryKey: ["worker-recipes"],
+    queryFn: async () => {
+      const res = await fetch("/api/workers/recipes");
+      if (!res.ok) return [];
+      return res.json() as Promise<Array<{ id: string; name: string; description: string; icon: string; phase_count: number; phases: Array<{ title: string; output: string }> }>>;
+    },
+    staleTime: 60_000,
+  });
+  const [selectedRecipe, setSelectedRecipe] = useState("");
+
+  const { events, connected, done, error, execute, fork, cancel, reset, hydrate, resubscribe } =
     useWorkerExecute();
 
   // 双重保险：done 状态可能未及时更新，从 events 推断
@@ -112,7 +125,11 @@ export default function WorkerBench() {
     )
   );
 
+  // 致命错误终止：最后一条事件是 worker.error
+  const fatalError = events.length > 0 && events[events.length - 1]?.type === "worker.error";
+
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
+  const [workerRunning, setWorkerRunning] = useState(false);
   const [reconnectNotice, setReconnectNotice] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<Array<{
@@ -144,6 +161,7 @@ export default function WorkerBench() {
         if (running.length > 0) {
           const latest = running[running.length - 1];
           setCurrentRunId(latest.run_id);
+          setWorkerRunning(true);
           // 加载历史事件并还原终端
           try {
             const evResp = await fetch(`/api/workers/${latest.run_id}/events`, { signal: controller.signal });
@@ -153,6 +171,10 @@ export default function WorkerBench() {
                 hydrate(evData.events);
                 if (evData.accepted) setAccepted(true);
                 setReconnectNotice(`已恢复: ${latest.task?.slice(0, 60)}…`);
+                // 如果 Worker 仍在运行，重新订阅 SSE 事件流
+                if (evData.running) {
+                  resubscribe(latest.run_id, evData.events.length);
+                }
               } else {
                 setReconnectNotice(`检测到后台 Worker: ${latest.task?.slice(0, 60)}…（事件为空）`);
               }
@@ -167,7 +189,7 @@ export default function WorkerBench() {
     };
     checkRunning();
     return () => controller.abort();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 纪念墙跳转：URL 带 ?run_id=xxx → 自动加载该 Worker 历史
   useEffect(() => {
@@ -194,23 +216,26 @@ export default function WorkerBench() {
     task: taskText,
     role: workerRole,
     enabled_tools: enabledTools.length > 0 ? enabledTools : undefined,
+    recipe_id: selectedRecipe || undefined,
     workspace_type: workspaceConfig.type,
     workspace_config: workspaceConfig.type === "cloud"
       ? { host: workspaceConfig.host, port: workspaceConfig.port, user: workspaceConfig.user, key: workspaceConfig.key, path: workspaceConfig.path }
       : { path: workspaceConfig.path },
     reuse_run_id: reuse && currentRunId ? currentRunId : undefined,
-  }), [effectiveAgentId, workspaceConfig, currentRunId, workerRole, enabledTools]);
+  }), [effectiveAgentId, workspaceConfig, currentRunId, workerRole, enabledTools, selectedRecipe]);
 
   // 执行新任务（新工作区）
   const handleExecute = useCallback(() => {
     if (!task.trim()) return;
+    setWorkerRunning(true);
     execute(buildRequest(task.trim(), false));
   }, [task, execute, buildRequest]);
 
-  // 停止
+  // 停止（中断 SSE + 清除事件）
   const handleCancel = useCallback(() => {
-    cancel();
-  }, [cancel]);
+    reset();
+    setWorkerRunning(false);
+  }, [reset]);
 
   const loadHistory = useCallback(async () => {
     try {
@@ -227,13 +252,21 @@ export default function WorkerBench() {
       const response = await fetch(`/api/workers/${runId}/events`);
       if (response.ok) {
         const payload = await response.json();
-        if (payload.events?.length > 0) hydrate(payload.events);
+        if (payload.events?.length > 0) {
+          hydrate(payload.events);
+          // 如果 Worker 仍在运行，重新订阅 SSE 事件流
+          if (payload.running) {
+            setWorkerRunning(true);
+            resubscribe(runId, payload.events.length);
+          }
+        }
       }
     } catch { /* 决策面板仍可读取持久化决策日志 */ }
-  }, [history, hydrate]);
+  }, [history, hydrate, resubscribe]);
 
   const handleFork = useCallback((runId: string, stepIndex: number, alternativeDecision: string) => {
     setAccepted(false);
+    setWorkerRunning(true);
     setReconnectNotice(`正在从 Step ${stepIndex} 创建新路线…`);
     void fork(runId, {
       fork_point_step: stepIndex,
@@ -277,7 +310,10 @@ export default function WorkerBench() {
     const last = events[events.length - 1];
     if (!last) return;
     const triggerTypes = ["worker.done", "worker.error", "worker.summary", "worker.cancelled"];
-    if (triggerTypes.includes(last.type)) loadHistory();
+    if (triggerTypes.includes(last.type)) {
+      setWorkerRunning(false);
+      loadHistory();
+    }
   }, [events, loadHistory]);
 
   const [accepted, setAccepted] = useState(false);
@@ -287,17 +323,30 @@ export default function WorkerBench() {
 
   // 运行中每 10 秒轮询一次历史（防止 SSE 断连导致 done 不触发）
   useEffect(() => {
-    if (!connected) return;
+    if (!connected && !workerRunning) return;
     const interval = setInterval(() => loadHistory(), 10_000);
     return () => clearInterval(interval);
-  }, [connected, loadHistory]);
+  }, [connected, workerRunning, loadHistory]);
 
-  // 重置 = 新任务
-  const handleReset = useCallback(() => {
+  // 重置 = 新任务（不清除 workerRunning，后台 Worker 可能仍在运行）
+  const handleReset = useCallback(async () => {
     reset();
     setTask("");
     setCurrentRunId(null);
     setAccepted(false);
+    // 检查后台是否仍有运行中的 Worker
+    try {
+      const resp = await fetch("/api/workers/running/list");
+      if (resp.ok) {
+        const running = await resp.json() as Array<{ run_id: string; running: boolean }>;
+        const stillRunning = running.some((w) => w.running);
+        setWorkerRunning(stillRunning);
+      } else {
+        setWorkerRunning(false);
+      }
+    } catch {
+      setWorkerRunning(false);
+    }
   }, [reset]);
 
   // 认可交付——先更新 UI，后台持久化 + 刷新历史
@@ -316,6 +365,7 @@ export default function WorkerBench() {
     const rid = currentRunId;  // 闭包捕获当前值
     if (!instruction.trim() || !rid) return;
     setAccepted(false);
+    setWorkerRunning(true);
     execute({
       agent_id: effectiveAgentId,
       task: instruction.trim(),
@@ -370,7 +420,7 @@ export default function WorkerBench() {
               onKeyDown={handleKeyDown}
               placeholder="描述你想让 Agent 完成的任务...&#10;例如：搜索 AI Agent 框架的最新发展，写一份报告"
               rows={3}
-              disabled={connected}
+              disabled={connected || workerRunning}
               className="w-full bg-bg-primary border border-border rounded-lg px-4 py-3
                          text-sm font-mono text-text-primary placeholder-text-muted
                          resize-none focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20
@@ -378,7 +428,7 @@ export default function WorkerBench() {
             />
 
             {/* 示例任务 + 快捷操作栏 */}
-            {!connected && !done && (
+            {!connected && !workerRunning && !effectiveDone && (
               <div className="flex items-center gap-2 mt-2.5 flex-wrap">
                 <span className="text-[10px] font-mono text-text-muted/60 shrink-0">💡 推荐:</span>
                 {EXAMPLE_TASKS.map((t, i) => (
@@ -394,8 +444,38 @@ export default function WorkerBench() {
 
           {/* 角色 + 工具 + 执行按钮 */}
           <div className="flex flex-col gap-2.5 shrink-0 min-w-[210px]">
-            {!connected && !done && (
+            {!connected && !workerRunning && !effectiveDone && (
               <>
+                {/* 配方选择 */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono text-text-muted/60 w-8">配方</span>
+                  <select value={selectedRecipe} onChange={(e) => setSelectedRecipe(e.target.value)}
+                    className="flex-1 bg-bg-primary border border-border rounded-lg px-2.5 py-1.5 text-xs font-mono text-text-primary outline-none focus:border-accent-green/40 transition-all">
+                    <option value="">— 不使用配方 —</option>
+                    {recipes.map((r) => (
+                      <option key={r.id} value={r.id} title={r.description}>{r.icon} {r.name}（{r.phase_count} 步）</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 配方阶段信息 */}
+                {selectedRecipe && (() => {
+                  const recipe = recipes.find((r) => r.id === selectedRecipe);
+                  if (!recipe) return null;
+                  return (
+                    <div className="ml-10 p-2 bg-bg-primary rounded-lg border border-border/60 space-y-1">
+                      <div className="text-[10px] font-mono text-text-muted/60">{recipe.description}</div>
+                      {recipe.phases.map((phase, i) => (
+                        <div key={i} className="flex items-start gap-1.5 text-[10px] font-mono">
+                          <span className="text-cyan-400 shrink-0 mt-0.5">{i + 1}.</span>
+                          <span className="text-text-secondary">{phase.title}</span>
+                          {phase.output && <span className="text-text-muted/50 truncate" title={phase.output}>→ {phase.output}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+
                 {/* 角色选择 */}
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] font-mono text-text-muted/60 w-8">角色</span>
@@ -459,6 +539,15 @@ export default function WorkerBench() {
                 ⏹ 停止
               </button>
             )}
+            {!connected && workerRunning && !effectiveDone && (
+              <button
+                onClick={handleCancel}
+                className="px-4 py-2 bg-rose-800 hover:bg-rose-700 text-white text-sm
+                           font-mono rounded transition-colors"
+              >
+                ⏹ 停止
+              </button>
+            )}
             {done && (
               <>
                 <button
@@ -475,7 +564,7 @@ export default function WorkerBench() {
         </div>
 
         {/* Agent 选择器 */}
-        {!connected && (
+        {!connected && !workerRunning && (
           <>
             <div className="mt-2 flex items-center gap-2">
               <span className="text-xs font-mono text-text-muted">Agent:</span>
@@ -612,11 +701,13 @@ export default function WorkerBench() {
             events={events}
             connected={connected}
             done={effectiveDone}
+            fatalError={fatalError}
             accepted={accepted}
             onAccept={handleAccept}
             onRevise={(instruction: string) => {
               if (!instruction.trim()) return;
               setAccepted(false);
+              setWorkerRunning(true);
               execute({
                 agent_id: effectiveAgentId,
                 task: instruction.trim(),

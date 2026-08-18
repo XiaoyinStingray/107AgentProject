@@ -11,6 +11,7 @@ Phase 24: 扩展支持 CloudWorkspace。
 Phase 25: 扩展支持多 Agent 协作。
 """
 
+import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
@@ -479,6 +480,42 @@ async def get_worker_events(run_id: str):
         "running": entry.get("running", False),
         "accepted": entry.get("accepted", False),
     }
+
+
+@router.get("/{run_id}/events/stream")
+async def stream_worker_events(run_id: str, from_index: int = 0):
+    """SSE 端点——从指定事件索引开始推送新事件，用于页面切换后重连。
+
+    前端在 reconnect effect 中 hydrate 历史事件后调用此端点，
+    从已加载事件的末尾继续接收新事件，直到 Worker 完成。
+    """
+    entry = _active_workers.get(run_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Worker {run_id!r} 未找到")
+
+    async def event_generator():
+        last_idx = from_index
+        while True:
+            events = entry.get("events", [])
+            # 推送从 from_index 开始的所有新事件
+            while last_idx < len(events):
+                evt = events[last_idx]
+                yield f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
+                last_idx += 1
+            # Worker 已完成 → 发送剩余事件后关闭
+            if not entry.get("running", False):
+                break
+            await asyncio.sleep(1.5)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 class FileWriteRequest(BaseModel):

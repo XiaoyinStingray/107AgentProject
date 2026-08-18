@@ -74,6 +74,11 @@ export default function DecisionForkPanel({
     if (hash === "#branches") setExpanded(true);
   }, [hash]);
 
+  // 分叉执行开始后自动折叠面板
+  useEffect(() => {
+    if (connected) setExpanded(false);
+  }, [connected]);
+
   useEffect(() => {
     if (!selectedRunId) {
       setDecisions([]);

@@ -293,9 +293,13 @@ export default function WorkspacePanel({ events, runId, connected }: WorkspacePa
         )}
       </div>
 
-      {/* 文件查看器——替换文件树的全宽面板 */}
+      {/* 文件查看器——全屏悬浮弹窗 */}
       {viewingFile && (
-        <div className="absolute inset-0 bg-bg-card z-40 flex flex-col">
+        <>
+          {/* 遮罩层 */}
+          <div className="fixed inset-0 z-50 bg-black/60" onClick={closeFile} />
+          {/* 弹窗内容 */}
+          <div className="fixed inset-4 z-50 bg-bg-card rounded-xl shadow-2xl flex flex-col overflow-hidden border border-border/50">
           {/* 标题栏 */}
           <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-bg-secondary shrink-0">
             <div className="flex items-center gap-2 min-w-0">
@@ -356,7 +360,8 @@ export default function WorkspacePanel({ events, runId, connected }: WorkspacePa
               </pre>
             ) : null}
           </div>
-        </div>
+          </div>
+        </>
       )}
     </div>
   );

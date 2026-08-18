@@ -272,6 +272,8 @@ interface WorkerTerminalProps {
   events: WorkerEvent[];
   connected: boolean;
   done: boolean;
+  /** 是否因致命错误终止 */
+  fatalError?: boolean;
   /** 是否已认可 */
   accepted?: boolean;
   /** 用户点击认可后的回调 */
@@ -286,6 +288,7 @@ export default function WorkerTerminal({
   events,
   connected,
   done,
+  fatalError,
   accepted,
   onAccept,
   onRevise,
@@ -356,7 +359,7 @@ export default function WorkerTerminal({
       </div>
 
       {/* 完成卡片 */}
-      {done && <CompletionCard events={events} accepted={accepted} onAccept={onAccept} onRevise={onRevise} onNewTask={onNewTask} />}
+      {done && <CompletionCard events={events} fatalError={fatalError} accepted={accepted} onAccept={onAccept} onRevise={onRevise} onNewTask={onNewTask} />}
     </div>
   );
 }
@@ -364,96 +367,126 @@ export default function WorkerTerminal({
 
 /** 完成卡片——用户验收入口 */
 function CompletionCard({
-  events, accepted, onAccept, onRevise, onNewTask
+  events, fatalError, accepted, onAccept, onRevise, onNewTask
 }: {
   events: WorkerEvent[];
+  fatalError?: boolean;
   accepted?: boolean;
   onAccept?: () => void;
   onRevise?: (instruction: string) => void;
   onNewTask?: () => void;
 }) {
   const doneEvt = events.find(e => e.type === "worker.done");
+  const errorEvt = events.filter(e => e.type === "worker.error");
   const summaryEvt = events.find(e => e.type === "worker.summary");
   const steps = (doneEvt?.data as Record<string,unknown>|null)?.total_steps ?? "?";
   const files = ((doneEvt?.data as Record<string,unknown>|null)?.files ?? []) as string[];
   const toolCount = events.filter(e => e.type === "worker.tool_start").length;
+  const lastError = errorEvt.length > 0 ? errorEvt[errorEvt.length - 1] : null;
+  const lastErrorMsg = lastError ? String((lastError.data as Record<string,unknown>)?.message ?? "") : "";
 
   const [followUp, setFollowUp] = useState("");
-  const borderClass = accepted
-    ? "border-t-2 border-emerald-700/50 bg-emerald-900/5"
-    : "border-t-2 border-cyan-700/50 bg-bg-card";
+  const borderClass = fatalError
+    ? "border-t-2 border-rose-700/50 bg-rose-900/5"
+    : accepted
+      ? "border-t-2 border-emerald-700/50 bg-emerald-900/5"
+      : "border-t-2 border-cyan-700/50 bg-bg-card";
 
   return (
     <div className={borderClass} style={{transition: "border-color 0.3s, background-color 0.3s"}}>
       <div className={`p-4 space-y-3 ${accepted ? "opacity-70" : ""}`}>
-        <div className="flex items-center gap-2">
-          <span className="text-lg">{accepted ? "🏁" : "✅"}</span>
-          <span className={`text-sm font-mono font-semibold ${accepted ? "text-emerald-400" : "text-emerald-400"}`}>
-            {accepted ? "已验收" : "交付物就绪"} — {String(steps)} 步, {files.length} 个文件{!accepted && `, ${toolCount} 次工具调用`}
-          </span>
-          {files.length > 0 && (
-            <span className="text-xs text-text-muted font-mono">
-              {files.map((f, i) => (
-                <span key={f}>{i > 0 && " · "}
-                  <span className="text-cyan-400 cursor-pointer hover:underline"
-                        onClick={async () => {
-                          try {
-                            const rid = (events.find(ev => ev.type === "worker.started")?.data as any)?.run_id;
-                            const resp = await fetch(`/api/workers/${rid}/files/${encodeURIComponent(f)}`);
-                            if (resp.ok) { const d = await resp.json(); const b = new Blob([d.content]); const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href=u; a.download=f.split("/").pop()||f; a.click(); URL.revokeObjectURL(u); }
-                          } catch {}
-                        }}>{f.split("/").pop()} ⬇</span>
-                </span>
-              ))}
-            </span>
-          )}
-        </div>
-        {!accepted && (
+        {fatalError ? (
+          /* 致命错误终止 */
           <>
-            {summaryEvt && (
-              <p className="text-xs font-mono text-text-muted ml-7">
-                {(summaryEvt.data as Record<string,unknown>|null)?.deliverable_summary as string}
-              </p>
+            <div className="flex items-center gap-2">
+              <span className="text-lg"></span>
+              <span className="text-sm font-mono font-semibold text-rose-400">
+                任务因致命错误终止 — {String(steps)} 步, {toolCount} 次工具调用
+              </span>
+            </div>
+            {lastErrorMsg && (
+              <p className="text-xs font-mono text-rose-300 ml-7">{lastErrorMsg.slice(0, 300)}</p>
             )}
             <div className="flex items-center gap-2 ml-7">
-              <button onClick={onAccept}
-                      className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white
-                                 text-xs font-mono rounded transition-colors">
-                ✓ 认可交付
-              </button>
               <button onClick={onNewTask}
                       className="px-4 py-1.5 bg-bg-secondary hover:bg-bg-primary text-text-secondary
                                  text-xs font-mono rounded border border-border transition-colors">
                 ↺ 新任务
               </button>
             </div>
-            <div className="flex items-center gap-2 ml-7">
-              <span className="text-xs font-mono text-text-muted shrink-0">或继续修改：</span>
-              <input type="text" value={followUp}
-                     onChange={e => setFollowUp(e.target.value)}
-                     onKeyDown={e => { if (e.key === "Enter" && followUp.trim()) { onRevise?.(followUp.trim()); setFollowUp(""); } }}
-                     placeholder="把第三章改短一点 / 加一个对比表格 / 翻译成英文…"
-                     className="flex-1 bg-bg-primary border border-border rounded px-2 py-1
-                                text-xs font-mono text-text-primary placeholder-text-muted/50
-                                focus:outline-none focus:border-cyan-700/50" />
-              <button onClick={() => { if (followUp.trim()) { onRevise?.(followUp.trim()); setFollowUp(""); } }}
-                      disabled={!followUp.trim()}
-                      className="px-3 py-1 bg-cyan-700 hover:bg-cyan-600 disabled:bg-bg-secondary
-                                 disabled:text-text-muted text-white text-xs font-mono rounded
-                                 transition-colors shrink-0">
-                发送
-              </button>
-            </div>
           </>
-        )}
-        {accepted && (
-          <div className="flex items-center gap-2 ml-7">
-            <button onClick={onNewTask}
-                    className="px-4 py-1.5 bg-bg-secondary hover:bg-bg-primary text-text-secondary
-                               text-xs font-mono rounded border border-border transition-colors">
-              ↺ 新任务
-            </button>
-          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-2">
+              <span className="text-lg">{accepted ? "" : "✅"}</span>
+              <span className="text-sm font-mono font-semibold text-emerald-400">
+                {accepted ? "已验收" : "交付物就绪"} — {String(steps)} 步, {files.length} 个文件{!accepted && `, ${toolCount} 次工具调用`}
+              </span>
+              {files.length > 0 && (
+                <span className="text-xs text-text-muted font-mono">
+                  {files.map((f, i) => (
+                    <span key={f}>{i > 0 && " · "}
+                      <span className="text-cyan-400 cursor-pointer hover:underline"
+                            onClick={async () => {
+                              try {
+                                const rid = (events.find(ev => ev.type === "worker.started")?.data as any)?.run_id;
+                                const resp = await fetch(`/api/workers/${rid}/files/${encodeURIComponent(f)}`);
+                                if (resp.ok) { const d = await resp.json(); const b = new Blob([d.content]); const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href=u; a.download=f.split("/").pop()||f; a.click(); URL.revokeObjectURL(u); }
+                              } catch {}
+                            }}>{f.split("/").pop()} ⬇</span>
+                    </span>
+                  ))}
+                </span>
+              )}
+            </div>
+            {!accepted && (
+              <>
+                {summaryEvt && (
+                  <p className="text-xs font-mono text-text-muted ml-7">
+                    {(summaryEvt.data as Record<string,unknown>|null)?.deliverable_summary as string}
+                  </p>
+                )}
+                <div className="flex items-center gap-2 ml-7">
+                  <button onClick={onAccept}
+                          className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white
+                                     text-xs font-mono rounded transition-colors">
+                    ✓ 认可交付
+                  </button>
+                  <button onClick={onNewTask}
+                          className="px-4 py-1.5 bg-bg-secondary hover:bg-bg-primary text-text-secondary
+                                     text-xs font-mono rounded border border-border transition-colors">
+                     新任务
+                  </button>
+                </div>
+                <div className="flex items-center gap-2 ml-7">
+                  <span className="text-xs font-mono text-text-muted shrink-0">或继续修改：</span>
+                  <input type="text" value={followUp}
+                         onChange={e => setFollowUp(e.target.value)}
+                         onKeyDown={e => { if (e.key === "Enter" && followUp.trim()) { onRevise?.(followUp.trim()); setFollowUp(""); } }}
+                         placeholder="把第三章改短一点 / 加一个对比表格 / 翻译成英文…"
+                         className="flex-1 bg-bg-primary border border-border rounded px-2 py-1
+                                    text-xs font-mono text-text-primary placeholder-text-muted/50
+                                    focus:outline-none focus:border-cyan-700/50" />
+                  <button onClick={() => { if (followUp.trim()) { onRevise?.(followUp.trim()); setFollowUp(""); } }}
+                          disabled={!followUp.trim()}
+                          className="px-3 py-1 bg-cyan-700 hover:bg-cyan-600 disabled:bg-bg-secondary
+                                     disabled:text-text-muted text-white text-xs font-mono rounded
+                                     transition-colors shrink-0">
+                    发送
+                  </button>
+                </div>
+              </>
+            )}
+            {accepted && (
+              <div className="flex items-center gap-2 ml-7">
+                <button onClick={onNewTask}
+                        className="px-4 py-1.5 bg-bg-secondary hover:bg-bg-primary text-text-secondary
+                                   text-xs font-mono rounded border border-border transition-colors">
+                  ↺ 新任务
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
