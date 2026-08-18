@@ -64,4 +64,5 @@ export interface SSEEvent {
   tick: number;
   data?: Record<string, unknown>;
   status?: string;  // "running" | "paused" — connected/paused 事件携带
+  reason?: string;  // session_end 的结束原因
 }

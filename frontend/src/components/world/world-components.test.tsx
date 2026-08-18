@@ -80,6 +80,49 @@ describe("Step 20 world components", () => {
     expect(screen.getByText("RELATION")).toBeInTheDocument();
   });
 
+  it("keeps Event Feed pinned to the latest relationship event", () => {
+    const { rerender } = render(<EventFeed events={events.slice(0, 2)} />);
+    const scroller = screen.getByTestId("event-feed-scroll");
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: 1200,
+    });
+
+    rerender(<EventFeed events={events} />);
+
+    expect(scroller.scrollTop).toBe(1200);
+  });
+
+  it("pauses Event Feed following only after the user scrolls upward", () => {
+    const { rerender } = render(<EventFeed events={events.slice(0, 2)} />);
+    const scroller = screen.getByTestId("event-feed-scroll");
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: 1200,
+    });
+    scroller.scrollTop = 240;
+    fireEvent.wheel(scroller, { deltaY: -100 });
+
+    rerender(<EventFeed events={events} />);
+
+    expect(scroller.scrollTop).toBe(240);
+    expect(screen.getByRole("button", { name: "↓ 回到底部" })).toBeInTheDocument();
+  });
+
+  it("shows an explicit end card with the backend reason", () => {
+    render(
+      <EventFeed
+        events={[
+          ...events,
+          { type: "session_end", tick: 3, reason: "natural_completion" },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("对话已自然结束");
+    expect(screen.getByRole("status")).toHaveTextContent("Tick #3");
+  });
+
   it("supports setup selection and disables start without agents", () => {
     const onToggleAgent = vi.fn();
     const onSelectScenario = vi.fn();
@@ -131,6 +174,7 @@ describe("Step 20 world components", () => {
         currentTick={3}
         connected
         isPaused={false}
+        isFinished={false}
         isPending={false}
         speed={1}
         onToggleSpeed={onToggleSpeed}

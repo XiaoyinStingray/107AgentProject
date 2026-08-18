@@ -83,13 +83,15 @@ export default function GroupSandbox() {
     };
   }, []);
 
-  // 模拟自然结束时清理活跃 World
+  const sessionEndEvent = [...events].reverse().find((event) => event.type === "session_end");
+  const isFinished = Boolean(sessionEndEvent);
+
+  // 模拟自然结束时清理活跃 World，并关闭 EventSource，避免浏览器自动重连。
   useEffect(() => {
-    const hasSessionEnd = events.some((e) => e.type === "session_end");
-    if (hasSessionEnd && activeWorldId) {
-      setActiveWorld(null);
-    }
-  }, [events, activeWorldId, setActiveWorld]);
+    if (!sessionEndEvent) return;
+    disconnect();
+    if (activeWorldId) setActiveWorld(null);
+  }, [sessionEndEvent, activeWorldId, disconnect, setActiveWorld]);
 
   useEffect(() => {
     if (initializedAgents.current || agents.length === 0) return;
@@ -333,6 +335,8 @@ export default function GroupSandbox() {
         currentTick={getCurrentTick(visibleEvents)}
         connected={connected}
         isPaused={isPaused}
+        isFinished={isFinished}
+        finishReason={sessionEndEvent?.reason}
         isPending={pending}
         speed={speed}
         onToggleSpeed={() => setSpeed((value) => value === 1 ? 2 : 1)}
@@ -344,6 +348,7 @@ export default function GroupSandbox() {
       <SandboxRuntime
         agents={selectedAgents}
         events={visibleEvents}
+        sessionEndEvent={sessionEndEvent}
         relationships={relationshipValues}
         lastRelationshipKey={lastRelationshipKey}
         selectedTick={selectedTick}
@@ -395,6 +400,7 @@ export default function GroupSandbox() {
 interface SandboxRuntimeProps {
   agents: AgentResponse[];
   events: SSEEvent[];
+  sessionEndEvent?: SSEEvent;
   relationships: RelationshipState[];
   lastRelationshipKey: string | null;
   selectedTick: number | null;
@@ -418,7 +424,7 @@ function SandboxRuntime(props: SandboxRuntimeProps) {
               <RelationshipGraph className="h-full" agents={props.agents} relationships={props.relationships} lastRelationshipKey={props.lastRelationshipKey} />
             </div>
           </div>
-          <Card className="flex-1 min-h-0 overflow-hidden flex flex-col"><EventFeed events={props.events} selectedTick={props.selectedTick} agents={props.agents} feedFilterIds={props.feedFilterIds} onToggleFeedAgent={props.onToggleFeedAgent} /></Card>
+          <Card className="flex-1 min-h-0 overflow-hidden flex flex-col"><EventFeed events={props.sessionEndEvent ? [...props.events, props.sessionEndEvent] : props.events} selectedTick={props.selectedTick} agents={props.agents} feedFilterIds={props.feedFilterIds} onToggleFeedAgent={props.onToggleFeedAgent} /></Card>
         </div>
       </main>
       <aside className="col-span-3 min-h-0 min-w-0 overflow-hidden">

@@ -212,6 +212,176 @@ class TestSSEConnectionIsolation:
         assert any("session_end" in chunk for chunk in chunks)
         sync_world.assert_awaited_once_with(engine.world)
 
+    @pytest.mark.asyncio
+    async def test_dialogue_guard_emits_natural_session_end(self, monkeypatch):
+        """A group World stops once its generic dialogue guard reports closure."""
+        import api.worlds as worlds_mod
+        from api.sse import _active_connection_ids, _world_event_generator
+        from engines.world.dialogue_guard import DialogueAssessment
+        from models.event import SimEvent
+
+        class GroupEngine:
+            def __init__(self):
+                self.agents = {
+                    "yue": SimpleNamespace(persona=SimpleNamespace(name="岳书妍")),
+                    "shen": SimpleNamespace(persona=SimpleNamespace(name="沈砚")),
+                }
+                self.current_tick = 0
+                self.simulation_id = None
+                self.world = SimpleNamespace(
+                    id="guard-auto",
+                    status="running",
+                    current_tick=0,
+                    scenario=SimpleNamespace(time_range="1-20"),
+                )
+
+            async def tick_stream(self):
+                event = SimEvent(
+                    id="farewell-1",
+                    world_id="guard-auto",
+                    tick=self.current_tick,
+                    type="agent_message",
+                    source_agent_id="yue",
+                    description="明早见，都稳稳的。",
+                    created_at="2026-08-17T00:00:00",
+                )
+                self.current_tick += 1
+                self.world.current_tick = self.current_tick
+                yield event
+
+            def assess_dialogue_progress(self, _events):
+                return DialogueAssessment(
+                    should_finish=True,
+                    reason="natural_completion",
+                )
+
+        engine = GroupEngine()
+        sync_world = AsyncMock()
+        monkeypatch.setattr(worlds_mod, "_sync_world_to_db", sync_world)
+        _active_connection_ids["guard-auto"] = "conn-guard"
+
+        chunks = [
+            chunk
+            async for chunk in _world_event_generator(
+                "guard-auto",
+                engine,  # type: ignore[arg-type]
+                "conn-guard",
+            )
+        ]
+
+        payloads = [json.loads(chunk.removeprefix("data: ").strip()) for chunk in chunks]
+        assert payloads[-1]["type"] == "session_end"
+        assert payloads[-1]["reason"] == "natural_completion"
+        assert engine.world.status == "finished"
+        sync_world.assert_awaited_once_with(engine.world)
+        _active_connection_ids.clear()
+
+    @pytest.mark.asyncio
+    async def test_group_hard_limit_survives_sse_reconnect(self, monkeypatch):
+        """A reconnected stream must honor the World's persisted global tick."""
+        import api.worlds as worlds_mod
+        from api.sse import _active_connection_ids, _world_event_generator
+
+        class GroupEngine:
+            def __init__(self):
+                self.agents = {
+                    "a1": SimpleNamespace(persona=SimpleNamespace(name="甲")),
+                    "a2": SimpleNamespace(persona=SimpleNamespace(name="乙")),
+                }
+                self.current_tick = 40
+                self.simulation_id = None
+                self.tick_called = False
+                self.world = SimpleNamespace(
+                    id="global-limit",
+                    status="running",
+                    current_tick=40,
+                    scenario=SimpleNamespace(time_range="1-20"),
+                )
+
+            async def tick_stream(self):
+                self.tick_called = True
+                if False:
+                    yield None
+
+        engine = GroupEngine()
+        sync_world = AsyncMock()
+        monkeypatch.setattr(worlds_mod, "_sync_world_to_db", sync_world)
+        _active_connection_ids["global-limit"] = "conn-reconnected"
+
+        chunks = [
+            chunk
+            async for chunk in _world_event_generator(
+                "global-limit",
+                engine,  # type: ignore[arg-type]
+                "conn-reconnected",
+            )
+        ]
+        payloads = [
+            json.loads(chunk.removeprefix("data: ").strip())
+            for chunk in chunks
+        ]
+
+        assert engine.tick_called is False
+        assert engine.world.status == "finished"
+        assert payloads[-1]["type"] == "session_end"
+        assert payloads[-1]["reason"] == "hard_limit"
+        assert payloads[-1]["tick"] == 40
+        sync_world.assert_awaited_once_with(engine.world)
+        _active_connection_ids.clear()
+
+    @pytest.mark.asyncio
+    async def test_stream_failure_auto_pauses_and_persists_world(self, monkeypatch):
+        """A tick failure pauses instead of reconnecting into another running loop."""
+        import api.worlds as worlds_mod
+        from api.sse import _active_connection_ids, _world_event_generator
+
+        class BrokenEngine:
+            def __init__(self):
+                self.agents = {
+                    "a1": SimpleNamespace(persona=SimpleNamespace(name="甲")),
+                    "a2": SimpleNamespace(persona=SimpleNamespace(name="乙")),
+                }
+                self.current_tick = 10
+                self.simulation_id = None
+                self.tick_pressure = 0
+                self._pause_event = None
+                self.world = SimpleNamespace(
+                    id="save-failure",
+                    status="running",
+                    current_tick=10,
+                    scenario=SimpleNamespace(time_range="1-20"),
+                )
+
+            async def tick_stream(self):
+                raise RuntimeError("事件保存失败")
+                if False:
+                    yield None
+
+        engine = BrokenEngine()
+        sync_world = AsyncMock()
+        monkeypatch.setattr(worlds_mod, "_sync_world_to_db", sync_world)
+        _active_connection_ids["save-failure"] = "conn-failure"
+
+        chunks = [
+            chunk
+            async for chunk in _world_event_generator(
+                "save-failure",
+                engine,  # type: ignore[arg-type]
+                "conn-failure",
+            )
+        ]
+        payloads = [
+            json.loads(chunk.removeprefix("data: ").strip())
+            for chunk in chunks
+        ]
+
+        assert engine.world.status == "paused"
+        assert payloads[-1]["type"] == "error"
+        assert payloads[-1]["status"] == "paused"
+        assert "自动暂停" in payloads[-1]["message"]
+        sync_world.assert_awaited_once_with(engine.world)
+        _active_connection_ids.clear()
+
 
 # =============================================================================
 # SSE 端点

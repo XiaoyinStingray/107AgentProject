@@ -68,6 +68,8 @@ class WorldMessageMixin:
     _name_to_id: dict[str, str]
     _act_model_client: Any
     _pending_speaker_ids: list[str]
+    _last_tick_speaker_id: str | None
+    _annotate_dialogue_event: Any
 
     def build_group_chat(self):
         """Create a target-aware AutoGen SelectorGroupChat for World Agents。"""
@@ -94,11 +96,11 @@ class WorldMessageMixin:
             if agent is not None:
                 return agent.autogen_agent.name
         if not messages:
-            return next(iter(self.agents.values())).autogen_agent.name
+            return self._next_initial_speaker_name()
         latest = messages[-1]
         source = getattr(latest, "source", "")
         if source in ("user", "world"):
-            return next(iter(self.agents.values())).autogen_agent.name
+            return self._next_initial_speaker_name()
         content = str(getattr(latest, "content", ""))
         matches = [
             agent.autogen_agent.name
@@ -107,6 +109,18 @@ class WorldMessageMixin:
             and (agent.persona.name or agent.id) in content
         ]
         return matches[0] if len(matches) == 1 else None
+
+    def _next_initial_speaker_name(self) -> str:
+        """Rotate the first speaker across ticks instead of always picking Agent 1."""
+        agent_ids = list(self.agents)
+        if not agent_ids:
+            return ""
+        last_id = getattr(self, "_last_tick_speaker_id", None)
+        if last_id not in self.agents:
+            next_id = agent_ids[0]
+        else:
+            next_id = agent_ids[(agent_ids.index(last_id) + 1) % len(agent_ids)]
+        return self.agents[next_id].autogen_agent.name
 
     def _has_identity_conflict(self, source_id: str, content: str) -> bool:
         """Reject obvious self/other identity contradictions before persistence。"""
@@ -237,7 +251,7 @@ class WorldMessageMixin:
                     target_agent_ids.append(agent.id)
                     break  # 只取第一个匹配
 
-        return SimEvent(
+        event = SimEvent(
             id=str(uuid.uuid4()),
             world_id=self.world.id,
             tick=self.current_tick,
@@ -247,6 +261,7 @@ class WorldMessageMixin:
             description=content,
             created_at=datetime.now(timezone.utc).isoformat(),
         )
+        return self._annotate_dialogue_event(event)
 
     def _tool_call_to_event(self, message) -> SimEvent | None:
         """Convert the first AutoGen tool call into an agent_action event."""
@@ -264,7 +279,7 @@ class WorldMessageMixin:
         description = _build_action_description(tool_name, arguments)
         if not description:
             return None
-        return SimEvent(
+        event = SimEvent(
             id=str(uuid.uuid4()),
             world_id=self.world.id,
             tick=self.current_tick,
@@ -274,6 +289,7 @@ class WorldMessageMixin:
             data={"action": tool_name, **arguments},
             created_at=datetime.now(timezone.utc).isoformat(),
         )
+        return event
 
     def _extract_events_from_response(self, response, agent_id: str) -> list[SimEvent]:
         """Extract inner thought/action events and the final chat message."""
@@ -314,7 +330,7 @@ class WorldMessageMixin:
 
     def _make_agent_event(self, event_type: str, agent_id: str, text: str) -> SimEvent:
         """Build a typed Agent event with current World metadata."""
-        return SimEvent(
+        event = SimEvent(
             id=str(uuid.uuid4()),
             world_id=self.world.id,
             tick=self.current_tick,
@@ -323,6 +339,9 @@ class WorldMessageMixin:
             description=text,
             created_at=datetime.now(timezone.utc).isoformat(),
         )
+        if event_type == "agent_message":
+            return self._annotate_dialogue_event(event)
+        return event
 
     def _make_error_event(self, agent_id: str, error: str) -> SimEvent:
         """Build a non-fatal world_event for an Agent execution failure."""
