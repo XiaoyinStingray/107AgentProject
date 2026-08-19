@@ -920,6 +920,12 @@ async def fork_worker(run_id: str, req: ForkRequest):
                 fork_entry["running"] = False
                 await _persist_worker_state(fork_entry)
                 await _save_events_file(fork_entry)
+            # 淘汰最旧的已完成 Worker，防止内存无限增长
+            if len(_active_workers) > _MAX_ACTIVE_WORKERS:
+                done = [(rid, e) for rid, e in _active_workers.items() if not e.get("running")]
+                done.sort(key=lambda x: x[1].get("created_at", ""))
+                for rid, _ in done[:len(done) // 2 + 1]:
+                    _active_workers.pop(rid, None)
 
     return StreamingResponse(
         fork_generator(),

@@ -83,7 +83,12 @@ export default function GroupSandbox() {
     };
   }, []);
 
-  const sessionEndEvent = [...events].reverse().find((event) => event.type === "session_end");
+  const sessionEndEvent = useMemo(() => {
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i].type === "session_end") return events[i];
+    }
+    return undefined;
+  }, [events]);
   const isFinished = Boolean(sessionEndEvent);
 
   // 模拟自然结束时清理活跃 World，并关闭 EventSource，避免浏览器自动重连。
@@ -107,13 +112,19 @@ export default function GroupSandbox() {
   // 暂停状态只由按钮和首次 connected 事件控制
   const didSyncRef = useRef(false);
   useEffect(() => {
-    const streamError = [...events].reverse().find((event) => event.type === "error");
+    let streamError: SSEEvent | undefined;
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i].type === "error") { streamError = events[i]; break; }
+    }
     if (streamError) {
       setError(streamError.message ?? streamError.content ?? "SSE 连接发生错误");
     }
     // 仅首次 connected 事件同步 isPaused
     if (!didSyncRef.current) {
-      const ce = [...events].reverse().find((event) => event.type === "connected");
+      let ce: SSEEvent | undefined;
+      for (let i = events.length - 1; i >= 0; i--) {
+        if (events[i].type === "connected") { ce = events[i]; break; }
+      }
       if (ce?.status) {
         didSyncRef.current = true;
         setIsPaused(ce.status === "paused");

@@ -429,6 +429,16 @@ async def _world_event_generator(
         _pe = getattr(engine, "_pause_event", None)
         if _pe is not None:
             _pe.set()
+        # ── 模拟结束时清理引擎资源，防止 DB session 泄漏 ──
+        # finish_world / reset_world_endpoint 可能已先行清理（幂等安全）
+        if engine.world.status in ("finished", "idle"):
+            _db_session = getattr(engine, "_db", None)
+            if _db_session is not None:
+                try:
+                    await _db_session.close()
+                except Exception:
+                    pass
+            unregister_world(world_id)
         logger.info(
             f"SSE: generator {conn_id[:8]} ended for world {world_id} "
             f"(meaningful_ticks={meaningful_ticks}, total_ticks={total_ticks})"

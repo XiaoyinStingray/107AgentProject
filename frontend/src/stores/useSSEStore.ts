@@ -60,14 +60,13 @@ export const useSSEStore = create<SSEStore>((set, get) => ({
       const key = relationship
         ? relationshipKey(relationship.source, relationship.target)
         : null;
-      // 同步维护 id 集合（与 events 数组等长）
-      const nextIds = new Set(state._eventIds);
-      if (event.id) nextIds.add(event.id);
+      // 原地维护 id 集合（_eventIds 仅内部去重用，不参与 React 渲染，无需不可变复制）
+      if (event.id) state._eventIds.add(event.id);
       const nextEvents = [...state.events.slice(-499), event];
-      // 裁剪时移除被挤出窗口的旧 id（去重保证唯一，O(1)）
+      // 裁剪时移除被挤出窗口的旧 id
       if (state.events.length >= 500) {
         const trimmed = state.events[0];
-        if (trimmed?.id) nextIds.delete(trimmed.id);
+        if (trimmed?.id) state._eventIds.delete(trimmed.id);
       }
       return {
         events: nextEvents,
@@ -76,7 +75,6 @@ export const useSSEStore = create<SSEStore>((set, get) => ({
           ? { ...state.relationships, [key]: relationship }
           : state.relationships,
         lastRelationshipKey: key ?? state.lastRelationshipKey,
-        _eventIds: nextIds,
       };
     }),
   appendUnique: (event) => {

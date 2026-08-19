@@ -472,7 +472,7 @@ class AgentWorker:
                 yield _sse_event("worker.error", WorkerErrorData(
                     step_index=1,
                     error_type="json_parse_failure",
-                    message=f"Agent 输出无法解析为 JSON (已重试 {MAX_PARSE_RETRIES} 次)",
+                    message=f"Agent 输出无法解析为 JSON (累计失败 {self._parse_errors} 次)",
                     recoverable=False,
                 ).__dict__)
                 return
@@ -489,7 +489,7 @@ class AgentWorker:
                 yield _sse_event("worker.error", WorkerErrorData(
                     step_index=1,
                     error_type="json_parse_failure",
-                    message=f"Agent 输出无法解析为 JSON (已重试 {MAX_PARSE_RETRIES} 次)",
+                    message="Agent 输出无法解析为 JSON (已重试 1 次)",
                     recoverable=False,
                 ).__dict__)
                 return
@@ -1162,16 +1162,28 @@ class AgentWorker:
         summary = f"任务完成。共执行 {self._step_index} 步，产生 {len(file_paths)} 个文件。"
         audit_finding = self._delivery_audit_summary or "未触发最终交付验收"
         key_findings = [audit_finding, f"产出 {len(file_paths)} 个文件"] + file_paths[:5]
+
+        # ── 基于可观测指标计算自评分（1-5） ──
+        _file_count = len(file_paths)
+        if _file_count >= 3:
+            _rating = 4
+        elif _file_count >= 1:
+            _rating = 3
+        else:
+            _rating = 2
+        if self._delivery_warning:
+            _rating = max(1, _rating - 1)
+
         events.append(_sse_event("worker.summary", WorkerSummaryData(
             deliverable_summary=summary,
-            self_rating="3",
+            self_rating=str(_rating),
             key_findings=key_findings,
             total_duration_ms=total_duration_ms,
         ).__dict__))
 
         # Step 100a: 存储元数据供纪念墙使用
         self._total_duration_ms = total_duration_ms
-        self._self_rating = "3"
+        self._self_rating = str(_rating)
         self._key_findings = [audit_finding, f"产出 {len(file_paths)} 个文件"] + file_paths[:3]
 
         logger.info(f"AgentWorker DONE: {self._step_index} steps, "
@@ -1317,5 +1329,5 @@ class AgentWorker:
             self._parse_errors = 0
             return decision
 
-        self._parse_errors += 1
+        # 重试也失败——不再额外递增，由下次调用时首次失败递增
         return None
