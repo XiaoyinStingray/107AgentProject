@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAgents } from "../api/agents";
 import type { GoalStatus } from "../types/agent";
@@ -47,6 +47,16 @@ export default function SoloTheater() {
   const [isRunning, setIsRunning] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   useFeatureAnchor(isRunning);
+
+  // agents 异步加载完成后自动选中第一个（与 GroupSandbox 行为一致）
+  const initializedAgentRef = useRef(false);
+  useEffect(() => {
+    if (initializedAgentRef.current || agents.length === 0) return;
+    if (!selectedAgentId || !agents.find((a) => a.id === selectedAgentId)) {
+      setSelectedAgentId(agents[0].id);
+    }
+    initializedAgentRef.current = true;
+  }, [agents, selectedAgentId]);
 
   // API Mutations
   const createWorld = useCreateWorld();

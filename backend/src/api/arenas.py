@@ -49,8 +49,20 @@ async def _load_agent(db: AsyncSession, agent_id: str):
 
 
 async def _load_agents(db: AsyncSession, agent_ids: list[str]) -> list:
-    """按请求顺序加载多个 Agent。"""
-    return [await _load_agent(db, agent_id) for agent_id in agent_ids]
+    """批量加载多个 Agent（单次 SQL 代替 N 次单独查询）。"""
+    result = await db.execute(
+        select(AgentRow).where(AgentRow.id.in_(agent_ids))
+    )
+    rows_by_id: dict[str, AgentRow] = {
+        row.id: row for row in result.scalars().all()
+    }
+    agents = []
+    for agent_id in agent_ids:
+        row = rows_by_id.get(agent_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
+        agents.append(await _rebuild_agent_from_row(row))
+    return agents
 
 
 async def _persist_result(

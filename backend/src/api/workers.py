@@ -427,9 +427,14 @@ async def get_worker_status(run_id: str):
     if not entry:
         raise HTTPException(status_code=404, detail=f"Worker {run_id!r} 未找到")
     worker = entry["worker"]
+    if worker is None:
+        # 磁盘恢复的条目无活跃引擎，从 running 字段推断
+        state = "running" if entry.get("running") else "done"
+    else:
+        state = worker.state.value if hasattr(worker.state, 'value') else str(worker.state)
     return WorkerStatusResponse(
         run_id=run_id,
-        state=worker.state.value if hasattr(worker.state, 'value') else str(worker.state),
+        state=state,
         agent_name=entry["agent_name"],
         task=entry["task"],
         created_at=entry["created_at"],
@@ -619,6 +624,9 @@ async def cancel_worker(run_id: str):
     if not entry:
         raise HTTPException(status_code=404, detail=f"Worker {run_id!r} 未找到")
     worker = entry["worker"]
+    if worker is None:
+        # 磁盘恢复的条目不在运行中，无需取消
+        return {"status": "not_running", "run_id": run_id}
     worker.cancel()
     return {"status": "cancelling", "run_id": run_id}
 

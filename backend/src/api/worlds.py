@@ -157,11 +157,13 @@ async def _sync_agent_goals_to_db(world_id: str) -> None:
         return  # 引擎不存在或已销毁，无需同步
 
     async with async_session() as session:
+        # 批量查询所有 Agent（单次 SQL 代替 N 次单独查询）
+        result = await session.execute(
+            select(AgentRow).where(AgentRow.id.in_(list(engine.agents.keys())))
+        )
+        rows_by_id = {row.id: row for row in result.scalars().all()}
         for aid, agent in engine.agents.items():
-            result = await session.execute(
-                select(AgentRow).where(AgentRow.id == aid)
-            )
-            row = result.scalar_one_or_none()
+            row = rows_by_id.get(aid)
             if not row:
                 continue
             goals = []
