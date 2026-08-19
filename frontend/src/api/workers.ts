@@ -139,6 +139,8 @@ export function useWorkerExecute() {
     error: null,
   });
   const abortRef = useRef<AbortController | null>(null);
+  const eventsRef = useRef<WorkerEvent[]>([]);
+  eventsRef.current = state.events;
 
   const consume = useCallback(async (
     url: string,
@@ -226,14 +228,14 @@ export function useWorkerExecute() {
     // 中止任何已有的连接（包括 resubscribe 的 SSE 流）
     abortRef.current?.abort();
     const initialEvents = req.reuse_run_id
-      ? [...state.events, {
+      ? [...eventsRef.current, {
           type: "worker.started" as WorkerEventType,
           data: { run_id: req.reuse_run_id, agent_name: "", task: `--- 追加: ${req.task.slice(0, 60)} ---`, workspace: "" },
           timestamp: new Date().toISOString(),
         }]
       : [];
     await consume("/api/workers/execute", req as unknown as Record<string, unknown>, initialEvents);
-  }, [consume, state.events]);
+  }, [consume]);
 
   const fork = useCallback(async (runId: string, req: WorkerForkRequest) => {
     await consume(

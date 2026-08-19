@@ -162,6 +162,9 @@ export default function SoloTheater() {
   const handleResumeWorld = (wid: string) => {
     const world = worlds.find((w) => w.id === wid);
     if (!world) return;
+    // 清理上一个实验的 SSE 连接和事件
+    disconnect();
+    clear();
     setWorldId(wid);
     setSelectedScenario(world.scenario.name ?? "期末周");
     if (world.agent_ids.length > 0) {
@@ -186,7 +189,7 @@ export default function SoloTheater() {
     const wid = worldId;
     if (wid) {
       try {
-        await pauseWorld.mutateAsync(worldId);
+        await pauseWorld.mutateAsync(wid);
         await new Promise(r => setTimeout(r, 2000));
       } catch (e) {
         console.error("返回暂停失败:", e);
