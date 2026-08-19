@@ -139,6 +139,18 @@ def get_world_engine(world_id: str) -> WorldEngine:
     return engine
 
 
+def get_active_world_events(world_id: str) -> list[SimEvent] | None:
+    """获取活跃 WorldEngine 内存中的事件列表。
+
+    Returns:
+        事件列表（引擎存在时），或 None（引擎不存在）
+    """
+    engine = _active_worlds.get(world_id)
+    if engine is None:
+        return None
+    return list(engine.events)
+
+
 # =============================================================================
 # SSE 端点
 # =============================================================================

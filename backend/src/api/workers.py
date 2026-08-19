@@ -105,6 +105,7 @@ class WorkerStatusResponse(BaseModel):
 # =============================================================================
 
 _active_workers: dict[str, dict] = {}  # run_id → {worker, agent_name, task, created_at}
+_MAX_ACTIVE_WORKERS = 200  # 防止内存无限增长
 
 
 async def _persist_worker_state(entry: dict):
@@ -338,6 +339,12 @@ async def execute_worker_task(req: WorkerExecuteRequest):
                 # 持久化到工作区目录（重启后可恢复）
                 await _persist_worker_state(entry)
                 await _save_events_file(entry)
+            # 淘汰最旧的已完成 Worker，防止内存无限增长
+            if len(_active_workers) > _MAX_ACTIVE_WORKERS:
+                done = [(rid, e) for rid, e in _active_workers.items() if not e.get("running")]
+                done.sort(key=lambda x: x[1].get("created_at", ""))
+                for rid, _ in done[:len(done) // 2 + 1]:
+                    _active_workers.pop(rid, None)
             # 保留 worker 在内存中（用户可查询状态、下载产物）
 
     return StreamingResponse(
@@ -540,7 +547,9 @@ async def write_worker_file(run_id: str, path: str, req: FileWriteRequest):
     entry = _active_workers.get(run_id)
     if not entry:
         raise HTTPException(status_code=404, detail=f"Worker {run_id!r} 未找到")
-    worker = entry["worker"]
+    worker = entry.get("worker")
+    if worker is None:
+        raise HTTPException(status_code=404, detail=f"Worker {run_id!r} 无活跃引擎（已从磁盘恢复）")
     try:
         if req.lock:
             worker.lock_file(path)

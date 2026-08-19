@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from loguru import logger
-from sqlalchemy import func, select, delete
+from sqlalchemy import func, or_, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
@@ -45,20 +45,29 @@ router = APIRouter(prefix="/api/worlds", tags=["worlds"])
 # =============================================================================
 
 async def _rebuild_agents_from_db(agent_ids: list[str]) -> list:
-    """从 SQLite 加载 Agent 数据并重建 LifeAgent 实例列表。"""
+    """从 SQLite 批量加载 Agent 数据并重建 LifeAgent 实例列表。"""
     from api.agents import get_agent_factory
 
     factory = get_agent_factory()
+
+    # 批量查询所有 Agent（单次 SQL 代替 N 次单独查询）
+    async with async_session() as session:
+        result = await session.execute(
+            select(AgentRow).where(AgentRow.id.in_(agent_ids))
+        )
+        rows = result.scalars().all()
+
+    row_map = {row.id: row for row in rows}
+    missing_ids = [aid for aid in agent_ids if aid not in row_map]
+    if missing_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Agents not found: {missing_ids}. Create agents first.",
+        )
+
     agents = []
     for aid in agent_ids:
-        async with async_session() as session:
-            result = await session.execute(select(AgentRow).where(AgentRow.id == aid))
-            row = result.scalar_one_or_none()
-        if not row:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Agent {aid!r} not found. Create agents first.",
-            )
+        row = row_map[aid]
         data = row.to_dict()
         persona = Persona(**data["persona"])
         background = Background(**data["background"])
@@ -92,12 +101,16 @@ async def _build_world_engine(world: WorldResponse) -> WorldEngine:
 
     agents = await _rebuild_agents_from_db(world.agent_ids)
     session = async_session()
-    return WorldEngine(
-        world,
-        agents,
-        session,
-        act_model_client=create_model_client("act"),
-    )
+    try:
+        return WorldEngine(
+            world,
+            agents,
+            session,
+            act_model_client=create_model_client("act"),
+        )
+    except Exception:
+        await session.close()
+        raise
 
 
 async def _sync_world_to_db(world: WorldResponse) -> None:
@@ -300,7 +313,6 @@ async def pause_world(
         engine.world.status = "paused"
         # 同步运行时 tick 到 DB（运行时 engine 持有权威时钟）
         world.current_tick = engine.current_tick
-        engine.world.current_tick = engine.current_tick
         # 清除 pause Event——SSE generator 检查 status 后会进入等待
         if hasattr(engine, "_pause_event") and engine._pause_event is not None:
             engine._pause_event.clear()
@@ -512,17 +524,16 @@ async def get_world_interventions(
     agent_names: dict[str, str] = {}
     unique_agent_ids = {r.target_agent_id for r in rows if r.target_agent_id}
     if unique_agent_ids:
-        for aid in unique_agent_ids:
-            agent_result = await db.execute(
-                select(AgentRow).where(AgentRow.id == aid)
-            )
-            agent_row = agent_result.scalar_one_or_none()
-            if agent_row:
-                try:
-                    persona = json.loads(agent_row.persona_json)
-                    agent_names[aid] = persona.get("name", "") or agent_row.name or aid[:8]
-                except Exception:
-                    agent_names[aid] = agent_row.name or aid[:8]
+        agent_result = await db.execute(
+            select(AgentRow.id, AgentRow.name, AgentRow.persona_json)
+            .where(AgentRow.id.in_(unique_agent_ids))
+        )
+        for agent_row in agent_result.all():
+            try:
+                persona = json.loads(agent_row.persona_json)
+                agent_names[agent_row.id] = persona.get("name", "") or agent_row.name or agent_row.id[:8]
+            except Exception:
+                agent_names[agent_row.id] = agent_row.name or agent_row.id[:8]
 
     interventions = []
     for r in rows:
@@ -611,7 +622,7 @@ async def get_world_events(
     world_id: str,
     tick_from: int = 0,
     tick_to: int | None = None,
-    type: str | None = None,
+    event_type: str | None = None,
     agent_id: str | None = None,
 ):
     """查询指定世界的历史事件（从 SQLite events 表）。每个事件附带 agent_name。"""
@@ -623,8 +634,8 @@ async def get_world_events(
     )
     if tick_to is not None:
         stmt = stmt.where(Event.tick <= tick_to)
-    if type is not None:
-        stmt = stmt.where(Event.type == type)
+    if event_type is not None:
+        stmt = stmt.where(Event.type == event_type)
     if agent_id is not None:
         stmt = stmt.where(Event.source_agent_id == agent_id)
 
@@ -638,15 +649,16 @@ async def get_world_events(
     if unique_agent_ids:
         from models.agent_orm import AgentRow
         async with async_session() as session:
-            for aid in unique_agent_ids:
-                result = await session.execute(select(AgentRow).where(AgentRow.id == aid))
-                row = result.scalar_one_or_none()
-                if row:
-                    try:
-                        persona = json.loads(row.persona_json)
-                        agent_names[aid] = persona.get("name", "") or row.name or aid[:8]
-                    except Exception:
-                        agent_names[aid] = row.name or aid[:8]
+            agent_result = await session.execute(
+                select(AgentRow.id, AgentRow.name, AgentRow.persona_json)
+                .where(AgentRow.id.in_(unique_agent_ids))
+            )
+            for row in agent_result.all():
+                try:
+                    persona = json.loads(row.persona_json)
+                    agent_names[row.id] = persona.get("name", "") or row.name or row.id[:8]
+                except Exception:
+                    agent_names[row.id] = row.name or row.id[:8]
 
     events = [e.to_response() for e in orm_events]
     # 注入 agent_name 到 data 中（不破坏 SimEvent 结构）

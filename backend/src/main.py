@@ -4,9 +4,11 @@ FastAPI 应用入口
 """
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from loguru import logger
+from pydantic import BaseModel
 
 from config import DATABASE_PATH, SEED_DATABASE_PATH, ensure_dirs, settings
 from db import async_session, init_db
@@ -66,7 +68,7 @@ register_llm_error_middleware(app)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"] if settings.debug else ["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -94,8 +96,6 @@ app.include_router(settings_router)
 @app.get("/api/export-db")
 async def export_database():
     """导出当前数据库文件供下载。"""
-    from fastapi.responses import FileResponse
-    from fastapi import HTTPException
     db_path = DATABASE_PATH
     if not db_path.exists():
         raise HTTPException(status_code=404, detail="数据库文件不存在")
@@ -109,26 +109,30 @@ async def reset_database():
     try:
         if target.exists():
             target.unlink()
-        # 创建一个空的 SQLite 数据库
         import sqlite3
         conn = sqlite3.connect(str(target))
         conn.close()
         return {"ok": True, "message": "数据库已清空"}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        raise HTTPException(status_code=500, detail=f"数据库重置失败: {e}")
 
 
 @app.get("/health")
 async def health():
-    from config import settings
+    agent_count = 0
+    try:
+        from db import async_session as _session
+        from sqlalchemy import text as _text
+        async with _session() as s:
+            r = await s.execute(_text("SELECT COUNT(*) FROM agents"))
+            agent_count = r.scalar() or 0
+    except Exception:
+        pass
     return {
         "status": "ok", "version": "0.1.0",
         "has_llm_key": bool(settings.llm_api_key),
-        "agent_count": 0,  # 前端可据此判断是否需要种子数据
+        "agent_count": agent_count,
     }
-
-
-from pydantic import BaseModel
 
 
 class ConfigUpdateRequest(BaseModel):
@@ -238,45 +242,64 @@ async def seed_database(keep_existing: bool = False):
     target_path = DATABASE_PATH
 
     if not seed_path.exists():
-        return {"ok": False, "error": "种子数据库不存在，请联系开发者"}
+        raise HTTPException(status_code=404, detail="种子数据库不存在，请联系开发者")
 
     try:
         if not keep_existing:
             shutil.copy2(seed_path, target_path)
             return {"ok": True, "mode": "replace", "message": "已替换为预置数据库"}
         else:
-            # 追加模式：将种子中不存在的记录插入
-            import sqlite3
-            seed_conn = sqlite3.connect(str(seed_path))
-            target_conn = sqlite3.connect(str(target_path))
+            # 追加模式：将种子中不存在的记录插入（使用 aiosqlite 避免阻塞事件循环）
+            import aiosqlite
+            seed_conn = await aiosqlite.connect(str(seed_path))
+            target_conn = await aiosqlite.connect(str(target_path))
 
-            tables = [r[0] for r in seed_conn.execute(
+            # 如果目标数据库为空，直接初始化表结构
+            cursor = await target_conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+            existing_tables = [r[0] for r in await cursor.fetchall()]
+            if not existing_tables:
+                seed_cursor = await seed_conn.execute(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+                )
+                all_ddl = list(await seed_cursor.fetchall())
+                if all_ddl:
+                    await target_conn.execute(all_ddl[0][0])
+
+            cursor = await seed_conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_%'"
-            ).fetchall()]
+            )
+            tables = [r[0] for r in await cursor.fetchall()]
 
             inserted = {}
             for table in tables:
                 try:
-                    seed_rows = seed_conn.execute(f"SELECT * FROM \"{table}\"").fetchall()
-                    seed_cols = [c[1] for c in seed_conn.execute(f"PRAGMA table_info(\"{table}\")").fetchall()]
-                    existing_ids = {r[0] for r in target_conn.execute(f"SELECT id FROM \"{table}\"").fetchall()} if 'id' in seed_cols else set()
+                    cur = await seed_conn.execute(f'SELECT * FROM "{table}"')
+                    seed_rows = await cur.fetchall()
+                    cur = await seed_conn.execute(f'PRAGMA table_info("{table}")')
+                    seed_cols = [c[1] for c in await cur.fetchall()]
+                    cur = await target_conn.execute(f'SELECT id FROM "{table}"')
+                    existing_ids = {r[0] for r in await cur.fetchall()} if 'id' in seed_cols else set()
 
                     new_rows = [r for r in seed_rows if r[0] not in existing_ids] if 'id' in seed_cols else []
                     if new_rows:
                         placeholders = ','.join(['?' for _ in seed_cols])
-                        cols_str = ','.join(f'\"{c}\"' for c in seed_cols)
-                        target_conn.executemany(
-                            f"INSERT OR IGNORE INTO \"{table}\" ({cols_str}) VALUES ({placeholders})",
+                        cols_str = ','.join(f'"{c}"' for c in seed_cols)
+                        await target_conn.executemany(
+                            f'INSERT OR IGNORE INTO "{table}" ({cols_str}) VALUES ({placeholders})',
                             new_rows
                         )
                         inserted[table] = len(new_rows)
                 except Exception:
                     pass
 
-            target_conn.commit()
-            seed_conn.close()
-            target_conn.close()
+            await target_conn.commit()
+            await seed_conn.close()
+            await target_conn.close()
             return {"ok": True, "mode": "append", "inserted": inserted}
 
+    except HTTPException:
+        raise
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))

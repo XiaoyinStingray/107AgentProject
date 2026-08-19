@@ -20,6 +20,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import async_session
 
+# 内存中最多保留已完成的 simulation 记录数（防止无限增长）
+_MAX_CACHED_SIMULATIONS = 200
+
 router = APIRouter(prefix="/api/simulations", tags=["simulations"])
 
 
@@ -66,32 +69,39 @@ async def list_simulations(world_id: str | None = None):
         result = await session.execute(stmt)
         rows = result.scalars().all()
 
+        if not rows:
+            return []
+
+        # 收集需要查询的 world_id（一次性批量获取 World 和事件数）
+        needed_world_ids = list({row.world_id for row in rows})
+        world_stmt = select(WorldRow).where(WorldRow.id.in_(needed_world_ids))
+        world_result = await session.execute(world_stmt)
+        world_map: dict[str, WorldRow] = {
+            w.id: w for w in world_result.scalars().all()
+        }
+
+        # 批量查询每个 world 的事件数
+        event_count_map: dict[str, int] = {}
+        for wid in needed_world_ids:
+            ec_result = await session.execute(
+                select(func.count()).select_from(Event).where(Event.world_id == wid)
+            )
+            event_count_map[wid] = ec_result.scalar() or 0
+
         records: list[SimulationRecord] = []
         for row in rows:
             if world_id and row.world_id != world_id:
                 continue
-
-            # 查询关联 World 的名称和 Agent 数
-            world_result = await session.execute(
-                select(WorldRow).where(WorldRow.id == row.world_id)
-            )
-            world_row = world_result.scalar_one_or_none()
-            # World 已删除 → 跳过这条 simulation 记录
+            world_row = world_map.get(row.world_id)
+            # World 已删除 → 跳过
             if not world_row:
                 continue
-            world_name = world_row.name
             agent_count = 0
             try:
                 agent_ids = json.loads(world_row.agent_ids_json)
                 agent_count = len(agent_ids)
             except (json.JSONDecodeError, TypeError):
                 pass
-
-            # 查询事件数
-            event_result = await session.execute(
-                select(func.count()).select_from(Event).where(Event.world_id == row.world_id)
-            )
-            event_count = event_result.scalar() or 0
 
             records.append(SimulationRecord(
                 id=row.id,
@@ -100,9 +110,9 @@ async def list_simulations(world_id: str | None = None):
                 ended_at=row.ended_at,
                 total_ticks=row.total_ticks,
                 status=row.status,
-                world_name=world_name,
+                world_name=world_row.name,
                 agent_count=agent_count,
-                event_count=event_count,
+                event_count=event_count_map.get(row.world_id, 0),
             ))
 
         return records
@@ -166,7 +176,14 @@ async def create_simulation(world_id: str) -> SimulationRecord:
     """Create and retain one running simulation record for a World.
 
     Step 45: 同时写入内存 dict 和 SQLite，保证向后兼容。
+    内存 dict 超过上限时淘汰最旧的已完成记录。
     """
+    # 淘汰已完成的旧记录，防止内存无限增长
+    if len(_simulations) >= _MAX_CACHED_SIMULATIONS:
+        finished_ids = [k for k, v in _simulations.items() if v.status != "running"]
+        for fid in finished_ids[:len(finished_ids) // 2 + 1]:
+            _simulations.pop(fid, None)
+
     sim = SimulationRecord(
         id=str(uuid.uuid4()),
         world_id=world_id,
@@ -194,13 +211,10 @@ async def create_simulation(world_id: str) -> SimulationRecord:
 async def finish_simulation(simulation_id: str, total_ticks: int):
     """Mark a retained simulation record as finished.
 
-    Step 45: 同时更新内存 dict 和 SQLite，保证向后兼容。
+    SQLite 为权威数据源；内存缓存条目在完成后移除以防止泄漏。
     """
-    sim = _simulations.get(simulation_id)
-    if sim:
-        sim.status = "finished"
-        sim.ended_at = datetime.now(timezone.utc).isoformat()
-        sim.total_ticks = total_ticks
+    # 从内存缓存移除（已完成，不再需要热缓存）
+    _simulations.pop(simulation_id, None)
 
     # SQLite 持久化
     from models.simulation_orm import SimulationRow
