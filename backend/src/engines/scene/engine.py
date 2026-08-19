@@ -287,8 +287,6 @@ def _extract_whisper_instruction(message: str) -> str:
     return instruction.split(" | ", 1)[0].strip()[:300]
 
 
-import re
-
 # DSML 标签清洗（支持标准格式和空格变体）
 _DSML_RE = re.compile(r"<\!?\s*\|\|\s*\|\|\s*\|\|\s*\|\|>?")
 

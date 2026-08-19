@@ -12,6 +12,7 @@ from engines.arena.prompts import (
     build_judge_system_prompt,
 )
 from engines.arena.scoring import ArenaScorer
+from engines.arena.utils import clean_dsml_content
 from models.arena import (
     ArenaMode,
     ArenaResult,
@@ -239,7 +240,7 @@ class ArenaEngine:
             if not isinstance(content, str) or not content:
                 continue
             # 清理 DSML 工具调用标记
-            content = ArenaEngine._clean_dsml_content(content)
+            content = clean_dsml_content(content)
             if not content:
                 continue
             identity = source_map.get(source)
@@ -256,38 +257,8 @@ class ArenaEngine:
 
     @staticmethod
     def _clean_dsml_content(content: str) -> str:
-        """从 TextMessage 内容中提取纯文本，去除 DSML 工具调用标记。"""
-        import re
-
-        if "DSML" not in content:
-            return content
-
-        # 尝试多种可能的 DSML 闭合标签格式
-        patterns = [
-            r'parameter\s+name="content"\s+string="true">(.*?)</\|\s*\|\s*DSML\s*\|\s*\|\s*parameter>',
-            r'parameter\s+name="content"\s+string="true">(.*?)</\|\|\s*DSML\s*\|\|\s*parameter>',
-            r'parameter\s+name="content"\s+string="true">(.*?)</[^>]*DSML[^>]*parameter>',
-        ]
-
-        for pattern in patterns:
-            matches = re.findall(pattern, content, re.DOTALL)
-            if matches:
-                cleaned = " ".join(m.strip() for m in matches if m.strip())
-                if cleaned:
-                    return cleaned
-
-        # 如果有 DSML 标记但无法提取，尝试去除所有 DSML 标签
-        dsml_tags = [
-            r'<\|\s*\|\s*DSML\s*\|\s*\|[^>]*>',
-            r'<\|\|\s*DSML\s*\|\|[^>]*>',
-            r'</\|\s*\|\s*DSML\s*\|\s*\|[^>]*>',
-            r'</\|\|\s*DSML\s*\|\|[^>]*>',
-            r'<[^>]*DSML[^>]*>',
-        ]
-        cleaned = content
-        for tag_pattern in dsml_tags:
-            cleaned = re.sub(tag_pattern, '', cleaned)
-        return cleaned.strip() if cleaned.strip() else content
+        """委托给共享工具函数。"""
+        return clean_dsml_content(content)
 
     @staticmethod
     def _reset_agent_contexts(agents: list) -> None:

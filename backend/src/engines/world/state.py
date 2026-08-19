@@ -389,8 +389,8 @@ class WorldStateMixin:
             if not hasattr(self, "_pending_llm_relationships"):
                 self._pending_llm_relationships = []
             self._pending_llm_relationships = llm_changes
-        except Exception:
-            pass  # LLM 评估失败不影响主流程
+        except Exception as error:
+            logger.debug(f"LLM relationship assessment failed: {error}")
 
     async def _persist_events(self, events: list[SimEvent]):
         """Persist a list of simulation events to SQLite (idempotent).
