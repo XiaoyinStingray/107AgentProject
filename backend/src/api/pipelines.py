@@ -181,26 +181,69 @@ SUGGEST_PROMPT = """你是一个工作流设计专家。用户描述了一个目
 
 @router.post("/suggest")
 async def suggest_pipeline(req: PipelineSuggestRequest):
-    """LLM 生成管道建议。"""
+    """LLM 生成管道建议。LLM 不可用时用规则兜底。"""
     logger.info(f"POST /api/pipelines/suggest: {req.goal[:80]}")
+
+    # 规则兜底：LLM 失败时基于目标关键词生成简单管道
+    def _rule_fallback() -> dict:
+        goal_lower = req.goal.lower()
+        nodes = []
+        if any(kw in goal_lower for kw in ["数据", "分析", "data", "统计"]):
+            nodes = [
+                {"id": "collect", "title": "数据收集", "agent_id": "worker-default",
+                 "description": "收集并整理输入数据", "depends_on": []},
+                {"id": "process", "title": "数据处理", "agent_id": "worker-default",
+                 "description": "清洗和转换数据", "depends_on": ["collect"]},
+                {"id": "analyze", "title": "数据分析", "agent_id": "worker-default",
+                 "description": "执行统计分析并生成洞察", "depends_on": ["process"]},
+            ]
+        elif any(kw in goal_lower for kw in ["报告", "文档", "report", "总结"]):
+            nodes = [
+                {"id": "research", "title": "资料收集", "agent_id": "worker-default",
+                 "description": "收集相关资料和参考信息", "depends_on": []},
+                {"id": "draft", "title": "撰写草稿", "agent_id": "worker-default",
+                 "description": "基于资料撰写报告草稿", "depends_on": ["research"]},
+                {"id": "review", "title": "审核优化", "agent_id": "worker-default",
+                 "description": "审核并优化报告内容", "depends_on": ["draft"]},
+            ]
+        else:
+            nodes = [
+                {"id": "plan", "title": "任务规划", "agent_id": "worker-default",
+                 "description": "分析目标并制定执行计划", "depends_on": []},
+                {"id": "execute", "title": "执行任务", "agent_id": "worker-default",
+                 "description": "按计划执行核心任务", "depends_on": ["plan"]},
+                {"id": "deliver", "title": "交付成果", "agent_id": "worker-default",
+                 "description": "整合产出并交付最终成果", "depends_on": ["execute"]},
+            ]
+        return {
+            "name": req.goal[:20] + ("..." if len(req.goal) > 20 else ""),
+            "description": f"规则兜底生成：{req.goal[:80]}",
+            "nodes": nodes,
+        }
+
     try:
+        import asyncio
         from llm.client import create_model_client
         from autogen_core.models import UserMessage
 
         client = create_model_client()
         if client is None:
-            raise HTTPException(status_code=503, detail="LLM 不可用")
+            logger.warning("Pipeline suggest: LLM client is None, using rule fallback")
+            return _rule_fallback()
 
         prompt = f"用户目标：{req.goal}\n可用 Agent ID：{', '.join(req.agent_ids) if req.agent_ids else '(全部可用)'}"
-        response = await client.create(
-            messages=[
-                UserMessage(content=f"{SUGGEST_PROMPT}\n\n{prompt}", source="pipeline_suggest"),
-            ],
+        response = await asyncio.wait_for(
+            client.create(
+                messages=[
+                    UserMessage(content=f"{SUGGEST_PROMPT}\n\n{prompt}", source="pipeline_suggest"),
+                ],
+            ),
+            timeout=15.0,
         )
         text = response.content if hasattr(response, 'content') else str(response)
 
         # Parse JSON
-        text = text.strip()
+        text = str(text).strip()
         if "```json" in text:
             text = text[text.find("```json") + 7:text.rfind("```")]
         elif "```" in text:
@@ -215,8 +258,8 @@ async def suggest_pipeline(req: PipelineSuggestRequest):
         }
 
     except Exception as e:
-        logger.error(f"Pipeline suggestion failed: {e}")
-        raise HTTPException(status_code=500, detail=f"生成建议失败: {e}")
+        logger.warning(f"Pipeline suggest LLM failed ({type(e).__name__}), using rule fallback: {e}")
+        return _rule_fallback()
 
 
 # =============================================================================
@@ -377,10 +420,16 @@ async def list_pipeline_files(pipeline_id: str):
 async def read_pipeline_file(pipeline_id: str, path: str):
     """读取管线工作区中的文件内容。"""
     from pathlib import Path
-    file_path = Path.home() / "workspaces" / f"pipeline-{pipeline_id}" / "files" / path
-    if not file_path.exists():
+    ws_root = Path.home() / "workspaces" / f"pipeline-{pipeline_id}" / "files"
+    if not ws_root.exists():
+        raise HTTPException(status_code=404, detail="管线工作区不存在")
+    # 路径穿越检查——resolved 必须在 ws_root 内
+    resolved = (ws_root / path).resolve()
+    if not str(resolved).startswith(str(ws_root.resolve())):
+        raise HTTPException(status_code=403, detail="不允许访问工作区外的文件")
+    if not resolved.exists() or not resolved.is_file():
         raise HTTPException(status_code=404, detail=f"文件不存在: {path}")
-    content = file_path.read_text(encoding='utf-8')
+    content = resolved.read_text(encoding='utf-8')
     return {"path": path, "content": content, "size": len(content)}
 
 
@@ -394,7 +443,7 @@ async def delete_pipeline(pipeline_id: str):
 
 
 @router.post("/{pipeline_id}/execute")
-async def execute_pipeline(pipeline_id: str, req: PipelineExecuteRequest = None):
+async def execute_pipeline(pipeline_id: str, req: PipelineExecuteRequest | None = None):
     if req is None:
         req = PipelineExecuteRequest()
     pipeline = _pipelines.get(pipeline_id)

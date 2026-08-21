@@ -34,8 +34,10 @@ def _exception_chain(error: BaseException) -> Iterator[BaseException]:
         seen.add(id(current))
         yield current
 
-        if isinstance(current, BaseExceptionGroup):
-            pending.extend(current.exceptions)
+        # BaseExceptionGroup is Python 3.11+
+        _ExcGroup = globals().get("BaseExceptionGroup")  # type: ignore[arg-type]
+        if _ExcGroup is not None and isinstance(current, _ExcGroup):
+            pending.extend(getattr(current, "exceptions", []))
         if current.__cause__ is not None:
             pending.append(current.__cause__)
         if current.__context__ is not None:

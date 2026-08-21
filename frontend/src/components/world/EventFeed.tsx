@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { SSEEvent, SSEEventType } from "../../types/events";
 import type { EventFeedProps } from "../../types/sandbox";
 import { getSessionEndCopy } from "./sessionEnd";
@@ -15,17 +15,30 @@ export default function EventFeed({
   onToggleFeedAgent,
   className = "",
 }: EventFeedProps) {
-  const feedEvents = events.filter(
-    (event) =>
-      event.type !== "thought_stream" &&
-      !INFRASTRUCTURE_EVENTS.has(event.type) &&
-      (selectedTick === null || event.tick === selectedTick) &&
-      (feedFilterIds.length === 0 || !event.agent_id || feedFilterIds.includes(event.agent_id)),
+  const feedEvents = useMemo(
+    () => events.filter(
+      (event) =>
+        event.type !== "thought_stream" &&
+        !INFRASTRUCTURE_EVENTS.has(event.type) &&
+        (selectedTick === null || event.tick === selectedTick) &&
+        (feedFilterIds.length === 0 || !event.agent_id || feedFilterIds.includes(event.agent_id)),
+    ),
+    [events, selectedTick, feedFilterIds],
   );
-  const sessionEndEvent = [...events].reverse().find(
-    (event) =>
-      event.type === "session_end" &&
-      (selectedTick === null || event.tick === selectedTick),
+  const sessionEndEvent = useMemo(
+    () => {
+      for (let i = events.length - 1; i >= 0; i--) {
+        const event = events[i];
+        if (
+          event.type === "session_end" &&
+          (selectedTick === null || event.tick === selectedTick)
+        ) {
+          return event;
+        }
+      }
+      return undefined;
+    },
+    [events, selectedTick],
   );
 
   const containerRef = useRef<HTMLDivElement>(null);

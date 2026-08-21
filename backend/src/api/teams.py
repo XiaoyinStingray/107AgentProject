@@ -5,7 +5,6 @@ Step 51: 为 Agent Team 模块提供数据层。
 
 import asyncio
 import json
-import json as _json
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -20,6 +19,29 @@ from db import get_db
 from models.team_orm import TeamRow
 from models.plan_orm import PlanRow
 from config import settings
+
+# MBTI → 默认角色映射（模块级常量，避免多处重复）
+_MBTI_ROLE_MAP: dict[str, tuple[str, str]] = {
+    "INTJ": ("技术架构师", "INTJ 擅长系统思维和长期规划"),
+    "INTP": ("算法工程师", "INTP 擅长抽象推理和逻辑分析"),
+    "ENTJ": ("项目经理", "ENTJ 擅长领导统筹和战略决策"),
+    "ENTP": ("产品经理", "ENTP 擅长创意发散和机会洞察"),
+    "INFJ": ("技术写作", "INFJ 擅长深度理解和表达"),
+    "INFP": ("UI/UX 设计师", "INFP 擅长共情和审美表达"),
+    "ENFJ": ("产品经理", "ENFJ 擅长沟通协调和团队激励"),
+    "ENFP": ("市场研究员", "ENFP 擅长探索新领域和用户共情"),
+    "ISTJ": ("后端开发", "ISTJ 擅长严谨实现和流程遵循"),
+    "ISFJ": ("测试工程师", "ISFJ 擅长细致检查和品质保障"),
+    "ESTJ": ("DevOps 工程师", "ESTJ 擅长运维管理和效率优化"),
+    "ESFJ": ("项目经理", "ESFJ 擅长协调资源和人际支持"),
+    "ISTP": ("前端开发", "ISTP 擅长动手实践和即时调试"),
+    "ISFP": ("UI/UX 设计师", "ISFP 擅长视觉表达和细节打磨"),
+    "ESTP": ("全栈开发", "ESTP 擅长快速试错和多面手能力"),
+    "ESFP": ("市场研究员", "ESFP 擅长现场感知和人脉拓展"),
+}
+
+# 保存后台 Task 引用，防止 GC 回收导致任务丢失
+_background_tasks: set[asyncio.Task] = set()
 
 router = APIRouter(prefix="/api/teams", tags=["teams"])
 
@@ -72,11 +94,14 @@ async def create_team(
     if not isinstance(agent_ids, list) or len(agent_ids) == 0:
         raise HTTPException(status_code=400, detail="Team 至少需要 1 个 Agent")
 
-    # 验证所有 Agent 存在
+    # 验证所有 Agent 存在 + 批量加载 persona（避免 N+1）
     from models.agent_orm import AgentRow
+    agent_result = await db.execute(select(AgentRow).where(AgentRow.id.in_(agent_ids)))
+    agent_rows_by_id: dict[str, AgentRow] = {
+        row.id: row for row in agent_result.scalars().all()
+    }
     for aid in agent_ids:
-        result = await db.execute(select(AgentRow).where(AgentRow.id == aid))
-        if not result.scalar_one_or_none():
+        if aid not in agent_rows_by_id:
             raise HTTPException(
                 status_code=400,
                 detail=f"Agent {aid!r} 不存在，请先创建 Agent",
@@ -88,36 +113,14 @@ async def create_team(
 
     # 如果未提供角色，根据 Agent MBTI 自动分配默认角色
     if not roles:
-        from models.agent_orm import AgentRow
-        mbti_role_map = {
-            "INTJ": ("技术架构师", "擅长系统思维和长期规划"),
-            "INTP": ("算法工程师", "擅长抽象推理和逻辑分析"),
-            "ENTJ": ("项目经理", "擅长组织领导和决策"),
-            "ENTP": ("产品策划", "擅长创新思维和市场洞察"),
-            "INFJ": ("用户体验师", "擅长共情和用户研究"),
-            "INFP": ("内容策划", "擅长创意写作和情感表达"),
-            "ENFJ": ("团队协调", "擅长沟通协调和团队管理"),
-            "ENFP": ("市场运营", "擅长创意营销和用户增长"),
-            "ISTJ": ("质量保证", "擅长细节检查和流程规范"),
-            "ISFJ": ("运维支持", "擅长稳定维护和后勤保障"),
-            "ESTJ": ("执行主管", "擅长任务分解和进度管控"),
-            "ESFJ": ("客户服务", "擅长用户沟通和需求收集"),
-            "ISTP": ("开发工程师", "擅长动手实现和技术攻关"),
-            "ISFP": ("视觉设计", "擅长美学设计和艺术创作"),
-            "ESTP": ("商务拓展", "擅长市场开拓和资源整合"),
-            "ESFP": ("活动策划", "擅长活动组织和现场执行"),
-        }
         for aid in agent_ids:
-            result = await db.execute(select(AgentRow).where(AgentRow.id == aid))
-            row = result.scalar_one_or_none()
-            if not row:
-                continue
+            row = agent_rows_by_id[aid]
             try:
-                persona = _json.loads(row.persona_json)
+                persona = json.loads(row.persona_json)
                 mbti = persona.get("mbti", "")
             except Exception:
                 mbti = ""
-            role, reason = mbti_role_map.get(mbti, ("团队成员", f"{mbti or '未知'} 类型"))
+            role, reason = _MBTI_ROLE_MAP.get(mbti, ("团队成员", f"{mbti or '未知'} 类型"))
             roles.append({"agent_id": aid, "role": role, "reason": reason})
 
     team_id = str(uuid.uuid4())
@@ -167,16 +170,18 @@ async def get_team(team_id: str, db: AsyncSession = Depends(get_db)):
 
     data = _attach_plan_outcome(row.to_dict(), await _latest_plan_dict(db, row.id))
 
-    # 附带 Agent 摘要（id, name, mbti）
+    # 附带 Agent 摘要（id, name, mbti）——批量查询避免 N+1
     from models.agent_orm import AgentRow
-    import json as _json
+    agent_result = await db.execute(
+        select(AgentRow).where(AgentRow.id.in_(data["agent_ids"]))
+    )
+    agent_rows_by_id = {row.id: row for row in agent_result.scalars().all()}
     agents_summary = []
     for aid in data["agent_ids"]:
-        agent_result = await db.execute(select(AgentRow).where(AgentRow.id == aid))
-        agent_row = agent_result.scalar_one_or_none()
+        agent_row = agent_rows_by_id.get(aid)
         if agent_row:
             try:
-                persona = _json.loads(agent_row.persona_json)
+                persona = json.loads(agent_row.persona_json)
                 agent_name = persona.get("name", "") or agent_row.name or aid[:8]
                 agent_mbti = persona.get("mbti", "")
             except Exception:
@@ -222,26 +227,28 @@ async def suggest_roles(body: dict) -> list[dict]:
     if not isinstance(agent_ids, list) or len(agent_ids) == 0:
         raise HTTPException(status_code=400, detail="至少需要 1 个 Agent ID")
 
-    # 从 DB 加载 Agent 人格摘要
+    # 从 DB 批量加载 Agent 人格摘要（避免 N+1）
     from models.agent_orm import AgentRow
     from db import async_session
-    import json as _json
 
     agent_profiles = []
     async with async_session() as session:
+        result = await session.execute(
+            select(AgentRow).where(AgentRow.id.in_(agent_ids))
+        )
+        rows_by_id = {row.id: row for row in result.scalars().all()}
         for aid in agent_ids:
-            result = await session.execute(select(AgentRow).where(AgentRow.id == aid))
-            row = result.scalar_one_or_none()
+            row = rows_by_id.get(aid)
             if not row:
                 raise HTTPException(status_code=400, detail=f"Agent {aid!r} 不存在")
             try:
-                persona = _json.loads(row.persona_json)
+                persona = json.loads(row.persona_json)
             except Exception:
                 persona = {}
             # 提取决策风格
             decision_style = ""
             try:
-                bg = _json.loads(row.background_json)
+                bg = json.loads(row.background_json)
                 decision_style = bg.get("decision_style", "")
             except Exception:
                 pass
@@ -300,9 +307,9 @@ async def suggest_roles(body: dict) -> list[dict]:
         import re
         json_match = re.search(r"\[.*\]", response_text, re.DOTALL)
         if json_match:
-            llm_roles = _json.loads(json_match.group())
+            llm_roles = json.loads(json_match.group())
         else:
-            llm_roles = _json.loads(response_text)
+            llm_roles = json.loads(response_text)
     except Exception as e:
         logger.warning(f"LLM 角色推荐不可用，使用规则兜底: {e}")
 
@@ -312,28 +319,10 @@ async def suggest_roles(body: dict) -> list[dict]:
 
     # 规则兜底：MBTI → 角色映射
     if not llm_roles:
-        mbti_role_map = {
-            "INTJ": ("技术架构师", "INTJ 擅长系统思维和长期规划"),
-            "INTP": ("算法工程师", "INTP 擅长抽象推理和逻辑分析"),
-            "ENTJ": ("项目经理", "ENTJ 擅长领导统筹和战略决策"),
-            "ENTP": ("产品经理", "ENTP 擅长创意发散和机会洞察"),
-            "INFJ": ("技术写作", "INFJ 擅长深度理解和表达"),
-            "INFP": ("UI/UX 设计师", "INFP 擅长共情和审美表达"),
-            "ENFJ": ("产品经理", "ENFJ 擅长沟通协调和团队激励"),
-            "ENFP": ("市场研究员", "ENFP 擅长探索新领域和用户共情"),
-            "ISTJ": ("后端开发", "ISTJ 擅长严谨实现和流程遵循"),
-            "ISFJ": ("测试工程师", "ISFJ 擅长细致检查和品质保障"),
-            "ESTJ": ("DevOps 工程师", "ESTJ 擅长运维管理和效率优化"),
-            "ESFJ": ("项目经理", "ESFJ 擅长协调资源和人际支持"),
-            "ISTP": ("前端开发", "ISTP 擅长动手实践和即时调试"),
-            "ISFP": ("UI/UX 设计师", "ISFP 擅长视觉表达和细节打磨"),
-            "ESTP": ("全栈开发", "ESTP 擅长快速试错和多面手能力"),
-            "ESFP": ("市场研究员", "ESFP 擅长现场感知和人脉拓展"),
-        }
         llm_roles = []
         for p in agent_profiles:
             mbti = p.get("mbti", "")
-            role, reason = mbti_role_map.get(
+            role, reason = _MBTI_ROLE_MAP.get(
                 mbti, ("全栈开发", "综合能力均衡，可胜任多种角色")
             )
             llm_roles.append({
@@ -367,29 +356,10 @@ async def suggest_roles(body: dict) -> list[dict]:
             "reason": str(r.get("reason", "")).strip(),
         }
 
-    # LLM 漏掉某位成员时只为该成员使用规则兜底，并保证返回顺序与输入一致。
-    mbti_role_map = {
-        "INTJ": ("技术架构师", "INTJ 擅长系统思维和长期规划"),
-        "INTP": ("算法工程师", "INTP 擅长抽象推理和逻辑分析"),
-        "ENTJ": ("项目经理", "ENTJ 擅长领导统筹和战略决策"),
-        "ENTP": ("产品经理", "ENTP 擅长创意发散和机会洞察"),
-        "INFJ": ("技术写作", "INFJ 擅长深度理解和表达"),
-        "INFP": ("UI/UX 设计师", "INFP 擅长共情和审美表达"),
-        "ENFJ": ("产品经理", "ENFJ 擅长沟通协调和团队激励"),
-        "ENFP": ("市场研究员", "ENFP 擅长探索新领域和用户共情"),
-        "ISTJ": ("后端开发", "ISTJ 擅长严谨实现和流程遵循"),
-        "ISFJ": ("测试工程师", "ISFJ 擅长细致检查和品质保障"),
-        "ESTJ": ("DevOps 工程师", "ESTJ 擅长运维管理和效率优化"),
-        "ESFJ": ("项目经理", "ESFJ 擅长协调资源和人际支持"),
-        "ISTP": ("前端开发", "ISTP 擅长动手实践和即时调试"),
-        "ISFP": ("UI/UX 设计师", "ISFP 擅长视觉表达和细节打磨"),
-        "ESTP": ("全栈开发", "ESTP 擅长快速试错和多面手能力"),
-        "ESFP": ("市场研究员", "ESFP 擅长现场感知和人脉拓展"),
-    }
     for p in agent_profiles:
         if p["id"] in normalized_by_id:
             continue
-        role, reason = mbti_role_map.get(
+        role, reason = _MBTI_ROLE_MAP.get(
             p.get("mbti", ""), ("全栈开发", "综合能力均衡，可胜任多种角色")
         )
         normalized_by_id[p["id"]] = {
@@ -549,7 +519,9 @@ async def execute_team(
         "task": task,
     }
 
-    asyncio.create_task(_run())
+    bg_task = asyncio.create_task(_run())
+    _background_tasks.add(bg_task)
+    bg_task.add_done_callback(lambda t: _background_tasks.discard(t))
 
     logger.info(f"Team {team_id!r} execution started, plan={plan_id}")
     return _plan_execution_response(
@@ -817,21 +789,7 @@ async def evaluate_team(
         }
 
 
-@router.get("/{team_id}/plan/history")
-async def get_team_plan_history(
-    team_id: str,
-    db: AsyncSession = Depends(get_db),
-):
-    """获取 Team 的全部历史 Plan。"""
-    from models.plan_orm import PlanRow
-
-    result = await db.execute(
-        select(PlanRow)
-        .where(PlanRow.team_id == team_id)
-        .order_by(PlanRow.created_at.desc())
-    )
-    rows = result.scalars().all()
-    return [row.to_dict() for row in rows]
+# (get_team_plan_history 已合并到 get_team_plan，保留此路由作为兼容别名)
 
 
 # ── 68: Team 打分 ──

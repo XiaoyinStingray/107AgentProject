@@ -9,15 +9,21 @@ Fork 管理 — Step 100c: 决策分叉。
   4. 新 Worker 从分叉点继续执行
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 import json
 from pathlib import Path
 import shutil
+from typing import TYPE_CHECKING
 import uuid
 
 from loguru import logger
 
 from engines.worker.workspace import LocalWorkspace
+
+if TYPE_CHECKING:
+    from engines.worker.engine import AgentWorker
 
 
 # =============================================================================
@@ -267,7 +273,7 @@ async def fork_from_checkpoint(
     agent,
     task: str,
     base_dir: str | Path | None = None,
-) -> tuple[str, "AgentWorker"]:
+) -> tuple[str, AgentWorker]:
     """从指定决策点创建分叉 Worker。
 
     Args:
@@ -307,10 +313,10 @@ async def fork_from_checkpoint(
     worker._run_id = fork_run_id
 
     # 4. 注入分叉前的历史上下文
-    worker._fork_history = prefix_steps
-    worker._fork_decision = alternative_decision
-    worker._fork_point = fork_point_step
-    worker._is_fork = True
+    setattr(worker, "_fork_history", prefix_steps)
+    setattr(worker, "_fork_decision", alternative_decision)
+    setattr(worker, "_fork_point", fork_point_step)
+    setattr(worker, "_is_fork", True)
 
     logger.info(
         f"Fork created: {fork_run_id} from {original_run_id} "

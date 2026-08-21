@@ -71,8 +71,8 @@ async def test_fork_uses_one_run_id_for_registry_workspace_and_events(
 
     assert worker.run_id == fork_run_id
     assert Path(worker._workspace.root).name == fork_run_id
-    assert worker._fork_point == 1
-    assert worker._fork_decision.startswith("跳过泛搜")
+    assert worker._fork_point == 1  # type: ignore[attr-defined]
+    assert worker._fork_decision.startswith("跳过泛搜")  # type: ignore[attr-defined]
 
 
 def test_snapshot_reconstruction_uses_version_present_before_decision(

@@ -63,4 +63,49 @@ describe("Step 33 useSSEStore", () => {
     });
     expect(useSSEStore.getState().relationships).toEqual({});
   });
+
+  it("deduplicates events with same id via appendUnique", () => {
+    const event1: SSEEvent = {
+      id: "dup-1",
+      type: "world_event",
+      tick: 1,
+      data: { content: "first" },
+    };
+    const event2: SSEEvent = {
+      id: "dup-1",
+      type: "world_event",
+      tick: 1,
+      data: { content: "duplicate" },
+    };
+    useSSEStore.getState().appendUnique(event1);
+    useSSEStore.getState().appendUnique(event2);
+    const events = useSSEStore.getState().events;
+    // 应该只保留第一个
+    expect(events.filter((e) => e.id === "dup-1")).toHaveLength(1);
+    expect(events.find((e) => e.id === "dup-1")?.data).toEqual({ content: "first" });
+  });
+
+  it("allows events without ids (no dedup)", () => {
+    const event1: SSEEvent = { type: "world_event", tick: 1 };
+    const event2: SSEEvent = { type: "world_event", tick: 2 };
+    useSSEStore.getState().appendUnique(event1);
+    useSSEStore.getState().appendUnique(event2);
+    const events = useSSEStore.getState().events;
+    // 无 id 的事件不去重，都应该保留
+    expect(events).toHaveLength(2);
+  });
+
+  it("clear resets seenIds set for dedup tracking", () => {
+    const event1: SSEEvent = { id: "seen-1", type: "world_event", tick: 1 };
+    useSSEStore.getState().appendUnique(event1);
+    expect(useSSEStore.getState().events).toHaveLength(1);
+
+    // clear 应该重置 seenIds
+    useSSEStore.getState().clear();
+    expect(useSSEStore.getState().events).toHaveLength(0);
+
+    // 再次添加相同 id 应该成功（因为 seenIds 已清空）
+    useSSEStore.getState().appendUnique(event1);
+    expect(useSSEStore.getState().events).toHaveLength(1);
+  });
 });

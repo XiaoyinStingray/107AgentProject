@@ -225,7 +225,7 @@ async def test_scene_start_persists_serialized_scenario_and_registers_engine(
     assert payload["status"] == "running"
     rebuild_agents.assert_awaited_once_with(["agent-a"])
 
-    world = build_engine.await_args.args[0]
+    world = build_engine.await_args.args[0]  # type: ignore[union-attr]
     assert world.world_type == "scene"
     assert world.scenario.name == "scene_library"
     assert world.scenario.environment_params == {"scene_id": "library"}

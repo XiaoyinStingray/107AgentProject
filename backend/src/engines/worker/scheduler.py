@@ -56,7 +56,7 @@ class WorkerScheduler:
     在 FastAPI lifespan 中启动，作为后台任务运行。
     """
 
-    def __init__(self, base_dir: str = None):
+    def __init__(self, base_dir: str | None = None):
         self._base_dir = base_dir or str(Path.home() / "workspaces")
         self._tasks: list[ScheduledTask] = []
         self._running = False

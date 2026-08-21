@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import get_db
-from api.sse import _active_worlds
+from api.sse import get_active_world_events
 from models.agent_orm import AgentRow
 from models.event import SimEvent
 from models.world_orm import WorldRow
@@ -181,11 +181,10 @@ async def _collect_events(world_id: str) -> list[SimEvent]:
 
     优先内存（运行中的 World），引擎不在时回退 SQLite（已结束/重置的 World）。
     """
-    engine = _active_worlds.get(world_id)
-    if engine:
-        events = list(engine.events)
-        if events:
-            return events
+    # 优先内存（运行中的 World），引擎不在时回退 SQLite（已结束/重置的 World）
+    mem_events = get_active_world_events(world_id)
+    if mem_events:
+        return mem_events
 
     # Fallback: 从 SQLite events 表查询
     from db import async_session
@@ -203,16 +202,25 @@ async def _collect_events(world_id: str) -> list[SimEvent]:
 async def _collect_agent_names(world_id: str, db: AsyncSession) -> dict[str, str]:
     """收集 Agent ID → 名称映射（从活跃引擎 + SQLite）。"""
     names: dict[str, str] = {}
-    engine = _active_worlds.get(world_id)
-    if engine:
-        for aid, agent in engine.agents.items():
-            names[aid] = agent.persona.name or aid[:8]
+    mem_events_check = get_active_world_events(world_id)
+    if mem_events_check is not None:
+        # 引擎存在——从内存获取 Agent 名称
+        from api.sse import get_world_engine
+        try:
+            engine = get_world_engine(world_id)
+            for aid, agent in engine.agents.items():
+                names[aid] = agent.persona.name or aid[:8]
+        except Exception:
+            pass
     # 补充从 SQLite 中查找
     result = await db.execute(select(AgentRow))
     for row in result.scalars().all():
         if row.id not in names:
-            persona = json.loads(row.persona_json)
-            names[row.id] = persona.get("name", "") or row.id[:8]
+            try:
+                persona = json.loads(row.persona_json)
+                names[row.id] = persona.get("name", "") or row.id[:8]
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                names[row.id] = row.id[:8]
     return names
 
 

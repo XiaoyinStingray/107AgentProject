@@ -11,7 +11,7 @@ async def test_prepare_is_idempotent_and_persists_one_plan(monkeypatch):
 
     engine = engine_module.TeamEngine(
         team={"id": "team-1", "name": "课程作业", "description": "完成课程报告"},
-        db=None,
+        db=None,  # type: ignore[arg-type]
     )
     agents = [{"id": "agent-1", "name": "岳书言", "role": "负责人", "mbti": "ENFJ"}]
     calls = {"decompose": 0, "persist": 0}
@@ -46,7 +46,7 @@ async def test_prepare_is_idempotent_and_persists_one_plan(monkeypatch):
 
     assert first == second == "plan-only"
     assert calls == {"decompose": 1, "persist": 1}
-    assert engine._prepared_steps[0]["assignee_name"] == "岳书言"
+    assert engine._prepared_steps[0]["assignee_name"] == "岳书言"  # type: ignore[index]
 
 
 @pytest.mark.asyncio
@@ -55,7 +55,7 @@ async def test_execute_reuses_prepared_plan_without_redecomposing(monkeypatch):
 
     engine = engine_module.TeamEngine(
         team={"id": "team-1", "name": "课程作业", "description": "完成课程报告"},
-        db=None,
+        db=None,  # type: ignore[arg-type]
     )
     engine._agents = [
         {"id": "agent-1", "name": "岳书言", "role": "负责人", "mbti": "ENFJ"}

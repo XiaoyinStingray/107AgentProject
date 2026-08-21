@@ -106,6 +106,7 @@ class WorkerStatusResponse(BaseModel):
 # =============================================================================
 
 _active_workers: dict[str, dict] = {}  # run_id → {worker, agent_name, task, created_at}
+_MAX_ACTIVE_WORKERS = 200  # 防止内存无限增长
 
 # Older runs stored transient model/format failures as unrecoverable. The
 # workspace is still intact, so keep those histories resumable after upgrade.
@@ -410,6 +411,12 @@ async def execute_worker_task(req: WorkerExecuteRequest):
                 # 持久化到工作区目录（重启后可恢复）
                 await _persist_worker_state(entry)
                 await _save_events_file(entry)
+            # 淘汰最旧的已完成 Worker，防止内存无限增长
+            if len(_active_workers) > _MAX_ACTIVE_WORKERS:
+                done = [(rid, e) for rid, e in _active_workers.items() if not e.get("running")]
+                done.sort(key=lambda x: x[1].get("created_at", ""))
+                for rid, _ in done[:len(done) // 2 + 1]:
+                    _active_workers.pop(rid, None)
             # 保留 worker 在内存中（用户可查询状态、下载产物）
 
     return StreamingResponse(
@@ -497,12 +504,14 @@ async def get_worker_status(run_id: str):
     if not entry:
         raise HTTPException(status_code=404, detail=f"Worker {run_id!r} 未找到")
     worker = entry.get("worker")
+    if worker is None:
+        # 磁盘恢复的条目无活跃引擎，从 running 字段推断
+        state = "running" if entry.get("running") else entry.get("state", "done")
+    else:
+        state = worker.state.value if hasattr(worker.state, 'value') else str(worker.state)
     return WorkerStatusResponse(
         run_id=run_id,
-        state=(
-            worker.state.value if worker is not None and hasattr(worker.state, "value")
-            else entry.get("state", "done")
-        ),
+        state=state,
         agent_name=entry["agent_name"],
         task=entry["task"],
         created_at=entry["created_at"],
@@ -563,10 +572,18 @@ async def read_worker_file(run_id: str, path: str):
     worker = entry.get("worker")
     if worker is None:
         # 磁盘恢复的条目——直接从文件系统读
-        file_path = _worker_workspace_root(run_id, entry) / "files" / path
-        if not file_path.exists():
+        ws_root = (_worker_workspace_root(run_id, entry) / "files").resolve()
+        if not ws_root.exists():
+            raise HTTPException(status_code=404, detail="工作区不存在")
+        # 路径穿越检查
+        resolved = (ws_root / path).resolve()
+        try:
+            resolved.relative_to(ws_root)
+        except ValueError:
+            raise HTTPException(status_code=403, detail="不允许访问工作区外的文件")
+        if not resolved.exists() or not resolved.is_file():
             raise HTTPException(status_code=404, detail=f"文件不存在: {path}")
-        content = file_path.read_text(encoding='utf-8')
+        content = resolved.read_text(encoding='utf-8')
         return {"path": path, "content": content, "size": len(content)}
     try:
         content = await worker._workspace.read_file(path)
@@ -654,7 +671,9 @@ async def write_worker_file(run_id: str, path: str, req: FileWriteRequest):
     entry = _active_workers.get(run_id)
     if not entry:
         raise HTTPException(status_code=404, detail=f"Worker {run_id!r} 未找到")
-    worker = entry["worker"]
+    worker = entry.get("worker")
+    if worker is None:
+        raise HTTPException(status_code=404, detail=f"Worker {run_id!r} 无活跃引擎（已从磁盘恢复）")
     try:
         if req.lock:
             worker.lock_file(path)
@@ -724,6 +743,9 @@ async def cancel_worker(run_id: str):
     if not entry:
         raise HTTPException(status_code=404, detail=f"Worker {run_id!r} 未找到")
     worker = entry["worker"]
+    if worker is None:
+        # 磁盘恢复的条目不在运行中，无需取消
+        return {"status": "not_running", "run_id": run_id}
     worker.cancel()
     return {"status": "cancelling", "run_id": run_id}
 
@@ -1026,6 +1048,12 @@ async def fork_worker(run_id: str, req: ForkRequest):
                 fork_entry["running"] = False
                 await _persist_worker_state(fork_entry)
                 await _save_events_file(fork_entry)
+            # 淘汰最旧的已完成 Worker，防止内存无限增长
+            if len(_active_workers) > _MAX_ACTIVE_WORKERS:
+                done = [(rid, e) for rid, e in _active_workers.items() if not e.get("running")]
+                done.sort(key=lambda x: x[1].get("created_at", ""))
+                for rid, _ in done[:len(done) // 2 + 1]:
+                    _active_workers.pop(rid, None)
 
     return StreamingResponse(
         fork_generator(),

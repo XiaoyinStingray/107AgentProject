@@ -18,7 +18,7 @@ export function useSSE(worldId: string | null) {
   const {
     events,
     totalEventCount,
-    appendEvent,
+    appendUnique,
     clear,
     setConnected,
     connected,
@@ -27,24 +27,15 @@ export function useSSE(worldId: string | null) {
     hydrateRelationships,
   } = useSSEStore();
 
-  /** 去重追加事件。
-   *  有 id → 按 id 去重（防 SSE 重连 + API 补发重复）。
-   *  无 id → 同 type + 同 tick 的连续事件跳过（防 paused 每秒一条撑爆数组）。 */
-  const appendUnique = useCallback(
+  /** 去重追加事件——委托给 store 的 O(1) appendUnique。 */
+  const appendUniqueEvent = useCallback(
     (event: SSEEvent) => {
-      const existing = useSSEStore.getState().events;
-      if (event.id && existing.some((e) => e.id === event.id)) return;
-      // 无 id 的基础设施事件（paused/connected/tick_boundary 等）——防重复堆积
-      if (!event.id) {
-        const last = existing[existing.length - 1];
-        if (last && last.type === event.type && last.tick === event.tick) return;
-      }
-      appendEvent(event);
+      appendUnique(event);
       if (event.tick > lastTickRef.current) {
         lastTickRef.current = event.tick;
       }
     },
-    [appendEvent],
+    [appendUnique],
   );
 
   /** 重连补偿：从 API 拉取最近事件，弥补 SSE 不重放历史事件的缺陷。
@@ -85,7 +76,7 @@ export function useSSE(worldId: string | null) {
         return base;
       });
       for (const e of mapped) {
-        appendUnique(e);
+        appendUniqueEvent(e);
         if (e.tick > lastTickRef.current) {
           lastTickRef.current = e.tick;
         }
@@ -93,7 +84,7 @@ export function useSSE(worldId: string | null) {
     } catch (err) {
       console.warn("replayMissedEvents failed:", err);
     }
-  }, [worldId, appendUnique]);
+  }, [worldId, appendUniqueEvent]);
 
   const connect = useCallback(() => {
     if (!worldId) return;
@@ -109,14 +100,14 @@ export function useSSE(worldId: string | null) {
     es.onmessage = (e) => {
       try {
         const event = JSON.parse(e.data) as SSEEvent;
-        appendUnique(event);
+        appendUniqueEvent(event);
       } catch {
         // 忽略解析失败的帧
       }
     };
 
     eventSourceRef.current = es;
-  }, [worldId, setConnected, appendUnique, replayMissedEvents]);
+  }, [worldId, setConnected, appendUniqueEvent]);
 
   const disconnect = useCallback(() => {
     eventSourceRef.current?.close();

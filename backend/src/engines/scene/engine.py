@@ -57,7 +57,7 @@ def detect_emotion(text: str) -> Optional[str]:
             scores[emotion] = count
     if not scores:
         return None
-    return max(scores, key=scores.get)
+    return max(scores, key=lambda k: scores[k])
 
 
 # ── 66-S: 随机场景事件 ──
@@ -286,8 +286,6 @@ def _extract_whisper_instruction(message: str) -> str:
     instruction = message[marker_index + len(WHISPER_CONTEXT_PREFIX):]
     return instruction.split(" | ", 1)[0].strip()[:300]
 
-
-import re
 
 # DSML 标签清洗（支持标准格式和空格变体）
 _DSML_RE = re.compile(r"<\!?\s*\|\|\s*\|\|\s*\|\|\s*\|\|>?")

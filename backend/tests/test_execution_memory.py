@@ -68,7 +68,7 @@ async def test_retrieves_by_task_and_injects_guarded_memory_context(monkeypatch)
     result = await module.prepare_execution_memory_context(
         agent,
         "制定高数复习计划",
-        db=db,
+        db=db,  # type: ignore[arg-type]
     )
 
     assert observed["session"] is db
@@ -127,7 +127,7 @@ async def test_real_life_agent_system_prompt_contains_task_and_memory(monkeypatc
     result = await module.prepare_execution_memory_context(
         agent,
         "制定本周高数复习计划",
-        db=object(),
+        db=object(),  # type: ignore[arg-type]
     )
 
     system_prompt = agent._get_autogen_system_messages()[0].content
@@ -152,7 +152,7 @@ async def test_default_worker_does_not_query_or_receive_personal_memory(monkeypa
     result = await module.prepare_execution_memory_context(
         agent,
         "通用资料整理",
-        db=object(),
+        db=object(),  # type: ignore[arg-type]
     )
 
     assert result.eligible is False
@@ -178,7 +178,7 @@ async def test_memory_failure_is_fail_soft(monkeypatch):
     result = await module.prepare_execution_memory_context(
         agent,
         "制定高数复习计划",
-        db=object(),
+        db=object(),  # type: ignore[arg-type]
     )
 
     assert result.eligible is True
@@ -229,7 +229,7 @@ async def test_every_agent_worker_prepares_memory_before_started_event(monkeypat
         persona=SimpleNamespace(name="岳书言"),
         autogen_agent=MinimalAutogenAgent(),
     )
-    worker = AgentWorker(agent, workspace=MinimalWorkspace())
+    worker = AgentWorker(agent, workspace=MinimalWorkspace())  # type: ignore[arg-type]
 
     stream = worker.execute("整理高数复习资料")
     first_event = json.loads((await anext(stream))[6:].strip())

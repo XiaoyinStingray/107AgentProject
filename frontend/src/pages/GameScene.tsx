@@ -640,12 +640,10 @@ export default function GameScenePage() {
       const mapScene = gameRef.current?.scene.getScene("MapScene") as
         | MapScene
         | undefined;
+      // BUG-038 修复：恢复 React 状态 + 强制覆盖 Phaser 精灵坐标
       mapScene?.restoreAgents(cp.agents);
       setAgents(cp.agents);
       saveAgents(mapId, cp.agents);
-      // BUG-038 修复：强制覆盖 Phaser 精灵坐标
-      const ms = gameRef.current?.scene.getScene("MapScene") as any;
-      ms?.restoreAgents?.(cp.agents);
     },
     [mapId, checkpoints],
   );

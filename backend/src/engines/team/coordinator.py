@@ -155,8 +155,8 @@ async def schedule_steps(
                         "duration_secs": 0,
                         "error": str(result),
                     }
-                completed[step["id"]] = result
-                results.append(result)
+                completed[step["id"]] = result  # type: ignore[assignment]
+                results.append(result)  # type: ignore[arg-type]
         else:
             # 串行执行（一次一个）
             for step in ready:

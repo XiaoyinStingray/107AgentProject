@@ -44,7 +44,7 @@ async def generate_report(scores: dict, task_count: int) -> str:
             client.create(messages=[UserMessage(content=prompt, source="reporter")]),
             timeout=15.0,
         )
-        return (result.content if hasattr(result, "content") else str(result)).strip()
+        return str(result.content if hasattr(result, "content") else result).strip()
     except Exception:
         pass
 

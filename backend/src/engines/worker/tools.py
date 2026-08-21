@@ -494,19 +494,26 @@ def make_worker_tools(workspace, extra_tools: list[str] | None = None, enabled_t
                 f"格式示例：\n```mermaid\nmindmap\n  root((中心主题))\n    分支1\n      细节A\n    分支2\n      细节B\n```"
             )
             try:
+                import asyncio
+                from autogen_core.models import UserMessage
                 from llm.client import create_model_client
                 client = create_model_client("act")
-                result = await client.create(
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.7, max_tokens=500,
+                result = await asyncio.wait_for(
+                    client.create(
+                        messages=[UserMessage(content=prompt, source="mindmap")],
+                    ),
+                    timeout=15.0,
                 )
-                content = result.content.strip()
+                content = str(result.content).strip()
                 # 提取 mermaid 代码块
                 import re
                 m = re.search(r"```mermaid\s*\n?([\s\S]*?)```", content)
                 mermaid = m.group(1).strip() if m else content
                 await workspace.write_file("mindmap.md", "```mermaid\n" + mermaid + "\n```")
                 return f"✅ 思维导图已生成 → mindmap.md"
+            except asyncio.TimeoutError:
+                logger.warning("[special-tool] mindmap timed out")
+                return "❌ 思维导图生成超时，请缩小主题范围后重试"
             except Exception as e:
                 logger.warning(f"[special-tool] mindmap failed: {e}")
                 return tool_error(f"❌ 思维导图生成失败: {e}")
@@ -584,15 +591,21 @@ def make_worker_tools(workspace, extra_tools: list[str] | None = None, enabled_t
                 f"请用不超过{max_words}字总结以下内容，保留关键数据和结论：\n\n{content[:8000]}"
             )
             try:
+                import asyncio
+                from autogen_core.models import UserMessage
                 from llm.client import create_model_client
                 client = create_model_client("act")
-                result = await client.create(
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.5, max_tokens=400,
+                result = await asyncio.wait_for(
+                    client.create(
+                        messages=[UserMessage(content=prompt, source="summary")],
+                    ),
+                    timeout=15.0,
                 )
-                summary = result.content.strip()
+                summary = str(result.content).strip()
                 await workspace.write_file("summary.md", summary)
                 return f"✅ 摘要已生成 → summary.md ({len(summary)} 字符)"
+            except asyncio.TimeoutError:
+                return "❌ 摘要生成超时，请缩短输入内容后重试"
             except Exception as e:
                 return tool_error(f"❌ 摘要生成失败: {e}")
         special_specs.append(ToolSpec(
@@ -608,18 +621,24 @@ def make_worker_tools(workspace, extra_tools: list[str] | None = None, enabled_t
             content = await workspace.read_file(path)
             prompt = f"将以下内容翻译为{target_lang}，保持 Markdown 格式不变：\n\n{content[:6000]}"
             try:
+                import asyncio
+                from autogen_core.models import UserMessage
                 from llm.client import create_model_client
                 client = create_model_client("act")
-                result = await client.create(
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.4, max_tokens=600,
+                result = await asyncio.wait_for(
+                    client.create(
+                        messages=[UserMessage(content=prompt, source="translate")],
+                    ),
+                    timeout=15.0,
                 )
-                translated = result.content.strip()
+                translated = str(result.content).strip()
                 from pathlib import Path
                 stem = Path(path).stem
                 out = f"{stem}_{target_lang}.md"
                 await workspace.write_file(out, translated)
                 return f"✅ 翻译完成 → {out}"
+            except asyncio.TimeoutError:
+                return "❌ 翻译超时，请缩短输入内容后重试"
             except Exception as e:
                 return tool_error(f"❌ 翻译失败: {e}")
         special_specs.append(ToolSpec(
@@ -671,14 +690,20 @@ def make_worker_tools(workspace, extra_tools: list[str] | None = None, enabled_t
                 f"```{ext}\n{content[:6000]}\n```"
             )
             try:
+                import asyncio
+                from autogen_core.models import UserMessage
                 from llm.client import create_model_client
                 client = create_model_client("think")
-                result = await client.create(
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.5, max_tokens=800,
+                result = await asyncio.wait_for(
+                    client.create(
+                        messages=[UserMessage(content=prompt, source="code_review")],
+                    ),
+                    timeout=20.0,
                 )
-                await workspace.write_file("code_review.md", result.content.strip())
+                await workspace.write_file("code_review.md", str(result.content).strip())
                 return "✅ 代码审查报告已生成 → code_review.md"
+            except asyncio.TimeoutError:
+                return "❌ 代码审查超时，请缩短代码后重试"
             except Exception as e:
                 return tool_error(f"❌ 审查失败: {e}")
         special_specs.append(ToolSpec(
@@ -698,14 +723,20 @@ def make_worker_tools(workspace, extra_tools: list[str] | None = None, enabled_t
                 f"（## 第X章 ...），结构从背景到结论，逻辑递进。不要输出其他内容。"
             )
             try:
+                import asyncio
+                from autogen_core.models import UserMessage
                 from llm.client import create_model_client
                 client = create_model_client("act")
-                result = await client.create(
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.7, max_tokens=500,
+                result = await asyncio.wait_for(
+                    client.create(
+                        messages=[UserMessage(content=prompt, source="outline")],
+                    ),
+                    timeout=15.0,
                 )
-                await workspace.write_file("outline.md", result.content.strip())
+                await workspace.write_file("outline.md", str(result.content).strip())
                 return "✅ 文档大纲已生成 → outline.md"
+            except asyncio.TimeoutError:
+                return "❌ 大纲生成超时，请减少章节数后重试"
             except Exception as e:
                 return tool_error(f"❌ 大纲生成失败: {e}")
         special_specs.append(ToolSpec(

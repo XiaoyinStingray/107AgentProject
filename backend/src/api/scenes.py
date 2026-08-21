@@ -228,6 +228,7 @@ async def generate_proactive_topic(scene_id: str, body: ProactiveTopicRequest):
 
     # 尝试 LLM 生成
     try:
+        import asyncio
         from llm.client import create_model_client
         from autogen_core.models import UserMessage
         client = create_model_client()
@@ -236,8 +237,11 @@ async def generate_proactive_topic(scene_id: str, body: ProactiveTopicRequest):
             f"用一句话主动跟一个路过的人搭话。"
             f"要自然、带点好奇、不要像客服、不要超过20个字。"
         )
-        result = await client.create(
-            messages=[UserMessage(content=prompt, source="proactive_topic")],
+        result = await asyncio.wait_for(
+            client.create(
+                messages=[UserMessage(content=prompt, source="proactive_topic")],
+            ),
+            timeout=8.0,
         )
         llm_topic = str(result.content).strip().strip("\"'")
         if llm_topic and len(llm_topic) > 2:
@@ -300,6 +304,7 @@ async def generate_chat_options(scene_id: str, body: ChatOptionsRequest):
     ]
 
     try:
+        import asyncio
         from llm.client import create_model_client
         from autogen_core.models import UserMessage
         client = create_model_client("act")
@@ -328,8 +333,11 @@ async def generate_chat_options(scene_id: str, body: ChatOptionsRequest):
             f'{{"tone":"冷淡","userText":"...","agentReaction":"...","agentEmotion":"neutral"}},'
             f'{{"tone":"挑衅","userText":"...","agentReaction":"...","agentEmotion":"angry"}}]'
         )
-        result = await client.create(
-            messages=[UserMessage(content=prompt, source="chat_options")],
+        result = await asyncio.wait_for(
+            client.create(
+                messages=[UserMessage(content=prompt, source="chat_options")],
+            ),
+            timeout=10.0,
         )
         text = str(result.content).strip()
         # 提取 JSON 数组

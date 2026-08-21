@@ -8,7 +8,15 @@
 """
 
 from datetime import datetime, timezone
-from enum import StrEnum
+import sys
+
+# StrEnum is Python 3.11+; provide a fallback for 3.10
+if sys.version_info >= (3, 11):
+    from enum import StrEnum
+else:
+    from enum import Enum
+    class StrEnum(str, Enum):
+        pass
 
 from loguru import logger
 
@@ -121,13 +129,30 @@ class NarrativeEngine:
 
         from autogen_core.models import SystemMessage, UserMessage
 
-        response = await self._client.create(
-            messages=[
-                SystemMessage(content="你是一个专业的叙事作家。"),
-                UserMessage(content=prompt, source="narrative_engine"),
-            ],
-        )
-        raw = response.content
+        try:
+            import asyncio
+            response = await asyncio.wait_for(
+                self._client.create(
+                    messages=[
+                        SystemMessage(content="你是一个专业的叙事作家。"),
+                        UserMessage(content=prompt, source="narrative_engine"),
+                    ],
+                ),
+                timeout=20.0,
+            )
+            raw = response.content
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"NarrativeEngine.generate: LLM timed out for "
+                f"agent={req.agent_id}, style={req.style}"
+            )
+            raw = _template_fallback(req)
+        except Exception as error:
+            logger.warning(
+                f"NarrativeEngine.generate: LLM failed: "
+                f"{type(error).__name__}: {error}"
+            )
+            raw = _template_fallback(req)
 
         title, content = _parse_narrative(raw)
         return NarrativeResponse(
@@ -165,6 +190,20 @@ def _format_events(events: list[SimEvent]) -> str:
         lines.append(f"{i}. {tick_label} {desc}")
 
     return "\n".join(lines)
+
+
+def _template_fallback(req: NarrativeRequest) -> str:
+    """LLM 不可用时的规则兜底——基于事件和角色生成简单叙事。"""
+    name = req.persona.name or "未知角色"
+    events_text = _format_events(req.events)
+    style_label = req.style.value if hasattr(req.style, "value") else str(req.style)
+    return (
+        f"# {name}的{style_label}\n\n"
+        f"以下是{name}的经历记录：\n\n"
+        f"{events_text}\n\n"
+        f"（注：LLM 叙事引擎暂不可用，以上为事件原始记录。"
+        f"待服务恢复后可重新生成完整叙事。）"
+    )
 
 
 def _parse_narrative(raw: str) -> tuple[str, str]:

@@ -66,7 +66,7 @@ class PipelineRun:
         self._cancel_requested = True
         for worker in self.node_workers.values():
             if hasattr(worker, 'cancel'):
-                worker.cancel()
+                worker.cancel()  # type: ignore[union-attr]
 
     @property
     def status(self) -> PipelineStatus:

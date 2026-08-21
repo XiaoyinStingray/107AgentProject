@@ -21,8 +21,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from engines.team.decomposer import decompose_task
 from engines.team.role_evolution import evaluate_and_evolve, apply_evolution
 from engines.team.workspace import init_team_workspace, write_step_context, _safe_dirname
+from engines.worker.engine import AgentWorker
+from engines.worker.workspace import LocalWorkspace
 from models.team_orm import TeamRow
 from models.plan_orm import PlanRow
+from models.agent_orm import AgentRow
 
 
 @dataclass
@@ -289,9 +292,6 @@ class TeamEngine:
                 continue
 
             # === 创建 Worker ===
-            from engines.worker.engine import AgentWorker
-            from engines.worker.workspace import LocalWorkspace
-
             workspace = LocalWorkspace(base_dir=str(step_dir), run_id="work")
 
             worker = AgentWorker(agent, workspace=workspace)
@@ -420,13 +420,21 @@ class TeamEngine:
 
     async def _load_agents(self) -> list[dict]:
         from engines.agent_factory.loader import AgentNotFoundError
-        from models.agent_orm import AgentRow
+
+        agent_ids = self.team.get("agent_ids", [])
+        if not agent_ids:
+            return []
+
+        # 批量查询，避免 N+1
+        result = await self.db.execute(
+            select(AgentRow).where(AgentRow.id.in_(agent_ids))
+        )
+        rows_by_id = {r.id: r for r in result.scalars().all()}
 
         agents = []
         roles_map = {r.get("agent_id"): r for r in (self.team.get("roles") or [])}
-        for aid in self.team.get("agent_ids", []):
-            result = await self.db.execute(select(AgentRow).where(AgentRow.id == aid))
-            row = result.scalar_one_or_none()
+        for aid in agent_ids:
+            row = rows_by_id.get(aid)
             if not row:
                 raise AgentNotFoundError(f"Agent {aid!r} 不存在或已被删除")
             try:
@@ -633,7 +641,6 @@ class TeamEngine:
                     s["result"] = result
                 break
         plan_row.steps = _json.dumps(steps, ensure_ascii=False)
-        self.db.add(plan_row)
         await self.db.commit()
 
     async def _finalize_plan(self, report: dict):
@@ -642,7 +649,6 @@ class TeamEngine:
         if plan_row:
             plan_row.status = "finished"
             plan_row.report = _json.dumps(report, ensure_ascii=False)
-            self.db.add(plan_row)
         await self.db.execute(
             update(TeamRow).where(TeamRow.id == self.team["id"]).values(status="finished")
         )

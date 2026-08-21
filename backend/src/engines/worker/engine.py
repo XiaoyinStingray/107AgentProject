@@ -1237,16 +1237,28 @@ class AgentWorker:
         summary = f"任务完成。共执行 {self._step_index} 步，产生 {len(file_paths)} 个文件。"
         audit_finding = self._delivery_audit_summary or "未触发最终交付验收"
         key_findings = [audit_finding, f"产出 {len(file_paths)} 个文件"] + file_paths[:5]
+
+        # ── 基于可观测指标计算自评分（1-5） ──
+        _file_count = len(file_paths)
+        if _file_count >= 3:
+            _rating = 4
+        elif _file_count >= 1:
+            _rating = 3
+        else:
+            _rating = 2
+        if self._delivery_warning:
+            _rating = max(1, _rating - 1)
+
         events.append(_sse_event("worker.summary", WorkerSummaryData(
             deliverable_summary=summary,
-            self_rating="3",
+            self_rating=str(_rating),
             key_findings=key_findings,
             total_duration_ms=total_duration_ms,
         ).__dict__))
 
         # Step 100a: 存储元数据供纪念墙使用
         self._total_duration_ms = total_duration_ms
-        self._self_rating = "3"
+        self._self_rating = str(_rating)
         self._key_findings = [audit_finding, f"产出 {len(file_paths)} 个文件"] + file_paths[:3]
 
         logger.info(f"AgentWorker DONE: {self._step_index} steps, "

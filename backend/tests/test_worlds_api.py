@@ -341,7 +341,7 @@ class TestRelationships:
     def test_active_world_returns_typed_snapshot(self, client):
         import api.sse as sse_mod
 
-        sse_mod._active_worlds["world-rel"] = SimpleNamespace(
+        sse_mod._active_worlds["world-rel"] = SimpleNamespace(  # type: ignore[index]
             agents={
                 "a1": SimpleNamespace(id="a1", persona=SimpleNamespace(name="小明")),
                 "a2": SimpleNamespace(id="a2", persona=SimpleNamespace(name="小红")),
@@ -411,7 +411,7 @@ class TestInjectEvent:
             "agent_ids": [],
         }).json()
         world_id = world["id"]
-        sse_mod._active_worlds[world_id] = SimpleNamespace(
+        sse_mod._active_worlds[world_id] = SimpleNamespace(  # type: ignore[index]
             world=SimpleNamespace(status="running"),
             inject_event=lambda *args, **kwargs: None,
         )

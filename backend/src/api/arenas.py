@@ -49,8 +49,20 @@ async def _load_agent(db: AsyncSession, agent_id: str):
 
 
 async def _load_agents(db: AsyncSession, agent_ids: list[str]) -> list:
-    """按请求顺序加载多个 Agent。"""
-    return [await _load_agent(db, agent_id) for agent_id in agent_ids]
+    """批量加载多个 Agent（单次 SQL 代替 N 次单独查询）。"""
+    result = await db.execute(
+        select(AgentRow).where(AgentRow.id.in_(agent_ids))
+    )
+    rows_by_id: dict[str, AgentRow] = {
+        row.id: row for row in result.scalars().all()
+    }
+    agents = []
+    for agent_id in agent_ids:
+        row = rows_by_id.get(agent_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
+        agents.append(await _rebuild_agent_from_row(row))
+    return agents
 
 
 async def _persist_result(
@@ -244,13 +256,10 @@ async def list_arenas(
 ):
     """列出竞技历史，可按任意参赛 Agent 过滤。"""
     query = select(ArenaRow).order_by(ArenaRow.created_at.desc())
-    rows = (await db.execute(query)).scalars().all()
     if agent_id:
-        rows = [
-            row
-            for row in rows
-            if agent_id in row.to_result().participant_ids
-        ]
+        # 在 DB 层面过滤而非全量加载后 Python 过滤
+        query = query.where(ArenaRow.participant_ids_json.contains(agent_id))
+    rows = (await db.execute(query)).scalars().all()
     return [
         ArenaResultResponse.from_result(row.id, row.to_result())
         for row in rows

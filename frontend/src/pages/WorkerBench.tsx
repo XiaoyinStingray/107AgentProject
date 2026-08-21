@@ -154,10 +154,14 @@ export default function WorkerBench() {
     outcome: string; accepted: boolean; created_at: string;
   }>>([]);
 
-  // 追踪 runId——从 events 中保持最新值
+  // 追踪 runId——从 events 中反向查找最近 started（O(1) 命中）
   const latestRunId = useMemo(() => {
-    const started = [...events].reverse().find((e) => e.type === "worker.started");
-    return started?.data?.run_id as string | undefined;
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i].type === "worker.started") {
+        return events[i].data?.run_id as string | undefined;
+      }
+    }
+    return undefined;
   }, [events]);
 
   useEffect(() => {

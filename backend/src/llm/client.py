@@ -78,5 +78,5 @@ def create_model_client(profile: LLMProfile = "think"):
         timeout=float(settings.agent_timeout_seconds),
         max_tokens=settings.llm_max_tokens,
         model_info=model_info,  # type: ignore[arg-type]
-        **create_options,
+        **create_options,  # type: ignore[arg-type]
     )

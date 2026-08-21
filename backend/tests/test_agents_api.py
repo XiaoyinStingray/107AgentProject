@@ -139,7 +139,7 @@ class TestCreateAgent:
         def invalid_factory():
             raise AuthenticationError(
                 "Authentication Fails",
-                response=response,
+                response=response,  # type: ignore[arg-type]
                 body={"error": "invalid key"},
             )
 

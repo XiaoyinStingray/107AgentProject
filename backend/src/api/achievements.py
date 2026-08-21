@@ -98,15 +98,15 @@ async def get_achievements():
         )
         total_events = event_result.scalar() or 0
 
-        # World 中最多 Agent 数（用于"三人成众"）——从 worlds 表 agent_ids_json 无法聚合，按世界数近似
-        # 检查是否有 World 包含 ≥3 Agent
-        worlds_result = await session.execute(select(WorldRow))
-        world_rows = worlds_result.scalars().all()
+        # World 中最多 Agent 数（用于“三人成众”）——只加载 agent_ids_json 列避免全量加载
+        worlds_result = await session.execute(
+            select(WorldRow.agent_ids_json)
+        )
         max_agents_in_world = 0
-        for wr in world_rows:
+        for (agent_ids_raw,) in worlds_result.all():
             try:
                 import json
-                agent_ids = json.loads(wr.agent_ids_json)
+                agent_ids = json.loads(agent_ids_raw)
                 max_agents_in_world = max(max_agents_in_world, len(agent_ids))
             except Exception:
                 pass

@@ -200,6 +200,55 @@ describe("M2 SoloTheater lifecycle", () => {
     );
   });
 
+  it("auto-selects the first agent when agents load asynchronously", async () => {
+    // 模拟 agents 异步加载：初始为空，稍后填充
+    vi.mocked(useAgents).mockReturnValue({
+      data: [],
+      isLoading: true,
+      error: null,
+    } as unknown as ReturnType<typeof useAgents>);
+
+    const { rerender } = renderPage();
+
+    // agents 为空时不应 crash，按钮应禁用或不可点击
+    const startBtn = screen.getByRole("button", { name: /开始投放/ });
+    expect(startBtn).toBeInTheDocument();
+
+    // agents 加载完成
+    vi.mocked(useAgents).mockReturnValue({
+      data: MOCK_AGENTS,
+      isLoading: false,
+      error: null,
+    } as ReturnType<typeof useAgents>);
+
+    // 重新渲染触发 useEffect
+    rerender(
+      <MemoryRouter
+        initialEntries={["/theater"]}
+        future={{
+          v7_startTransition: true,
+          v7_relativeSplatPath: true,
+        }}
+      >
+        <Routes>
+          <Route path="/theater" element={<SoloTheater />} />
+          <Route path="/archive" element={<ArchiveLocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    // 点击开始投放——应该使用自动选中的第一个 agent
+    const buttons = screen.getAllByRole("button", { name: /开始投放/ });
+    fireEvent.click(buttons[0]!);
+    await waitFor(() =>
+      expect(createWorld).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agent_ids: [MOCK_AGENTS[0]!.id],
+        }),
+      ),
+    );
+  });
+
   it("shows only solo Worlds, restores paused runs, and confirms deletion", async () => {
     vi.mocked(useWorlds).mockReturnValue({
       data: [

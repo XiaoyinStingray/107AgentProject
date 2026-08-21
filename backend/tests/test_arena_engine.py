@@ -97,7 +97,7 @@ class TestArenaTypes:
             winner_id="a1",
             scores={"a1": 35, "b1": 25},
             judge_reasoning="正方论点更充分",
-            transcript=[{
+            transcript=[{  # type: ignore[arg-type]
                 "turn": 0,
                 "round": 1,
                 "speaker_id": "a1",
