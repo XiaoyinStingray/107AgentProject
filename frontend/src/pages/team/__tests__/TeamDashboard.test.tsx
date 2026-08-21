@@ -260,6 +260,39 @@ describe("TeamDashboard", () => {
     anchorClick.mockRestore();
   });
 
+  it("keeps step output files collapsed by default and toggles them", async () => {
+    hookState.plan = {
+      ...MOCK_PLAN,
+      steps: [{
+        ...MOCK_PLAN.steps[0],
+        result: {
+          files: ["output.md"],
+          output_summary: "方案已生成",
+          steps_used: 2,
+          duration_secs: 1,
+        },
+      }],
+      report: {
+        title: "团队任务完成报告",
+        content: "#### 📄 output.md\n```\n校园应用方案\n```",
+      },
+    };
+    renderDashboard();
+    fireEvent.click(screen.getByRole("button", { name: /执行/ }));
+
+    const toggle = await screen.findByRole("button", { name: /展开步骤产出文件，共 1 个文件/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("button", { name: /output\.md.*输出方案/ })).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: /output\.md.*输出方案/ })).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("button", { name: /output\.md.*输出方案/ })).not.toBeInTheDocument();
+  });
+
   it("shows recovery guide for a recoverable step and reaudits only that step", async () => {
     hookState.plan = {
       ...MOCK_PLAN,

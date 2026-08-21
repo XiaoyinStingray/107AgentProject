@@ -4,6 +4,7 @@
  * 不再使用 WorldEngine/GroupChat——改为 Worker 原生执行。
  */
 import { useState, useCallback, useEffect } from "react";
+import { ChevronDown, ChevronRight, Folder } from "lucide-react";
 import { useAgents } from "../api/agents";
 import { useTeams, useCreateTeam, useDeleteTeam, useSuggestRoles, useExecuteTeam, useTeamPlan, useEvaluateTeam, useRecoverTeamStep } from "../api/teams";
 import { usePublishTeam } from "../api/market";
@@ -45,6 +46,7 @@ export default function TeamDashboard() {
   const [publishMsg, setPublishMsg] = useState<string | null>(null);
   const [pendingRecoveryAction, setPendingRecoveryAction] = useState<TeamRecoveryAction | null>(null);
   const [recoveryMsg, setRecoveryMsg] = useState<string | null>(null);
+  const [stepFilesExpanded, setStepFilesExpanded] = useState(false);
 
   // ── 重入恢复: 已完成/执行中的 Team 没有活跃 SSE 时，从 DB Plan 恢复状态 ──
   const activeTeam = teams.find((t) => t.id === activeTeamId);
@@ -57,6 +59,10 @@ export default function TeamDashboard() {
       && Boolean(step.result?.recoverable)
       && (step.result?.files?.length ?? 0) > 0,
   );
+
+  useEffect(() => {
+    setStepFilesExpanded(false);
+  }, [activeTeamId]);
 
   // 从 DB Plan 恢复到 store（重入场景）
   useEffect(() => {
@@ -342,6 +348,10 @@ export default function TeamDashboard() {
                 {/* 步骤产出文件下载 —— 直接从报告正文中提取内容 */}
                 {Object.values(store.steps).some((s) => s.files.length > 0) && (() => {
                   const fileContentMap = new Map<string, string>();
+                  const fileCount = Object.values(store.steps).reduce(
+                    (total, step) => total + step.files.length,
+                    0,
+                  );
                   const reportText = currentReport.content || "";
                   const fileBlocks = reportText.match(/#### 📄 (.+?)\n+```[\s\S]*?\n([\s\S]*?)\n```/g) || [];
                   for (const block of fileBlocks) {
@@ -353,8 +363,19 @@ export default function TeamDashboard() {
                   }
                   return (
                   <Card className="p-4">
-                    <h4 className="text-xs font-mono text-text-secondary mb-2">📁 步骤产出文件</h4>
-                    <div className="space-y-1">
+                    <button
+                      type="button"
+                      aria-expanded={stepFilesExpanded}
+                      aria-label={`${stepFilesExpanded ? "收起" : "展开"}步骤产出文件，共 ${fileCount} 个文件`}
+                      onClick={() => setStepFilesExpanded((expanded) => !expanded)}
+                      className="flex w-full items-center gap-2 text-left font-mono text-xs text-text-secondary transition-colors hover:text-accent-green"
+                    >
+                      {stepFilesExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                      <Folder size={14} />
+                      <span>步骤产出文件</span>
+                      <span className="ml-auto text-text-secondary/50">{fileCount} 个</span>
+                    </button>
+                    {stepFilesExpanded && <div className="mt-3 space-y-1 border-t border-border pt-3">
                       {Object.values(store.steps).map((step) =>
                         step.files.map((f) => {
                           const fname = f.includes("/") ? f.split("/").pop()! : f;
@@ -379,7 +400,7 @@ export default function TeamDashboard() {
                           );
                         })
                       )}
-                    </div>
+                    </div>}
                   </Card>
                   );
                 })()}
