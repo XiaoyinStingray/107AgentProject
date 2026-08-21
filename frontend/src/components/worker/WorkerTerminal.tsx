@@ -295,6 +295,19 @@ export default function WorkerTerminal({
   onNewTask,
 }: WorkerTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const legacyRecoverableErrorTypes = new Set(["json_parse_failure", "llm_api_error"]);
+  const terminalEvent = [...events].reverse().find(
+    (event) => event.type === "worker.done" || event.type === "worker.error"
+  );
+  const terminalError = terminalEvent?.type === "worker.error" ? terminalEvent : undefined;
+  const legacyAuditFailure = terminalEvent?.type === "worker.done"
+    && String(terminalEvent.data?.reason ?? "").includes("交付验收未通过");
+  const recoverableError = Boolean(
+    terminalError?.data?.recoverable
+    || legacyRecoverableErrorTypes.has(String(terminalError?.data?.error_type ?? ""))
+    || legacyAuditFailure
+  );
+  const terminalNeedsAttention = Boolean(terminalError || legacyAuditFailure);
 
   // 自动滚动到底部
   useEffect(() => {
@@ -310,11 +323,19 @@ export default function WorkerTerminal({
         <div className="flex items-center gap-2">
           <span
             className={`w-2 h-2 rounded-full ${
-              connected ? "bg-emerald-400 animate-pulse" : done ? "bg-text-muted" : "bg-yellow-400"
+              connected
+                ? "bg-emerald-400 animate-pulse"
+                : terminalNeedsAttention
+                  ? recoverableError ? "bg-amber-400" : "bg-rose-400"
+                  : done ? "bg-text-muted" : "bg-yellow-400"
             }`}
           />
           <span className="text-xs font-mono text-text-muted">
-            {connected ? "运行中" : done ? "已完成" : "就绪"}
+            {connected
+              ? "运行中"
+              : terminalNeedsAttention
+                ? recoverableError ? "需要处理" : "执行失败"
+                : done ? "已完成" : "就绪"}
           </span>
         </div>
         <span className="text-xs font-mono text-text-muted">
@@ -376,18 +397,38 @@ function CompletionCard({
   onRevise?: (instruction: string) => void;
   onNewTask?: () => void;
 }) {
-  const doneEvt = events.find(e => e.type === "worker.done");
-  const errorEvt = events.filter(e => e.type === "worker.error");
-  const summaryEvt = events.find(e => e.type === "worker.summary");
+  const terminalEvent = [...events].reverse().find(
+    e => e.type === "worker.done" || e.type === "worker.error"
+  );
+  const doneEvt = terminalEvent?.type === "worker.done" ? terminalEvent : undefined;
+  const lastError = terminalEvent?.type === "worker.error" ? terminalEvent : null;
+  const summaryEvt = [...events].reverse().find(e => e.type === "worker.summary");
   const steps = (doneEvt?.data as Record<string,unknown>|null)?.total_steps ?? "?";
   const files = ((doneEvt?.data as Record<string,unknown>|null)?.files ?? []) as string[];
   const toolCount = events.filter(e => e.type === "worker.tool_start").length;
-  const lastError = errorEvt.length > 0 ? errorEvt[errorEvt.length - 1] : null;
-  const lastErrorMsg = lastError ? String((lastError.data as Record<string,unknown>)?.message ?? "") : "";
+  const legacyAuditFailure = Boolean(
+    doneEvt && String(doneEvt.data?.reason ?? "").includes("交付验收未通过")
+  );
+  const lastErrorMsg = lastError
+    ? String((lastError.data as Record<string,unknown>)?.message ?? "")
+    : legacyAuditFailure ? String(doneEvt?.data?.reason ?? "") : "";
+  const recoverableError = Boolean(
+    (lastError && (lastError.data as Record<string, unknown>)?.recoverable)
+    || (lastError && ["json_parse_failure", "llm_api_error"].includes(
+      String((lastError.data as Record<string, unknown>)?.error_type ?? ""),
+    ))
+    || legacyAuditFailure
+  );
+  const hasTerminalError = Boolean(lastError || fatalError || legacyAuditFailure);
+  const displayedSteps = doneEvt
+    ? steps
+    : ((lastError?.data as Record<string, unknown> | undefined)?.step_index ?? "?");
 
   const [followUp, setFollowUp] = useState("");
-  const borderClass = fatalError
-    ? "border-t-2 border-rose-700/50 bg-rose-900/5"
+  const borderClass = hasTerminalError
+    ? recoverableError
+      ? "border-t-2 border-amber-700/50 bg-amber-900/5"
+      : "border-t-2 border-rose-700/50 bg-rose-900/5"
     : accepted
       ? "border-t-2 border-emerald-700/50 bg-emerald-900/5"
       : "border-t-2 border-cyan-700/50 bg-bg-card";
@@ -395,17 +436,37 @@ function CompletionCard({
   return (
     <div className={borderClass} style={{transition: "border-color 0.3s, background-color 0.3s"}}>
       <div className={`p-4 space-y-3 ${accepted ? "opacity-70" : ""}`}>
-        {fatalError ? (
-          /* 致命错误终止 */
+        {hasTerminalError ? (
           <>
             <div className="flex items-center gap-2">
               <span className="text-lg"></span>
-              <span className="text-sm font-mono font-semibold text-rose-400">
-                任务因致命错误终止 — {String(steps)} 步, {toolCount} 次工具调用
+              <span className={`text-sm font-mono font-semibold ${recoverableError ? "text-amber-400" : "text-rose-400"}`}>
+                {recoverableError ? "任务暂停，需要处理" : "任务因致命错误终止"}
+                {" — "}{String(displayedSteps)} 步, {toolCount} 次工具调用
               </span>
             </div>
             {lastErrorMsg && (
-              <p className="text-xs font-mono text-rose-300 ml-7">{lastErrorMsg.slice(0, 300)}</p>
+              <p className={`text-xs font-mono ml-7 ${recoverableError ? "text-amber-200" : "text-rose-300"}`}>
+                {lastErrorMsg.slice(0, 300)}
+              </p>
+            )}
+            {recoverableError && (
+              <div className="flex items-center gap-2 ml-7">
+                <span className="text-xs font-mono text-text-muted shrink-0">继续修改：</span>
+                <input type="text" value={followUp}
+                       onChange={e => setFollowUp(e.target.value)}
+                       onKeyDown={e => { if (e.key === "Enter" && followUp.trim()) { onRevise?.(followUp.trim()); setFollowUp(""); } }}
+                       placeholder="补充说明或让 Agent 继续当前任务…"
+                       className="flex-1 bg-bg-primary border border-amber-700/40 rounded px-2 py-1
+                                  text-xs font-mono text-text-primary placeholder-text-muted/50
+                                  focus:outline-none focus:border-amber-500/60" />
+                <button onClick={() => { if (followUp.trim()) { onRevise?.(followUp.trim()); setFollowUp(""); } }}
+                        disabled={!followUp.trim()}
+                        className="px-3 py-1 bg-amber-700 hover:bg-amber-600 disabled:bg-bg-secondary
+                                   disabled:text-text-muted text-white text-xs font-mono rounded transition-colors shrink-0">
+                  继续
+                </button>
+              </div>
             )}
             <div className="flex items-center gap-2 ml-7">
               <button onClick={onNewTask}

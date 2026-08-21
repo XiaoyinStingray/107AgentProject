@@ -483,6 +483,7 @@ class TestPersistence:
         state_data = json.loads(state_file.read_text(encoding="utf-8"))
         assert state_data["run_id"] == "test-persist-run"
         assert state_data["accepted"] is True
+        assert state_data["outcome"] == "completed"
 
         # 清理 _active_workers 中的测试条目
         _active_workers.pop("test-persist-run", None)
@@ -493,6 +494,188 @@ class TestPersistence:
         from api.workers import _restore_workers_from_disk
         result = await _restore_workers_from_disk(str(tmp_path))
         assert result is None or result == 0
+
+    @pytest.mark.asyncio
+    async def test_restore_legacy_false_completion_as_needs_attention(self, tmp_path):
+        """旧记录中验收失败的 worker.done 不应继续显示为成功。"""
+        from api.workers import _active_workers, _restore_workers_from_disk
+
+        run_dir = tmp_path / "custom-workspace" / "run-legacy-audit"
+        run_dir.mkdir(parents=True)
+        (run_dir / "worker_state.json").write_text(
+            json.dumps({
+                "run_id": "run-legacy-audit",
+                "agent_name": "TestAgent",
+                "task": "生成文件",
+                "state": "done",
+                "steps": 6,
+                "created_at": "2026-08-18T10:00:00",
+            }, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (run_dir / "worker_events.json").write_text(
+            json.dumps([{
+                "type": "worker.done",
+                "data": {
+                    "reason": "任务已完成（交付验收未通过：已达到两轮自动修订上限）",
+                    "files": [],
+                },
+            }], ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        await _restore_workers_from_disk(str(tmp_path))
+
+        assert _active_workers["run-legacy-audit"]["outcome"] == "needs_attention"
+        assert _active_workers["run-legacy-audit"]["steps"] == 6
+        assert _active_workers["run-legacy-audit"]["workspace_root"] == str(run_dir)
+        _active_workers.pop("run-legacy-audit", None)
+
+    @pytest.mark.asyncio
+    async def test_restore_legacy_json_failure_as_needs_attention(self, tmp_path):
+        """旧版错误事件即使写了 recoverable=false，也应允许复用工作区。"""
+        from api.workers import _active_workers, _restore_workers_from_disk
+
+        run_dir = tmp_path / "custom-workspace" / "run-legacy-json"
+        run_dir.mkdir(parents=True)
+        (run_dir / "worker_state.json").write_text(
+            json.dumps({
+                "run_id": "run-legacy-json",
+                "agent_name": "岳书妍",
+                "task": "生成方案",
+                "state": "error",
+                "steps": 0,
+                "created_at": "2026-08-18T10:00:00",
+            }, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (run_dir / "worker_events.json").write_text(
+            json.dumps([{
+                "type": "worker.error",
+                "data": {
+                    "error_type": "json_parse_failure",
+                    "message": "Agent 输出无法解析为 JSON",
+                    "recoverable": False,
+                },
+            }], ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        await _restore_workers_from_disk(str(tmp_path))
+
+        assert _active_workers["run-legacy-json"]["outcome"] == "needs_attention"
+        assert _active_workers["run-legacy-json"]["workspace_root"] == str(run_dir)
+        _active_workers.pop("run-legacy-json", None)
+
+    def test_follow_up_keeps_saved_agent_identity(self):
+        """继续修改不能被前端当前的默认 Worker 覆盖原 Agent。"""
+        from api.workers import (
+            _active_workers,
+            _resolve_worker_agent_id,
+        )
+
+        _active_workers["run-yue"] = {
+            "agent_id": "agent-yue-shuyan",
+            "agent_name": "岳书妍",
+        }
+        try:
+            resolved, existing = _resolve_worker_agent_id(
+                "worker-default",
+                "run-yue",
+            )
+            assert resolved == "agent-yue-shuyan"
+            assert existing is _active_workers["run-yue"]
+        finally:
+            _active_workers.pop("run-yue", None)
+
+    def test_new_task_uses_requested_agent_identity(self):
+        """新任务仍使用用户当前选择，不受历史绑定规则影响。"""
+        from api.workers import _resolve_worker_agent_id
+
+        resolved, existing = _resolve_worker_agent_id("agent-new", "")
+        assert resolved == "agent-new"
+        assert existing is None
+
+    @pytest.mark.asyncio
+    async def test_running_list_excludes_finished_history(self, monkeypatch):
+        """历史任务仍在内存中时，不能把新任务入口误锁为运行中。"""
+        import api.workers as worker_api
+
+        monkeypatch.setattr(worker_api, "_active_workers", {
+            "run-finished": {
+                "agent_id": "agent-old",
+                "agent_name": "旧任务 Agent",
+                "task": "已经结束的任务",
+                "running": False,
+                "created_at": "2026-08-21T10:00:00",
+            },
+            "run-active": {
+                "agent_id": "agent-current",
+                "agent_name": "当前 Agent",
+                "task": "仍在执行的任务",
+                "running": True,
+                "created_at": "2026-08-21T10:01:00",
+            },
+        })
+
+        result = await worker_api.list_running_workers()
+
+        assert [item["run_id"] for item in result] == ["run-active"]
+        assert result[0]["running"] is True
+
+    @pytest.mark.asyncio
+    async def test_file_list_reads_live_workspace_instead_of_events(self, monkeypatch):
+        """手动加入工作区的文件即使没有 file_updated 事件也必须可见。"""
+        import api.workers as worker_api
+        from engines.worker.workspace import FileInfo
+
+        mock_worker = MagicMock()
+        mock_worker._workspace.list_files = AsyncMock(return_value=[
+            FileInfo(
+                path="team-report.md",
+                size=9939,
+                modified_at="2026-08-21T12:00:00",
+            ),
+        ])
+        monkeypatch.setattr(worker_api, "_active_workers", {
+            "run-live-files": {
+                "worker": mock_worker,
+                "events": [],
+            },
+        })
+
+        result = await worker_api.list_worker_files("run-live-files")
+
+        assert result == {
+            "run_id": "run-live-files",
+            "files": [{
+                "path": "team-report.md",
+                "size": 9939,
+                "modified_at": "2026-08-21T12:00:00",
+            }],
+        }
+
+    @pytest.mark.asyncio
+    async def test_file_list_reads_restored_workspace_from_disk(self, tmp_path, monkeypatch):
+        """后端重启后的历史工作区也能列出操作系统中新增的文件。"""
+        import api.workers as worker_api
+
+        run_root = tmp_path / "run-restored-files"
+        files_root = run_root / "files"
+        files_root.mkdir(parents=True)
+        (files_root / "manual-input.md").write_text("手动输入", encoding="utf-8")
+        monkeypatch.setattr(worker_api, "_active_workers", {
+            "run-restored-files": {
+                "worker": None,
+                "workspace_root": str(run_root),
+            },
+        })
+
+        result = await worker_api.list_worker_files("run-restored-files")
+
+        assert result["run_id"] == "run-restored-files"
+        assert [item["path"] for item in result["files"]] == ["manual-input.md"]
+        assert result["files"][0]["size"] == len("手动输入".encode("utf-8"))
 
     @pytest.mark.asyncio
     async def test_save_events_file(self, tmp_path):
@@ -819,4 +1002,3 @@ class TestForkSupplement:
         from engines.worker.fork import _snapshot_original_path
         result = _snapshot_original_path("report.md.20260818_100000")
         assert result == "report.md"
- 

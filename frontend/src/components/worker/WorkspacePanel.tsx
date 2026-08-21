@@ -7,6 +7,7 @@
  */
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { RefreshCw } from "lucide-react";
 import type { WorkerEvent } from "../../api/workers";
 
 // =============================================================================
@@ -163,6 +164,10 @@ export default function WorkspacePanel({ events, runId, connected }: WorkspacePa
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState("");
   const [saving, setSaving] = useState(false);
+  const [workspaceFiles, setWorkspaceFiles] = useState<FileEntry[]>([]);
+  const [filesLoaded, setFilesLoaded] = useState(false);
+  const [filesRefreshing, setFilesRefreshing] = useState(false);
+  const [refreshNonce, setRefreshNonce] = useState(0);
 
   // 点击文件 → 获取内容
   const openFile = useCallback(async (path: string) => {
@@ -218,8 +223,8 @@ export default function WorkspacePanel({ events, runId, connected }: WorkspacePa
     } catch {} finally { setSaving(false); }
   }, [viewingFile, runId, editContent]);
 
-  // 从事件中提取文件信息
-  const files = useMemo(() => {
+  // 事件列表仅作为接口暂不可用时的兼容回退。
+  const eventFiles = useMemo(() => {
     const seen = new Map<string, number>();
     for (const event of events) {
       if (event.type === "worker.file_updated") {
@@ -232,6 +237,46 @@ export default function WorkspacePanel({ events, runId, connected }: WorkspacePa
     }
     return Array.from(seen.entries()).map(([path, size]) => ({ path, size }));
   }, [events]);
+
+  const fileEventRevision = useMemo(
+    () => events.filter((event) => event.type === "worker.file_updated").length,
+    [events],
+  );
+
+  // 真实工作区是文件列表的权威来源：首次、事件变更和轮询都会刷新。
+  useEffect(() => {
+    let cancelled = false;
+    setWorkspaceFiles([]);
+    setFilesLoaded(false);
+
+    if (!runId) return () => { cancelled = true; };
+
+    const loadFiles = async () => {
+      setFilesRefreshing(true);
+      try {
+        const response = await fetch(`/api/workers/${runId}/files`);
+        if (!response.ok) return;
+        const payload = await response.json() as { files?: FileEntry[] };
+        if (!cancelled) {
+          setWorkspaceFiles(Array.isArray(payload.files) ? payload.files : []);
+          setFilesLoaded(true);
+        }
+      } catch {
+        // 保留事件回退，下一次轮询继续尝试。
+      } finally {
+        if (!cancelled) setFilesRefreshing(false);
+      }
+    };
+
+    void loadFiles();
+    const interval = window.setInterval(() => { void loadFiles(); }, connected ? 2000 : 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [runId, connected, fileEventRevision, refreshNonce]);
+
+  const files = filesLoaded ? workspaceFiles : eventFiles;
 
   // 最近新增的文件（最后 1 个 file_updated 事件中的文件）
   const [newFiles, setNewFiles] = useState<Set<string>>(new Set());
@@ -262,9 +307,23 @@ export default function WorkspacePanel({ events, runId, connected }: WorkspacePa
           <span className="text-xs font-mono text-text-secondary font-semibold">
             📁 工作区文件
           </span>
-          <span className="text-xs font-mono text-text-muted">
-            {files.length}
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-mono text-text-muted">
+              {files.length}
+            </span>
+            <button
+              type="button"
+              onClick={() => setRefreshNonce((value) => value + 1)}
+              disabled={!runId || filesRefreshing}
+              title="刷新工作区文件"
+              aria-label="刷新工作区文件"
+              className="w-6 h-6 inline-flex items-center justify-center rounded border border-transparent
+                         text-text-muted hover:text-cyan-400 hover:border-border disabled:opacity-40
+                         disabled:cursor-not-allowed transition-colors"
+            >
+              <RefreshCw size={13} className={filesRefreshing ? "animate-spin" : ""} />
+            </button>
+          </div>
         </div>
       </div>
 

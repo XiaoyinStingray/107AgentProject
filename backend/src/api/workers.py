@@ -15,6 +15,7 @@ import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -106,6 +107,41 @@ class WorkerStatusResponse(BaseModel):
 
 _active_workers: dict[str, dict] = {}  # run_id → {worker, agent_name, task, created_at}
 
+# Older runs stored transient model/format failures as unrecoverable. The
+# workspace is still intact, so keep those histories resumable after upgrade.
+_LEGACY_RECOVERABLE_ERROR_TYPES = {"json_parse_failure", "llm_api_error"}
+
+
+def _worker_workspace_root(run_id: str, entry: dict) -> Path:
+    """Resolve both default and user-selected local Worker workspaces."""
+    worker = entry.get("worker")
+    if worker is not None and hasattr(worker._workspace, "_root"):
+        return Path(worker._workspace._root)
+    saved_root = entry.get("workspace_root")
+    if saved_root:
+        return Path(saved_root)
+    return Path.home() / "workspaces" / run_id
+
+
+def _resolve_worker_agent_id(requested_agent_id: str, reuse_run_id: str) -> tuple[str, dict | None]:
+    """Keep a follow-up bound to the Agent that created the original run."""
+    existing = _active_workers.get(reuse_run_id) if reuse_run_id else None
+    if not existing:
+        return requested_agent_id, existing
+
+    saved_agent_id = str(existing.get("agent_id") or "").strip()
+    if not saved_agent_id:
+        return requested_agent_id, existing
+
+    if saved_agent_id != requested_agent_id:
+        logger.warning(
+            "Follow-up agent mismatch for run {}: requested={}, restored={}",
+            reuse_run_id,
+            requested_agent_id,
+            saved_agent_id,
+        )
+    return saved_agent_id, existing
+
 
 async def _persist_worker_state(entry: dict):
     """保存 Worker 状态到工作区目录——重启后可恢复。"""
@@ -114,6 +150,9 @@ async def _persist_worker_state(entry: dict):
         if worker is None:
             return  # 磁盘恢复的条目无活跃 engine
         state_file = f"{worker._workspace._root}/worker_state.json"
+        outcome = getattr(worker, "_outcome", "completed")
+        if outcome not in {"pending", "running", "completed", "needs_attention", "failed", "cancelled"}:
+            outcome = "completed"
         state = {
             "run_id": worker.run_id,
             "agent_id": entry.get("agent_id", ""),
@@ -121,6 +160,7 @@ async def _persist_worker_state(entry: dict):
             "task": entry["task"],
             "running": entry.get("running", False),
             "state": worker.state.value if hasattr(worker.state, 'value') else str(worker.state),
+            "outcome": outcome,
             "steps": worker._step_index,
             "accepted": entry.get("accepted", False),
             "created_at": entry["created_at"],
@@ -138,14 +178,17 @@ async def _persist_worker_agent_binding(
     base_dir: str | None = None,
 ):
     """只补写旧 Worker 历史的 Agent 身份，不破坏原状态字段。"""
-    from pathlib import Path
     import json as _json
 
     worker = entry.get("worker")
     if worker is not None and hasattr(worker._workspace, "root"):
         state_file = Path(worker._workspace.root) / "worker_state.json"
     else:
-        state_file = Path(base_dir or (Path.home() / "workspaces")) / run_id / "worker_state.json"
+        state_file = (
+            Path(base_dir) / run_id / "worker_state.json"
+            if base_dir
+            else _worker_workspace_root(run_id, entry) / "worker_state.json"
+        )
 
     state: dict = {}
     if state_file.exists():
@@ -173,15 +216,36 @@ async def _restore_workers_from_disk(base_dir: str | None = None):
     root = Path(base_dir or str(Path.home() / "workspaces"))
     if not root.exists():
         return
-    for ws_dir in root.iterdir():
-        if not ws_dir.is_dir():
-            continue
-        state_file = ws_dir / "worker_state.json"
-        if not state_file.exists():
-            continue
+    for state_file in root.rglob("worker_state.json"):
+        ws_dir = state_file.parent
         try:
             state = _json.loads(state_file.read_text(encoding='utf-8'))
             state["running"] = False  # 重启后标记为非运行
+            outcome = state.get("outcome")
+            if not outcome:
+                outcome = "completed"
+                events_file = ws_dir / "worker_events.json"
+                if events_file.exists():
+                    saved_events = _json.loads(events_file.read_text(encoding="utf-8"))
+                    terminal = next(
+                        (
+                            event for event in reversed(saved_events)
+                            if event.get("type") in {"worker.done", "worker.error"}
+                        ),
+                        None,
+                    )
+                    if terminal and terminal.get("type") == "worker.error":
+                        error_data = terminal.get("data") or {}
+                        outcome = (
+                            "needs_attention"
+                            if error_data.get("recoverable")
+                            or error_data.get("error_type") in _LEGACY_RECOVERABLE_ERROR_TYPES
+                            else "failed"
+                        )
+                    elif terminal and "交付验收未通过" in str(
+                        (terminal.get("data") or {}).get("reason", "")
+                    ):
+                        outcome = "needs_attention"
             _active_workers[state["run_id"]] = {
                 "worker": None,
                 "agent_id": state.get("agent_id", ""),
@@ -190,6 +254,10 @@ async def _restore_workers_from_disk(base_dir: str | None = None):
                 "running": False,
                 "accepted": state.get("accepted", False),
                 "events": [],
+                "outcome": outcome,
+                "state": state.get("state", "done"),
+                "steps": state.get("steps", 0),
+                "workspace_root": str(ws_dir),
                 "created_at": state.get("created_at", ""),
             }
             logger.info(f"Restored worker: {state['run_id']} — {state.get('task', '')[:50]}")
@@ -250,11 +318,17 @@ async def execute_worker_task(req: WorkerExecuteRequest):
         const es = new EventSource("/api/workers/execute", { method: "POST", body: ... })
         // 或使用 fetch + ReadableStream
     """
-    logger.info(f"POST /api/workers/execute: agent={req.agent_id}, task={req.task[:80]}")
+    effective_agent_id, existing = _resolve_worker_agent_id(
+        req.agent_id,
+        req.reuse_run_id,
+    )
+    logger.info(
+        f"POST /api/workers/execute: agent={effective_agent_id}, task={req.task[:80]}"
+    )
 
     # 获取 Agent
     try:
-        agent = await _get_or_create_agent(req.agent_id)
+        agent = await _get_or_create_agent(effective_agent_id)
     except AgentNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except AgentRestoreError as e:
@@ -266,7 +340,6 @@ async def execute_worker_task(req: WorkerExecuteRequest):
     workspace = None
     logger.info(f"reuse_run_id={req.reuse_run_id!r}, active_workers={list(_active_workers.keys())}")
     if req.reuse_run_id:
-        existing = _active_workers.get(req.reuse_run_id)
         if existing:
             worker_obj = existing.get("worker")
             if worker_obj is not None:
@@ -274,11 +347,9 @@ async def execute_worker_task(req: WorkerExecuteRequest):
                 logger.info(f"Reusing workspace from run {req.reuse_run_id}: {workspace.location_description}")
             else:
                 # 磁盘恢复的条目——尝试重建 LocalWorkspace
-                from pathlib import Path
-                ws_root = Path.home() / "workspaces" / req.reuse_run_id
+                ws_root = _worker_workspace_root(req.reuse_run_id, existing)
                 if ws_root.exists():
-                    from engines.worker.workspace import LocalWorkspace
-                    workspace = LocalWorkspace(str(Path.home() / "workspaces"), req.reuse_run_id)
+                    workspace = LocalWorkspace(str(ws_root.parent), ws_root.name)
                     logger.info(f"Rebuilt workspace for restored run {req.reuse_run_id}: {workspace.location_description}")
         else:
             logger.warning(f"reuse_run_id={req.reuse_run_id} not found in _active_workers")
@@ -286,7 +357,7 @@ async def execute_worker_task(req: WorkerExecuteRequest):
         workspace = _create_workspace(
             req.workspace_type,
             req.workspace_config or {},
-            req.agent_id,
+            effective_agent_id,
         )
         logger.info(f"Created new workspace: {workspace.location_description if workspace else 'default'}")
 
@@ -299,11 +370,12 @@ async def execute_worker_task(req: WorkerExecuteRequest):
     # 注册到内存表
     _active_workers[worker.run_id] = {
         "worker": worker,
-        "agent_id": req.agent_id,
+        "agent_id": effective_agent_id,
         "agent_name": worker._agent_name,
         "task": req.task,
         "running": True,
         "events": [],
+        "workspace_root": str(getattr(workspace, "_root", "")),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -359,11 +431,12 @@ async def list_worker_history():
     for rid, e in _active_workers.items():
         worker = e.get("worker")
         files = []
-        steps = 0
+        steps = e.get("steps", 0)
         worker_state = "done"
         duration_ms = e.get("duration_ms", 0)
         self_rating = ""
         key_findings = []
+        outcome = e.get("outcome", "completed")
         if worker is not None:
             try:
                 f_list = await worker._workspace.list_files()
@@ -376,9 +449,9 @@ async def list_worker_history():
             duration_ms = getattr(worker, "_total_duration_ms", 0) or duration_ms
             self_rating = getattr(worker, "_self_rating", "") or ""
             key_findings = getattr(worker, "_key_findings", []) or []
+            outcome = getattr(worker, "_outcome", outcome)
         else:
-            from pathlib import Path
-            ws_dir = Path.home() / "workspaces" / rid / "files"
+            ws_dir = _worker_workspace_root(rid, e) / "files"
             if ws_dir.exists():
                 for p in ws_dir.rglob("*"):
                     if p.is_file():
@@ -387,10 +460,12 @@ async def list_worker_history():
         accepted = e.get("accepted", False)
         history.append({
             "run_id": rid,
+            "agent_id": e.get("agent_id", ""),
             "agent_name": e["agent_name"],
             "task": e["task"][:120],
             "running": e.get("running", False),
             "state": worker_state,
+            "outcome": "running" if e.get("running", False) else outcome,
             "steps": steps,
             "files": files,
             "accepted": accepted,
@@ -407,9 +482,11 @@ async def list_worker_history():
 async def list_running_workers():
     """列出所有活跃 Worker——供全局状态栏显示。"""
     return [
-        {"run_id": rid, "agent_name": e["agent_name"], "task": e["task"][:80],
+        {"run_id": rid, "agent_id": e.get("agent_id", ""),
+         "agent_name": e["agent_name"], "task": e["task"][:80],
          "running": e.get("running", False), "created_at": e["created_at"]}
         for rid, e in _active_workers.items()
+        if e.get("running", False)
     ]
 
 
@@ -419,10 +496,13 @@ async def get_worker_status(run_id: str):
     entry = _active_workers.get(run_id)
     if not entry:
         raise HTTPException(status_code=404, detail=f"Worker {run_id!r} 未找到")
-    worker = entry["worker"]
+    worker = entry.get("worker")
     return WorkerStatusResponse(
         run_id=run_id,
-        state=worker.state.value if hasattr(worker.state, 'value') else str(worker.state),
+        state=(
+            worker.state.value if worker is not None and hasattr(worker.state, "value")
+            else entry.get("state", "done")
+        ),
         agent_name=entry["agent_name"],
         task=entry["task"],
         created_at=entry["created_at"],
@@ -434,6 +514,46 @@ async def get_worker_status(run_id: str):
 # =============================================================================
 
 
+@router.get("/{run_id}/files")
+async def list_worker_files(run_id: str):
+    """List the actual files currently present in a Worker workspace."""
+    entry = _active_workers.get(run_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Worker {run_id!r} 未找到")
+
+    worker = entry.get("worker")
+    try:
+        if worker is not None:
+            files = await worker._workspace.list_files()
+            items = [
+                {
+                    "path": file_info.path,
+                    "size": file_info.size,
+                    "modified_at": file_info.modified_at,
+                }
+                for file_info in files
+            ]
+        else:
+            files_root = _worker_workspace_root(run_id, entry) / "files"
+            items = []
+            if files_root.exists():
+                for file_path in files_root.rglob("*"):
+                    if not file_path.is_file():
+                        continue
+                    stat = file_path.stat()
+                    items.append({
+                        "path": str(file_path.relative_to(files_root)).replace("\\", "/"),
+                        "size": stat.st_size,
+                        "modified_at": str(stat.st_mtime),
+                    })
+                items.sort(key=lambda item: item["modified_at"], reverse=True)
+        return {"run_id": run_id, "files": items}
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.get("/{run_id}/files/{path:path}")
 async def read_worker_file(run_id: str, path: str):
     """读取 Worker 工作区中的文件内容。"""
@@ -443,8 +563,7 @@ async def read_worker_file(run_id: str, path: str):
     worker = entry.get("worker")
     if worker is None:
         # 磁盘恢复的条目——直接从文件系统读
-        from pathlib import Path
-        file_path = Path.home() / "workspaces" / run_id / "files" / path
+        file_path = _worker_workspace_root(run_id, entry) / "files" / path
         if not file_path.exists():
             raise HTTPException(status_code=404, detail=f"文件不存在: {path}")
         content = file_path.read_text(encoding='utf-8')
@@ -467,8 +586,7 @@ async def get_worker_events(run_id: str):
     events = entry.get("events", [])
     if not events:
         # 尝试从磁盘加载
-        from pathlib import Path
-        events_file = Path.home() / "workspaces" / run_id / "worker_events.json"
+        events_file = _worker_workspace_root(run_id, entry) / "worker_events.json"
         if events_file.exists():
             try:
                 events = json.loads(events_file.read_text(encoding='utf-8'))
@@ -476,6 +594,8 @@ async def get_worker_events(run_id: str):
                 pass
     return {
         "run_id": run_id,
+        "agent_id": entry.get("agent_id", ""),
+        "agent_name": entry.get("agent_name", ""),
         "events": events[-500:],
         "running": entry.get("running", False),
         "accepted": entry.get("accepted", False),
@@ -883,6 +1003,7 @@ async def fork_worker(run_id: str, req: ForkRequest):
         "task": f"[Fork] {entry['task'][:100]}",
         "running": True,
         "events": [],
+        "workspace_root": str(getattr(fork_worker._workspace, "_root", "")),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 

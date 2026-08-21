@@ -124,6 +124,7 @@ class TestMakeWorkerTools:
         assert handler is not None
         result = _run(handler(path="nope.txt"))
         assert "不存在" in result or "exist" in result.lower()
+        assert result.success is False
 
     def test_list_files_tool(self):
         """list_files 工具。"""
@@ -156,6 +157,20 @@ class TestMakeWorkerTools:
         assert handler is not None
         result = _run(handler(code=""))
         assert "错误" in result or "空" in result
+        assert result.success is False
+
+    def test_run_python_nonzero_exit_is_failure(self):
+        """沙盒退出码非零时，事件层不能再把工具标成成功。"""
+        handler = self.tool_map["run_python"].handler
+        assert handler is not None
+        self.workspace.run_python = AsyncMock(
+            return_value=SandboxResult(stdout="", stderr="沙盒执行失败", exit_code=-1)
+        )
+
+        result = _run(handler(code="print('x')"))
+
+        assert "退出码: -1" in result
+        assert result.success is False
 
     def test_web_search_tool_mock(self):
         """web_search 工具调用搜索引擎（mock）。"""

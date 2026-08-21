@@ -48,6 +48,22 @@ class ToolSpec:
     handler: Callable[..., Any] | None = None
 
 
+class ToolExecutionResult(str):
+    """String-compatible tool output carrying an explicit success flag."""
+
+    success: bool
+
+    def __new__(cls, output: str, *, success: bool = True):
+        instance = super().__new__(cls, output)
+        instance.success = success
+        return instance
+
+
+def tool_error(output: str) -> ToolExecutionResult:
+    """Return a visible tool error without losing machine-readable status."""
+    return ToolExecutionResult(output, success=False)
+
+
 # =============================================================================
 # 工具描述生成（在 Agent 决策 prompt 中使用）
 # =============================================================================
@@ -299,7 +315,7 @@ def make_worker_tools(workspace, extra_tools: list[str] | None = None, enabled_t
     async def run_python_handler(code: str) -> str:
         """在沙盒中执行 Python 代码。"""
         if not code or not isinstance(code, str) or len(code.strip()) == 0:
-            return "错误：代码不能为空。"
+            return tool_error("错误：代码不能为空。")
         result = await workspace.run_python(code)
         output_parts = []
         if result.stdout:
@@ -309,17 +325,18 @@ def make_worker_tools(workspace, extra_tools: list[str] | None = None, enabled_t
         if not result.stdout and not result.stderr:
             output_parts.append("(无输出)")
         output_parts.append(f"退出码: {result.exit_code}")
-        return "\n\n".join(output_parts)
+        output = "\n\n".join(output_parts)
+        return ToolExecutionResult(output, success=result.exit_code == 0)
 
     # ── write_file ──
     async def write_file_handler(path: str, content: str) -> str:
         """创建或覆盖写入文件（自动快照）。"""
         if not path or not isinstance(path, str):
-            return "错误：请提供有效的文件路径。"
+            return tool_error("错误：请提供有效的文件路径。")
         if content is None or not isinstance(content, str):
-            return "错误：请提供有效的文件内容。"
+            return tool_error("错误：请提供有效的文件内容。")
         if any(c in path for c in ('\\', '..')):
-            return f"错误：路径包含非法字符: {path}"
+            return tool_error(f"错误：路径包含非法字符: {path}")
         try:
             full_path = await workspace.write_file(path, content)
             # 获取快照数量
@@ -331,16 +348,16 @@ def make_worker_tools(workspace, extra_tools: list[str] | None = None, enabled_t
             logger.info(f"[worker-tool] write_file: {path} → {full_path} ({len(content)} chars)")
             return f"✅ 已写入 {path} ({len(content)} 字符{version_hint})"
         except PermissionError as e:
-            return f"权限错误: {e}"
+            return tool_error(f"权限错误: {e}")
         except Exception as e:
             logger.error(f"[worker-tool] write_file failed: {e}")
-            return f"写入失败: {e}"
+            return tool_error(f"写入失败: {e}")
 
     # ── read_file ──
     async def read_file_handler(path: str, snapshot: str = "") -> str:
         """读取文件内容（支持读取历史快照版本）。"""
         if not path or not isinstance(path, str):
-            return "错误：请提供有效的文件路径。"
+            return tool_error("错误：请提供有效的文件路径。")
         try:
             snap = snapshot if snapshot else None
             content = await workspace.read_file(path, snap)
@@ -349,11 +366,13 @@ def make_worker_tools(workspace, extra_tools: list[str] | None = None, enabled_t
                 label = f"[快照 {snapshot} 内容如下]"
             return f"{label}\n\n{content}"
         except FileNotFoundError:
-            return f"文件不存在: {path}。请确认文件名是否正确。工作区中的文件列表可用 list_files 查看。"
+            return tool_error(
+                f"文件不存在: {path}。请确认文件名是否正确。工作区中的文件列表可用 list_files 查看。"
+            )
         except PermissionError as e:
-            return f"权限错误: {e}"
+            return tool_error(f"权限错误: {e}")
         except Exception as e:
-            return f"读取失败: {e}"
+            return tool_error(f"读取失败: {e}")
 
     # ── list_files ──
     async def list_files_handler(directory: str = "") -> str:
@@ -373,7 +392,7 @@ def make_worker_tools(workspace, extra_tools: list[str] | None = None, enabled_t
                 lines.append("   使用 list_files('.snapshots') 可查看版本历史。")
             return "\n".join(lines)
         except Exception as e:
-            return f"列出文件失败: {e}"
+            return tool_error(f"列出文件失败: {e}")
 
     # ── install_package (Step 100) ──
     async def install_package_handler(package: str) -> str:
@@ -383,10 +402,10 @@ def make_worker_tools(workspace, extra_tools: list[str] | None = None, enabled_t
         from pathlib import Path as _Path
 
         if not package or not isinstance(package, str) or not package.strip():
-            return "错误：请提供要安装的包名。"
+            return tool_error("错误：请提供要安装的包名。")
         # 安全校验：只允许字母数字和 -_. 字符
         if not all(c.isalnum() or c in "-_." for c in package.strip()):
-            return f"错误：包名包含非法字符: {package}"
+            return tool_error(f"错误：包名包含非法字符: {package}")
 
         pkg_name = package.strip().lower()
         packages_dir = _Path(workspace.root if hasattr(workspace, 'root') else ".", ".packages")
@@ -408,11 +427,11 @@ def make_worker_tools(workspace, extra_tools: list[str] | None = None, enabled_t
             else:
                 err = stderr.decode("utf-8", errors="replace")[:500]
                 logger.warning(f"[worker-tool] install_package failed: {pkg_name} — {err}")
-                return f"❌ 安装 {pkg_name} 失败: {err}"
+                return tool_error(f"❌ 安装 {pkg_name} 失败: {err}")
         except asyncio.TimeoutError:
-            return f"❌ 安装 {pkg_name} 超时（60秒）。"
+            return tool_error(f"❌ 安装 {pkg_name} 超时（60秒）。")
         except Exception as e:
-            return f"❌ 安装 {pkg_name} 失败: {e}"
+            return tool_error(f"❌ 安装 {pkg_name} 失败: {e}")
 
     # 构造闭包 ToolSpec 列表（复制原 ToolSpec 并填入 handler）
     base_tools = [
@@ -490,7 +509,7 @@ def make_worker_tools(workspace, extra_tools: list[str] | None = None, enabled_t
                 return f"✅ 思维导图已生成 → mindmap.md"
             except Exception as e:
                 logger.warning(f"[special-tool] mindmap failed: {e}")
-                return f"❌ 思维导图生成失败: {e}"
+                return tool_error(f"❌ 思维导图生成失败: {e}")
         special_specs.append(ToolSpec(
             name="mindmap_generate",
             description=SPECIAL_TOOLS["mindmap"].description,
@@ -505,7 +524,9 @@ def make_worker_tools(workspace, extra_tools: list[str] | None = None, enabled_t
             safe_data = data_json.replace("\\", "\\\\").replace("'''", "\\'\\'\\'")
             safe_type = chart_type.replace("'", "\\'").strip()
             if safe_type not in ("bar", "line", "pie", "scatter"):
-                return f"❌ 不支持的图表类型: {chart_type[:20]}，请使用 bar/line/pie/scatter"
+                return tool_error(
+                    f"❌ 不支持的图表类型: {chart_type[:20]}，请使用 bar/line/pie/scatter"
+                )
             code = (
                 "import matplotlib\nmatplotlib.use('Agg')\n"
                 "import matplotlib.pyplot as plt\nimport json\n"
@@ -523,7 +544,7 @@ def make_worker_tools(workspace, extra_tools: list[str] | None = None, enabled_t
             result = await workspace.run_python(code)
             if result.exit_code == 0 and "OK" in (result.stdout or ""):
                 return "✅ 图表已生成 → chart.png"
-            return f"❌ 图表生成失败: {result.stderr or result.stdout or '未知错误'}"
+            return tool_error(f"❌ 图表生成失败: {result.stderr or result.stdout or '未知错误'}")
         special_specs.append(ToolSpec(
             name="chart_generate",
             description=SPECIAL_TOOLS["chart"].description,
@@ -573,7 +594,7 @@ def make_worker_tools(workspace, extra_tools: list[str] | None = None, enabled_t
                 await workspace.write_file("summary.md", summary)
                 return f"✅ 摘要已生成 → summary.md ({len(summary)} 字符)"
             except Exception as e:
-                return f"❌ 摘要生成失败: {e}"
+                return tool_error(f"❌ 摘要生成失败: {e}")
         special_specs.append(ToolSpec(
             name="summarize",
             description=SPECIAL_TOOLS["summarize"].description,
@@ -600,7 +621,7 @@ def make_worker_tools(workspace, extra_tools: list[str] | None = None, enabled_t
                 await workspace.write_file(out, translated)
                 return f"✅ 翻译完成 → {out}"
             except Exception as e:
-                return f"❌ 翻译失败: {e}"
+                return tool_error(f"❌ 翻译失败: {e}")
         special_specs.append(ToolSpec(
             name="translate",
             description=SPECIAL_TOOLS["translate"].description,
@@ -631,7 +652,7 @@ def make_worker_tools(workspace, extra_tools: list[str] | None = None, enabled_t
             result = await workspace.run_python(code)
             if result.exit_code == 0:
                 return "✅ 数据画像已生成 → data_profile.md"
-            return f"❌ 数据画像生成失败: {result.stderr or result.stdout or '未知错误'}"
+            return tool_error(f"❌ 数据画像生成失败: {result.stderr or result.stdout or '未知错误'}")
         special_specs.append(ToolSpec(
             name="data_profile",
             description=SPECIAL_TOOLS["data_profile"].description,
@@ -659,7 +680,7 @@ def make_worker_tools(workspace, extra_tools: list[str] | None = None, enabled_t
                 await workspace.write_file("code_review.md", result.content.strip())
                 return "✅ 代码审查报告已生成 → code_review.md"
             except Exception as e:
-                return f"❌ 审查失败: {e}"
+                return tool_error(f"❌ 审查失败: {e}")
         special_specs.append(ToolSpec(
             name="code_review",
             description=SPECIAL_TOOLS["code_review"].description,
@@ -686,7 +707,7 @@ def make_worker_tools(workspace, extra_tools: list[str] | None = None, enabled_t
                 await workspace.write_file("outline.md", result.content.strip())
                 return "✅ 文档大纲已生成 → outline.md"
             except Exception as e:
-                return f"❌ 大纲生成失败: {e}"
+                return tool_error(f"❌ 大纲生成失败: {e}")
         special_specs.append(ToolSpec(
             name="outline_generate",
             description=SPECIAL_TOOLS["outline"].description,

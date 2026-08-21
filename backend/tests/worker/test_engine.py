@@ -73,8 +73,10 @@ class MockAutogenAgent:
     def __init__(self, responses: list[str]):
         self._responses = responses
         self._call_idx = 0
+        self.received_messages = []
 
     async def on_messages(self, messages, cancellation_token=None):
+        self.received_messages.append(messages)
         if self._call_idx < len(self._responses):
             resp = self._responses[self._call_idx]
             self._call_idx += 1
@@ -169,6 +171,12 @@ class TestSafeJsonParse:
         assert _safe_json_parse("") is None
         assert _safe_json_parse("   ") is None
 
+    def test_decision_prompt_uses_a_valid_json_example(self):
+        from engines.worker.prompts import DECISION_JSON_EXAMPLE
+
+        parsed = json.loads(DECISION_JSON_EXAMPLE)
+        assert parsed["decision"] == "tool_call"
+
 
 # =============================================================================
 # AgentWorker 状态机测试
@@ -247,6 +255,59 @@ class TestAgentWorkerExecute:
         assert "worker.tool_start" in event_types
         assert "worker.tool_result" in event_types
 
+    def test_read_file_full_content_reaches_reflection_and_next_decision(self):
+        """长文件正文不能只以 200 字事件摘要进入 Agent 上下文。"""
+        marker = "FINAL_DECISION_B_PLUS_TREE_WITH_REAL_MEMBERS"
+        source_content = "调研材料\n" + ("背景信息" * 700) + marker
+        responses = [
+            json.dumps({"decision": "tool_call", "reason": "先读取输入材料"}),
+            json.dumps({
+                "decision": "tool_call",
+                "reason": "读取 team-report.md",
+                "tool_name": "read_file",
+                "tool_args": {"path": "team-report.md"},
+            }),
+            json.dumps({
+                "satisfied": True,
+                "plan_changed": False,
+                "thought": "已读取完整材料",
+                "next_action": "continue",
+            }),
+            json.dumps({"decision": "done", "reason": "已根据材料完成核对"}),
+            json.dumps({
+                "passed": True,
+                "checked_constraints": [],
+                "issues": [],
+                "repair_instructions": "",
+            }),
+        ]
+        ws = MockWorkspace()
+        ws._files["team-report.md"] = source_content
+        worker, _ = _make_worker(responses, workspace=ws)
+
+        events = []
+
+        async def collect():
+            async for event in worker.execute("读取 team-report.md 并核对最终选题"):
+                events.append(json.loads(event[6:].strip()))
+
+        _run(collect())
+
+        messages = worker._agent.autogen_agent.received_messages
+        assert marker in messages[2][0].content  # reflection prompt
+        assert marker in messages[3][0].content  # next decision prompt
+
+        read_result = next(
+            event for event in events
+            if event["type"] == "worker.tool_result"
+            and event["data"]["tool_name"] == "read_file"
+        )
+        assert len(read_result["data"]["result_summary"]) <= 200
+        assert marker not in read_result["data"]["result_summary"]
+        assert worker._tool_execution_ledger[0]["tool_name"] == "read_file"
+        assert worker._tool_execution_ledger[0]["arguments"]["path"] == "team-report.md"
+        assert worker._tool_execution_ledger[0]["success"] is True
+
     def test_write_file_triggers_file_updated(self):
         """write_file 成功后发射 file_updated 事件。"""
         responses = [
@@ -268,6 +329,12 @@ class TestAgentWorkerExecute:
         _run(collect())
         event_types = [json.loads(e[6:].strip())["type"] for e in events]
         assert "worker.file_updated" in event_types
+        record = worker._tool_execution_ledger[0]
+        assert record["tool_name"] == "write_file"
+        assert record["arguments"]["path"] == "report.md"
+        assert record["arguments"]["content_chars"] == len("# Report")
+        assert "content" not in record["arguments"]
+        assert record["success"] is True
 
     def test_max_steps_forces_done(self):
         """超过 MAX_STEPS 强制终止。"""
@@ -339,10 +406,11 @@ class TestAgentWorkerExecute:
         assert payload["type"] == "worker.error"
 
     def test_json_parse_error_returns_error(self):
-        """LLM 返回完全无效的 JSON → ERROR。"""
+        """计划 JSON 异常时使用兜底计划，不阻断真实执行。"""
         responses = [
             "This is not JSON at all",  # planning 失败
             "Also not JSON",            # retry 也失败
+            json.dumps({"decision": "done", "reason": "fallback plan continued"}),
         ]
         worker, ws = _make_worker(responses)
 
@@ -355,7 +423,34 @@ class TestAgentWorkerExecute:
 
         _run(collect())
         event_types = [json.loads(e[6:].strip())["type"] for e in events]
-        assert "worker.error" in event_types
+        assert "worker.error" not in event_types
+        assert "worker.done" in event_types
+        assert "worker.thought" in event_types
+
+        retry_message = worker._agent.autogen_agent.received_messages[1][0].content
+        assert "This is not JSON at all" in retry_message
+
+    def test_deciding_parse_failure_is_recoverable(self):
+        responses = [
+            json.dumps({"decision": "tool_call", "reason": "plan"}),
+            "not json",
+            "still not json",
+        ]
+        worker, _ = _make_worker(responses)
+
+        events = []
+
+        async def collect():
+            async for event in worker.execute("task"):
+                events.append(json.loads(event[6:].strip()))
+
+        _run(collect())
+
+        errors = [event for event in events if event["type"] == "worker.error"]
+        assert len(errors) == 1
+        assert errors[0]["data"]["error_type"] == "json_parse_failure"
+        assert errors[0]["data"]["recoverable"] is True
+        assert worker._outcome == "needs_attention"
 
     def test_delivery_gate_revises_and_rechecks_failed_output(self):
         """最终产出违反任务约束时，退回修订并在复验通过后完成。"""
@@ -464,6 +559,44 @@ class TestAgentWorkerExecute:
         assert "产物已保存" in errors[0]["data"]["message"]
         assert not any(event["type"] == "worker.done" for event in events)
 
+    def test_delivery_audit_exhaustion_needs_attention_instead_of_done(self):
+        """连续验收失败必须进入可恢复错误，不能显示任务完成。"""
+        failed_audit = {
+            "passed": False,
+            "checked_constraints": [{
+                "constraint": "必须生成 final-proposal.md",
+                "status": "fail",
+                "evidence": "工作区没有产出文件",
+            }],
+            "issues": ["final-proposal.md 未生成"],
+            "repair_instructions": "读取输入材料并生成 final-proposal.md。",
+        }
+        responses = [
+            json.dumps({"decision": "done", "reason": "开始验收"}),
+            json.dumps({"decision": "done", "reason": "无法生成文件"}),
+            json.dumps(failed_audit, ensure_ascii=False),
+            json.dumps({"decision": "done", "reason": "仍无法生成文件"}),
+            json.dumps(failed_audit, ensure_ascii=False),
+            json.dumps({"decision": "done", "reason": "工具不可用"}),
+            json.dumps(failed_audit, ensure_ascii=False),
+        ]
+        worker, _ = _make_worker(responses)
+        events = []
+
+        async def collect():
+            async for event in worker.execute("读取材料并生成 final-proposal.md"):
+                events.append(json.loads(event[6:].strip()))
+
+        _run(collect())
+
+        errors = [event for event in events if event["type"] == "worker.error"]
+        assert len(errors) == 1
+        assert errors[0]["data"]["error_type"] == "delivery_validation_failed"
+        assert errors[0]["data"]["recoverable"] is True
+        assert worker._outcome == "needs_attention"
+        assert not any(event["type"] == "worker.done" for event in events)
+        assert not any(event["type"] == "worker.summary" for event in events)
+
     def test_delivery_snapshot_excludes_context_and_upstream_files(self):
         worker, ws = _make_worker([])
         ws._files = {
@@ -524,6 +657,101 @@ class TestAgentWorkerExecute:
         assert audit is not None
         assert audit["passed"] is False
         assert any("程序合计 95 分钟" in issue for issue in audit["issues"])
+
+    @pytest.mark.parametrize("record_success", [False, None])
+    def test_delivery_gate_requires_successful_explicit_tool_evidence(self, record_success):
+        """失败调用或完全没有调用时，不能靠文字声明通过工具步骤验收。"""
+        auditor_wrongly_passes = json.dumps({
+            "passed": True,
+            "checked_constraints": [{
+                "constraint": "使用 read_file 读取 team-report.md",
+                "status": "pass",
+                "evidence": "Agent 声称已经读取",
+            }],
+            "issues": [],
+            "repair_instructions": "",
+        }, ensure_ascii=False)
+        worker, ws = _make_worker([auditor_wrongly_passes])
+        ws._files["team-report.md"] = "真实输入材料"
+        if record_success is not None:
+            worker._record_tool_execution(
+                "read_file",
+                {"path": "team-report.md"},
+                record_success,
+                "文件不存在",
+            )
+
+        audit = _run(worker._audit_delivery(
+            "请使用 read_file 读取 team-report.md，然后完成分析。"
+        ))
+
+        assert audit is not None
+        assert audit["passed"] is False
+        assert any("机器执行台账" in issue for issue in audit["issues"])
+
+    def test_delivery_auditor_receives_successful_tool_ledger(self):
+        """验收器能区分本轮调用、本轮写入和工作区既有文件。"""
+        auditor_passes = json.dumps({
+            "passed": True,
+            "checked_constraints": [{
+                "constraint": "读取输入并回读产出",
+                "status": "pass",
+                "evidence": "机器台账中三次调用均成功",
+            }],
+            "issues": [],
+            "repair_instructions": "",
+        }, ensure_ascii=False)
+        worker, ws = _make_worker([auditor_passes])
+        ws._files = {
+            "team-report.md": "真实输入材料",
+            "context-check.md": "核对结果",
+            "final-proposal.md": "上一轮既有文件",
+        }
+        worker._files_created.append("context-check.md")
+        worker._record_tool_execution(
+            "read_file", {"path": "team-report.md"}, True, "读取成功"
+        )
+        worker._record_tool_execution(
+            "write_file",
+            {"path": "context-check.md", "content": "核对结果"},
+            True,
+            "写入成功",
+        )
+        worker._record_tool_execution(
+            "read_file", {"path": "context-check.md"}, True, "回读成功"
+        )
+
+        audit = _run(worker._audit_delivery(
+            "请使用 read_file 读取 team-report.md；"
+            "然后使用 write_file 写入 context-check.md；"
+            "最后使用 read_file 回读 context-check.md。"
+        ))
+
+        assert audit is not None
+        assert audit["passed"] is True
+        prompt = worker._agent.autogen_agent.received_messages[0][0].content
+        assert "机器生成的本轮工具执行台账" in prompt
+        assert '"tool_name": "read_file"' in prompt
+        assert '"success": true' in prompt
+        assert '"content_chars": 4' in prompt
+        assert "context-check.md（4 bytes；本轮成功写入）" in prompt
+        assert "final-proposal.md（7 bytes；工作区既有（本轮未写入））" in prompt
+
+    def test_forbidden_tool_clause_is_not_misread_as_requirement(self):
+        """“不要读取某文件”不能被程序反向要求必须读取。"""
+        from engines.worker.delivery_validation import validate_tool_execution
+
+        issues = validate_tool_execution(
+            "不要使用 read_file 读取 final-proposal.md；"
+            "请使用 read_file 读取 team-report.md。",
+            [{
+                "tool_name": "read_file",
+                "arguments": {"path": "team-report.md"},
+                "success": True,
+            }],
+        )
+
+        assert issues == []
 
 
 class TestAgentWorkerFileLock:

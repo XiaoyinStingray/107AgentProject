@@ -15,6 +15,17 @@ Phase 23: 实现 build_decision_prompt() 等构建函数。
 from engines.worker.tools import build_tool_list_text, ToolSpec
 
 
+# Keep the example itself valid JSON. Models frequently copy examples verbatim,
+# so schema-like expressions such as `"a" | "b"` must not appear in it.
+DECISION_JSON_EXAMPLE = """{
+  "decision": "tool_call",
+  "tool_name": "list_files",
+  "tool_args": {"directory": ""},
+  "deliverable_summary": null,
+  "reason": "先查看工作区文件，再按任务要求继续执行"
+}"""
+
+
 # =============================================================================
 # 系统 Prompt
 # =============================================================================
@@ -61,17 +72,16 @@ DECISION_PROMPT_TEMPLATE = """你正在完成一项任务。当前是第 {step_i
 
 {tool_list}
 
-现在请决定下一步。你必须用以下 JSON 格式回复（**不要输出其他内容**，只输出 JSON）:
+现在请决定下一步。你必须只回复一个合法 JSON 对象，不要输出其他内容。
 
-{{
-  "decision": "tool_call" | "deliverable" | "done",
-  "tool_name": "web_search" | "run_python" | "write_file" | "read_file" | "list_files" | null,
-  "tool_args": {{...}} | null,
-  "deliverable_summary": "..." | null,
-  "reason": "为什么做这个决定（一句话）"
-}}
+合法示例：
+{decision_json_example}
 
 规则:
+- decision 只能是 "tool_call"、"deliverable" 或 "done"
+- tool_name 必须使用上方工具列表中的名称；不调用工具时填 null
+- tool_args 必须是 JSON 对象；不调用工具时填 null
+- deliverable_summary 和 reason 必须是字符串或 null
 - 如果是第 1 步，必须先制定计划（在 reason 中简述你的执行计划，然后选择 tool_call 开始第一步）
 - 如果上一步结果不符合预期，考虑调整后续步骤（在 reason 中说明调整方案）
 - 如果所有子任务完成且产出物已保存到文件中，选择 done
@@ -92,11 +102,16 @@ PLANNING_HINT = """这是第 1 步。请先在 reason 中列出一个简洁的�
 # =============================================================================
 
 RETRY_HINT = """
-⚠️ 你的上一条回复不是合法的 JSON。请确保：
+
+⚠️ 上一条回复未通过 JSON 解析。请根据原意纠正格式，并确保：
 1. 只输出 JSON 对象，不要有任何其他文字（包括解释、问候语、Markdown 标记）
 2. 所有字符串用双引号 ""
 3. 不要尾随逗号
-4. 确保花括号配对"""
+4. 确保花括号配对
+5. 不要输出 "a" | "b"、{...} 这类 schema 写法
+
+合法格式示例：
+""" + DECISION_JSON_EXAMPLE
 
 
 # =============================================================================
@@ -133,7 +148,8 @@ DELIVERY_AUDITOR_SYSTEM_PROMPT = """你是独立的交付验收员，不负责�
 2. 数量、总时长、日期、文件名、格式等可计算条件必须实际核算，不能凭感觉判断。
 3. 人名、地点、经历、来源等事实必须能从原任务或产出证据中找到依据；没有依据时标为 unverifiable。
 4. 不要因为文件成功生成就判定任务完成。
-5. 只输出合法 JSON，不要输出 Markdown 或额外说明。"""
+5. 只有机器生成的工具执行台账能证明本轮实际调用过工具；Agent 的文字声明和工作区既有文件都不能充当调用证据。
+6. 只输出合法 JSON，不要输出 Markdown 或额外说明。"""
 
 
 DELIVERY_AUDIT_PROMPT_TEMPLATE = """请验收下面这次 Agent 交付。
@@ -144,10 +160,15 @@ DELIVERY_AUDIT_PROMPT_TEMPLATE = """请验收下面这次 Agent 交付。
 ## 最终产出
 {deliverables}
 
+## 机器生成的本轮工具执行台账
+{tool_ledger}
+
 请先提取原任务中的明确要求和完成条件，然后逐条核验。特别注意：
 - 对时间、数量、比例等数字重新计算；标题或汇总中的重复数字不要重复计数。
 - 检查内容是否前后矛盾，是否遗漏“不允许/必须/不要”等限制。
 - 涉及现实事实但当前证据不足时，说明需要哪一种工具或来源核验。
+- 只有 success=true 的台账记录才算成功调用；失败记录不能证明任务步骤已经完成。
+- “工作区既有”文件只说明文件存在，不代表本轮读取、写入或参考过它。
 - 只有所有必要约束都通过时，passed 才能为 true。
 
 只用以下 JSON 格式回复：
@@ -197,6 +218,7 @@ def build_decision_prompt(
         last_action=last_action or "（无——这是第一步）",
         last_result=last_result or "（无）",
         tool_list=tool_list,
+        decision_json_example=DECISION_JSON_EXAMPLE,
     )
 
     # Step 100c: 注入分叉历史
@@ -220,13 +242,20 @@ def build_reflection_prompt(tool_name: str, result_summary: str) -> str:
     """构建 Agent 反思 prompt。"""
     return REFLECTION_PROMPT_TEMPLATE.format(
         tool_name=tool_name,
-        result_summary=result_summary[:1000],
+        # AgentWorker has already applied its tool-context size limit. Do not
+        # silently cut a successful read_file down to its opening paragraph.
+        result_summary=result_summary,
     )
 
 
-def build_delivery_audit_prompt(task: str, deliverables: str) -> str:
+def build_delivery_audit_prompt(
+    task: str,
+    deliverables: str,
+    tool_ledger: str = "（本轮没有工具调用）",
+) -> str:
     """构建最终交付验收 prompt。"""
     return DELIVERY_AUDIT_PROMPT_TEMPLATE.format(
         task=task[:8000],
         deliverables=deliverables[:24000],
+        tool_ledger=tool_ledger[:16000],
     )

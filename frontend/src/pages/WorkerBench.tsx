@@ -44,6 +44,22 @@ class ErrorCatcher extends React.Component<{children: React.ReactNode}, {err: st
   }
 }
 
+export function toWorkerAgentSelectionId(savedAgentId: string): string {
+  return savedAgentId === "worker-default" ? "__builtin__" : savedAgentId;
+}
+
+type RunningWorkerSummary = {
+  run_id: string;
+  task: string;
+  agent_id: string;
+  agent_name: string;
+  running: boolean;
+};
+
+export function onlyRunningWorkers(workers: RunningWorkerSummary[]): RunningWorkerSummary[] {
+  return workers.filter((worker) => worker.running === true);
+}
+
 export default function WorkerBench() {
   useFeatureAnchor();
   const { data: agents = [] } = useAgents();
@@ -133,9 +149,9 @@ export default function WorkerBench() {
   const [reconnectNotice, setReconnectNotice] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<Array<{
-    run_id: string; agent_name: string; task: string; running: boolean;
+    run_id: string; agent_id: string; agent_name: string; task: string; running: boolean;
     state: string; steps: number; files: Array<{path: string; size: number}>;
-    accepted: boolean; created_at: string;
+    outcome: string; accepted: boolean; created_at: string;
   }>>([]);
 
   // 追踪 runId——从 events 中保持最新值
@@ -157,9 +173,12 @@ export default function WorkerBench() {
     const checkRunning = async () => {
       try {
         const resp = await fetch("/api/workers/running/list", { signal: controller.signal });
-        const running: Array<{run_id: string; task: string; agent_name: string}> = await resp.json();
+        const running = onlyRunningWorkers(await resp.json() as RunningWorkerSummary[]);
         if (running.length > 0) {
           const latest = running[running.length - 1];
+          if (latest.agent_id) {
+            setAgentId(toWorkerAgentSelectionId(latest.agent_id));
+          }
           setCurrentRunId(latest.run_id);
           setWorkerRunning(true);
           // 加载历史事件并还原终端
@@ -168,6 +187,9 @@ export default function WorkerBench() {
             if (evResp.ok) {
               const evData = await evResp.json();
               if (evData.events?.length > 0) {
+                if (evData.agent_id) {
+                  setAgentId(toWorkerAgentSelectionId(evData.agent_id));
+                }
                 hydrate(evData.events);
                 if (evData.accepted) setAccepted(true);
                 setReconnectNotice(`已恢复: ${latest.task?.slice(0, 60)}…`);
@@ -201,6 +223,9 @@ export default function WorkerBench() {
         if (evResp.ok) {
           const evData = await evResp.json();
           if (evData.events?.length > 0) {
+            if (evData.agent_id) {
+              setAgentId(toWorkerAgentSelectionId(evData.agent_id));
+            }
             hydrate(evData.events);
             setCurrentRunId(rid);
             if (evData.accepted) setAccepted(true);
@@ -248,10 +273,16 @@ export default function WorkerBench() {
     const selectedHistory = history.find((item) => item.run_id === runId);
     setCurrentRunId(runId);
     setAccepted(selectedHistory?.accepted ?? false);
+    if (selectedHistory?.agent_id) {
+      setAgentId(toWorkerAgentSelectionId(selectedHistory.agent_id));
+    }
     try {
       const response = await fetch(`/api/workers/${runId}/events`);
       if (response.ok) {
         const payload = await response.json();
+        if (payload.agent_id) {
+          setAgentId(toWorkerAgentSelectionId(payload.agent_id));
+        }
         if (payload.events?.length > 0) {
           hydrate(payload.events);
           // 如果 Worker 仍在运行，重新订阅 SSE 事件流
@@ -741,7 +772,7 @@ export default function WorkerBench() {
                     onClick={() => { void handleSelectHistoryRun(h.run_id); loadHistory(); }}
                     className={`w-full text-left px-3 py-2 border-b border-border/30 hover:bg-bg-primary/50 transition-colors ${h.accepted ? "bg-emerald-500/5" : ""}`}>
                     <div className="flex items-center gap-1.5">
-                      <span className={`w-2 h-2 rounded-full shrink-0 ${h.running ? "bg-emerald-400 animate-pulse" : h.accepted ? "bg-emerald-400" : "bg-text-muted/60"}`} />
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${h.running ? "bg-emerald-400 animate-pulse" : h.outcome === "needs_attention" ? "bg-amber-400" : h.outcome === "failed" ? "bg-rose-400" : h.accepted ? "bg-emerald-400" : "bg-text-muted/60"}`} />
                       <span className="text-[10px] font-mono text-text-secondary truncate flex-1">{h.agent_name || "Agent"}</span>
                       {h.accepted && (
                         <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0">
@@ -751,6 +782,16 @@ export default function WorkerBench() {
                       {h.running && (
                         <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shrink-0 animate-pulse">
                           运行中
+                        </span>
+                      )}
+                      {!h.running && h.outcome === "needs_attention" && (
+                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 shrink-0">
+                          需处理
+                        </span>
+                      )}
+                      {!h.running && h.outcome === "failed" && (
+                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 shrink-0">
+                          失败
                         </span>
                       )}
                       <span className="text-[10px] font-mono text-text-muted/50">{h.created_at?.slice(5, 16)}</span>

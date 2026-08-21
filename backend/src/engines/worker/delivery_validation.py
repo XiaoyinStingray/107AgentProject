@@ -25,6 +25,14 @@ _ALLOCATION_LINE_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)、])\s+(.+)$")
 _MINUTES_RE = re.compile(r"(\d+(?:\.\d+)?)\s*分钟")
 _SUMMARY_WORDS = ("总时长", "总计", "合计", "共", "核对")
 
+_TOOL_NAMES = ("read_file", "write_file", "list_files")
+_TASK_CLAUSE_SPLIT_RE = re.compile(r"[\n。；;，,]+")
+_FILE_PATH_RE = re.compile(
+    r"(?<![\w./-])(?:[\w.-]+/)*[\w.-]+\.[A-Za-z0-9]{1,12}"
+)
+_TOOL_REQUIREMENT_MARKERS = ("必须", "请", "使用", "调用", "需要", "先", "再", "然后", "依次")
+_TOOL_NEGATION_RE = re.compile(r"(?:不要|不得|禁止|无需|不需要|不能|勿)[^，,；;。\n]{0,24}$")
+
 _BINARY_OPERATORS = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
@@ -91,6 +99,86 @@ def _extract_leaf_minute_allocations(deliverables: str) -> list[float]:
         values = [float(value) for value in _MINUTES_RE.findall(body)]
         allocations.extend(values)
     return allocations
+
+
+def _extract_required_tool_calls(task: str) -> list[tuple[str, str]]:
+    """Conservatively extract only explicit tool-call requirements."""
+    requirements: list[tuple[str, str]] = []
+    for clause in _TASK_CLAUSE_SPLIT_RE.split(task):
+        clause = clause.replace("`", "").strip()
+        if not clause:
+            continue
+        for tool_name in _TOOL_NAMES:
+            for match in re.finditer(rf"\b{re.escape(tool_name)}\b", clause, re.IGNORECASE):
+                prefix = clause[:match.start()]
+                local_prefix = prefix[-32:]
+                after = clause[match.end():]
+                if _TOOL_NEGATION_RE.search(local_prefix):
+                    continue
+
+                action_hint = after[:16]
+                is_explicit = (
+                    any(marker in local_prefix for marker in _TOOL_REQUIREMENT_MARKERS)
+                    or any(word in action_hint for word in ("读取", "回读", "写入", "创建", "列出", "查看"))
+                )
+                if not is_explicit:
+                    continue
+
+                target = ""
+                if tool_name != "list_files":
+                    path_match = _FILE_PATH_RE.search(after[:160])
+                    if path_match:
+                        target = path_match.group(0).replace("\\", "/")
+                requirements.append((tool_name.lower(), target))
+    return requirements
+
+
+def validate_tool_execution(
+    task: str,
+    records: list[dict],
+) -> list[dict[str, str]]:
+    """Verify explicit tool requirements against machine-recorded successes."""
+    issues: list[dict[str, str]] = []
+    required = _extract_required_tool_calls(task)
+    if not required:
+        return issues
+
+    required_counts: dict[tuple[str, str], int] = {}
+    for requirement in required:
+        required_counts[requirement] = required_counts.get(requirement, 0) + 1
+
+    successful_counts: dict[tuple[str, str], int] = {}
+    for record in records:
+        if record.get("success") is not True:
+            continue
+        tool_name = str(record.get("tool_name", "")).lower()
+        arguments = record.get("arguments") or {}
+        target = ""
+        if tool_name != "list_files":
+            target = str(arguments.get("path", "")).replace("\\", "/")
+        key = (tool_name, target)
+        successful_counts[key] = successful_counts.get(key, 0) + 1
+
+    for (tool_name, target), needed in required_counts.items():
+        if target:
+            actual = successful_counts.get((tool_name, target), 0)
+            target_text = f"（path={target}）"
+        else:
+            actual = sum(
+                count for (recorded_tool, _), count in successful_counts.items()
+                if recorded_tool == tool_name
+            )
+            target_text = ""
+        if actual >= needed:
+            continue
+        issues.append({
+            "constraint": f"任务明确要求成功调用 {tool_name}{target_text}",
+            "evidence": (
+                f"机器执行台账中只有 {actual} 次匹配的成功调用，任务要求至少 {needed} 次。"
+            ),
+            "repair": f"实际调用 {tool_name}{target_text} 并成功后，再声明任务完成。",
+        })
+    return issues
 
 
 def validate_delivery(task: str, deliverables: str) -> list[dict[str, str]]:

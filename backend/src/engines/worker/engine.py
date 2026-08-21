@@ -57,7 +57,7 @@ from engines.worker.prompts import (
     build_decision_prompt,
     build_reflection_prompt,
 )
-from engines.worker.delivery_validation import validate_delivery
+from engines.worker.delivery_validation import validate_delivery, validate_tool_execution
 from engines.worker.tools import make_worker_tools, ToolSpec
 from engines.worker.workspace import LocalWorkspace, WorkspaceProvider, safe_read
 from engines.worker.recipes import get_recipe, list_recipes as _list_recipes
@@ -153,6 +153,30 @@ def _safe_json_parse(text: str) -> dict | None:
     return None
 
 
+def _build_json_retry_prompt(prompt: str, invalid_response: str) -> str:
+    """Ask the model to repair its actual previous response, with bounded context."""
+    response_excerpt = invalid_response.strip()[:4000]
+    return (
+        f"{prompt}{RETRY_HINT}\n\n"
+        "以下是上一条未通过解析的回复，请只修正其 JSON 格式：\n"
+        f"<invalid_response>\n{response_excerpt}\n</invalid_response>"
+    )
+
+
+MAX_TOOL_RESULT_CONTEXT_CHARS = 24_000
+
+
+def _tool_result_context(result: str) -> str:
+    """Keep tool evidence for the Agent while bounding the model context."""
+    if len(result) <= MAX_TOOL_RESULT_CONTEXT_CHARS:
+        return result
+    omitted = len(result) - MAX_TOOL_RESULT_CONTEXT_CHARS
+    return (
+        result[:MAX_TOOL_RESULT_CONTEXT_CHARS]
+        + f"\n\n[工具结果过长，后续 {omitted} 字符未注入上下文；请分段读取原文件。]"
+    )
+
+
 def _is_user_deliverable_path(path: str) -> bool:
     """排除 Team 注入的上下文和上游参考文件，只保留本步骤产物。"""
     normalized = str(path).replace("\\", "/").lstrip("./")
@@ -161,6 +185,22 @@ def _is_user_deliverable_path(path: str) -> bool:
         or normalized.startswith("shared/")
         or normalized.startswith("upstream/")
     )
+
+
+def _tool_arguments_for_audit(tool_args: dict | None) -> dict:
+    """Keep useful call evidence without copying large content or secrets."""
+    evidence: dict = {}
+    for key, value in (tool_args or {}).items():
+        normalized_key = str(key).lower()
+        if normalized_key in {"content", "code"}:
+            evidence[f"{key}_chars"] = len(str(value))
+        elif any(secret in normalized_key for secret in ("password", "token", "secret", "key")):
+            evidence[key] = "<redacted>"
+        elif isinstance(value, (str, int, float, bool)) or value is None:
+            evidence[key] = str(value)[:500] if isinstance(value, str) else value
+        else:
+            evidence[key] = str(value)[:500]
+    return evidence
 
 
 # =============================================================================
@@ -226,6 +266,7 @@ class AgentWorker:
         self._plan_steps: list[dict] = []       # Agent 的计划
         self._completed_steps: list[dict] = []   # 已完成的步骤摘要
         self._files_created: list[str] = []       # 本运行中创建的文件
+        self._tool_execution_ledger: list[dict] = []  # 本轮真实工具调用证据
         self._start_time: float = 0
         self._execution_memory = None             # 任务执行前注入的 Memory 元数据
         self._task = ""
@@ -237,6 +278,7 @@ class AgentWorker:
         self._delivery_audit_summary = ""
         self._delivery_warning = ""
         self._delivery_constraints_checked = 0
+        self._outcome = "pending"
 
         # 终止信息单独保存，避免同一错误先报“可恢复”、随后又被通用
         # ERROR handler 覆盖成“致命且不可恢复”。
@@ -250,6 +292,7 @@ class AgentWorker:
         # 重试计数
         self._llm_errors = 0
         self._parse_errors = 0
+        self._last_decision_error_type = ""
 
         logger.info(f"AgentWorker created: agent={self._agent_name}, "
                     f"workspace={self._workspace.location_description}")
@@ -304,6 +347,7 @@ class AgentWorker:
         )
 
         self._start_time = time.monotonic()
+        self._outcome = "running"
         self._tools = make_worker_tools(self._workspace, extra_tools=extra_tools or [], enabled_tools=enabled_tools or [])
 
         # Step 103: 从用户参数读取 max_steps 和 timeout
@@ -439,7 +483,6 @@ class AgentWorker:
         发送决策 prompt（step_index=1），Agent 的回复中包含计划概述。
         提取 reason 字段作为计划描述。
         """
-        plan_text = f"任务：{task}"
         prompt = build_decision_prompt(
             step_index=1,
             task=task,
@@ -451,51 +494,29 @@ class AgentWorker:
             tools=self._tools,
         )
 
-        # 调用 LLM
-        response = await self._call_llm(WORKER_SYSTEM_PROMPT, prompt)
-        if response is None:
-            self._transition(WorkerState.ERROR)
-            yield _sse_event("worker.error", WorkerErrorData(
-                step_index=1,
-                error_type="llm_api_error",
-                message="LLM 调用失败，无法制定计划",
-                recoverable=False,
-            ).__dict__)
-            return
-
-        decision = _safe_json_parse(response)
+        decision = await self._get_decision(prompt)
         if decision is None:
-            # JSON 解析失败
-            self._parse_errors += 1
-            if self._parse_errors >= MAX_PARSE_RETRIES:
-                self._transition(WorkerState.ERROR)
-                yield _sse_event("worker.error", WorkerErrorData(
-                    step_index=1,
-                    error_type="json_parse_failure",
-                    message=f"Agent 输出无法解析为 JSON (已重试 {MAX_PARSE_RETRIES} 次)",
-                    recoverable=False,
-                ).__dict__)
-                return
-            # 重试
-            logger.warning("Agent planning JSON parse failed, retrying...")
-            retry_prompt = prompt + RETRY_HINT
-            response = await self._call_llm(WORKER_SYSTEM_PROMPT, retry_prompt)
-            if response is None:
+            if self._last_decision_error_type == "llm_api_error":
+                self._terminal_error_type = "llm_api_error"
+                self._terminal_error_message = (
+                    "模型服务暂时未响应，任务尚未执行；工作区已保留，可稍后继续。"
+                )
+                self._terminal_error_recoverable = True
                 self._transition(WorkerState.ERROR)
                 return
-            decision = _safe_json_parse(response)
-            if decision is None:
-                self._transition(WorkerState.ERROR)
-                yield _sse_event("worker.error", WorkerErrorData(
-                    step_index=1,
-                    error_type="json_parse_failure",
-                    message=f"Agent 输出无法解析为 JSON (已重试 {MAX_PARSE_RETRIES} 次)",
-                    recoverable=False,
-                ).__dict__)
-                return
+
+            # Planning only supplies a display summary; it must not become a
+            # single point of failure before any real tool call has happened.
+            reason = "计划：1.检查工作区材料 2.按任务要求生成产物 3.读取产物并复核"
+            logger.warning("Agent planning JSON remained invalid; using deterministic fallback plan")
+            yield _sse_event("worker.thought", WorkerThoughtData(
+                step_index=1,
+                thought="计划回复格式异常，系统已采用兜底计划继续执行。",
+            ).__dict__)
+        else:
+            reason = decision.get("reason") or "计划：检查材料、完成任务并复核交付物"
 
         # 提取计划（从 reason 字段）
-        reason = decision.get("reason", "（无计划）")
         self._plan_steps = [{"title": f"Step 1: {reason[:200]}"}]
 
         # 发射 plan 事件
@@ -545,7 +566,7 @@ class AgentWorker:
         # 上一步信息
         last = self._completed_steps[-1] if self._completed_steps else {}
         last_action = last.get("title", "")
-        last_result = last.get("result", "")
+        last_result = last.get("context", last.get("result", ""))
 
         # Step 100: 配方上下文
         recipe_context = ""
@@ -620,9 +641,13 @@ class AgentWorker:
                 )
                 self._terminal_error_recoverable = True
             else:
-                self._terminal_error_type = "json_parse_failure"
-                self._terminal_error_message = "Agent JSON 解析连续失败"
-                self._terminal_error_recoverable = False
+                self._terminal_error_type = self._last_decision_error_type or "json_parse_failure"
+                self._terminal_error_message = (
+                    "模型服务暂时未响应；当前工作区已保留，可稍后继续。"
+                    if self._terminal_error_type == "llm_api_error"
+                    else "Agent 连续两次返回无法解析的决策格式；当前工作区已保留，可继续重试。"
+                )
+                self._terminal_error_recoverable = True
             self._transition(WorkerState.ERROR)
             return
 
@@ -724,6 +749,9 @@ class AgentWorker:
             target_path = tool_args.get("path", "")
             if target_path and self.is_file_locked(target_path):
                 duration_ms = 0
+                self._record_tool_execution(
+                    tool_name, tool_args, False, "文件正在被用户编辑，暂时锁定"
+                )
                 yield _sse_event("worker.tool_result", WorkerToolResultData(
                     step_index=self._step_index,
                     tool_name=tool_name,
@@ -743,8 +771,9 @@ class AgentWorker:
         start_time = time.monotonic()
         try:
             if tool_spec and tool_spec.handler:
-                result_str = str(await tool_spec.handler(**tool_args))
-                success = True
+                raw_result = await tool_spec.handler(**tool_args)
+                result_str = str(raw_result)
+                success = bool(getattr(raw_result, "success", True))
             else:
                 result_str = f"工具 '{tool_name}' 未实现（handler 未注册）"
                 success = False
@@ -754,6 +783,10 @@ class AgentWorker:
             logger.error(f"AgentWorker tool error: {tool_name} — {e}")
 
         duration_ms = int((time.monotonic() - start_time) * 1000)
+
+        self._record_tool_execution(
+            tool_name, tool_args, success, result_str[:500], duration_ms
+        )
 
         # 发射 tool_result 事件
         result_summary = result_str[:200]
@@ -845,6 +878,9 @@ class AgentWorker:
         self._completed_steps.append({
             "title": f"Step {self._step_index}: {tool_name}",
             "result": result_summary,
+            # UI/history keep the compact summary; the Agent receives the
+            # actual evidence so a successful read_file is useful downstream.
+            "context": _tool_result_context(result_str),
         })
 
         # 检查错误级别
@@ -874,7 +910,7 @@ class AgentWorker:
         last = self._completed_steps[-1]
         prompt = build_reflection_prompt(
             tool_name=last.get("title", "未知"),
-            result_summary=last.get("result", ""),
+            result_summary=last.get("context", last.get("result", "")),
         )
 
         response = await self._call_llm(WORKER_SYSTEM_PROMPT, prompt)
@@ -918,6 +954,30 @@ class AgentWorker:
         else:  # "continue"
             self._transition(WorkerState.DECIDING)
 
+    def _record_tool_execution(
+        self,
+        tool_name: str,
+        tool_args: dict | None,
+        success: bool,
+        result_summary: str,
+        duration_ms: int = 0,
+    ) -> None:
+        """Record trusted evidence for final delivery auditing."""
+        self._tool_execution_ledger.append({
+            "sequence": len(self._tool_execution_ledger) + 1,
+            "step_index": self._step_index,
+            "tool_name": tool_name,
+            "arguments": _tool_arguments_for_audit(tool_args),
+            "success": bool(success),
+            "result_summary": str(result_summary)[:500],
+            "duration_ms": duration_ms,
+        })
+
+    def _collect_tool_execution_ledger(self) -> str:
+        if not self._tool_execution_ledger:
+            return "（本轮没有工具调用）"
+        return json.dumps(self._tool_execution_ledger, ensure_ascii=False, indent=2)
+
     async def _collect_delivery_snapshot(self) -> str:
         """读取最终工作区，给验收员提供真实交付内容而不是工具摘要。"""
         try:
@@ -938,7 +998,8 @@ class AgentWorker:
 
         for file_info in files[:20]:
             path = file_info.path
-            header = f"\n### 文件：{path}（{file_info.size} bytes）\n"
+            origin = "本轮成功写入" if path in self._files_created else "工作区既有（本轮未写入）"
+            header = f"\n### 文件：{path}（{file_info.size} bytes；{origin}）\n"
             if remaining <= len(header):
                 break
             chunks.append(header)
@@ -968,8 +1029,16 @@ class AgentWorker:
     async def _audit_delivery(self, task: str) -> dict | None:
         """让独立验收 prompt 对原任务与真实产出逐条核验。"""
         snapshot = await self._collect_delivery_snapshot()
-        deterministic_issues = validate_delivery(task, snapshot)
-        prompt = build_delivery_audit_prompt(task=task, deliverables=snapshot)
+        tool_ledger = self._collect_tool_execution_ledger()
+        deterministic_issues = (
+            validate_delivery(task, snapshot)
+            + validate_tool_execution(task, self._tool_execution_ledger)
+        )
+        prompt = build_delivery_audit_prompt(
+            task=task,
+            deliverables=snapshot,
+            tool_ledger=tool_ledger,
+        )
 
         # JSON 格式错误时只补一次格式重试；网络重试由 _call_llm 负责。
         for parse_attempt in range(2):
@@ -1124,7 +1193,12 @@ class AgentWorker:
                 f"{self._delivery_audit_summary}，已达到两轮自动修订上限"
             )
             thought = self._delivery_warning
-            self._transition(WorkerState.DONE)
+            self._terminal_error_type = "delivery_validation_failed"
+            self._terminal_error_message = (
+                f"{self._delivery_warning}。当前工作区会保留，可补充材料或继续修改后重新验收。"
+            )
+            self._terminal_error_recoverable = True
+            self._transition(WorkerState.ERROR)
 
         yield _sse_event("worker.thought", WorkerThoughtData(
             step_index=self._step_index,
@@ -1141,6 +1215,7 @@ class AgentWorker:
     async def _handle_done(self) -> list[str]:
         """DONE 状态：返回完成事件列表。"""
         events = []
+        self._outcome = "completed"
         total_duration_ms = int((time.monotonic() - self._start_time) * 1000)
 
         try:
@@ -1191,6 +1266,9 @@ class AgentWorker:
 
     async def _handle_error(self) -> list[str]:
         """ERROR 状态：返回错误事件列表。"""
+        self._outcome = (
+            "needs_attention" if self._terminal_error_recoverable else "failed"
+        )
         events = [_sse_event("worker.error", WorkerErrorData(
             step_index=self._step_index,
             error_type=self._terminal_error_type,
@@ -1202,6 +1280,7 @@ class AgentWorker:
 
     async def _handle_cancel(self) -> list[str]:
         """处理取消请求——返回取消事件列表。"""
+        self._outcome = "cancelled"
         logger.info(f"AgentWorker cancelled: run_id={self._run_id}")
         return [_sse_event("worker.done", WorkerDoneData(
             reason="用户取消",
@@ -1290,32 +1369,32 @@ class AgentWorker:
         Returns:
             解析后的决策 dict，失败返回 None
         """
-        response = await self._call_llm(WORKER_SYSTEM_PROMPT, prompt)
-        if response is None:
-            return None
+        self._parse_errors = 0
+        self._last_decision_error_type = ""
+        invalid_response = ""
 
-        decision = _safe_json_parse(response)
-        if decision is not None:
-            self._parse_errors = 0  # reset on success
-            return decision
+        for attempt in range(MAX_PARSE_RETRIES):
+            request_prompt = (
+                prompt
+                if attempt == 0
+                else _build_json_retry_prompt(prompt, invalid_response)
+            )
+            response = await self._call_llm(WORKER_SYSTEM_PROMPT, request_prompt)
+            if response is None:
+                self._last_decision_error_type = "llm_api_error"
+                return None
 
-        # JSON 解析失败 → 重试
-        self._parse_errors += 1
-        logger.warning(f"AgentWorker JSON parse failed (attempt {self._parse_errors}/{MAX_PARSE_RETRIES})")
+            decision = _safe_json_parse(response)
+            if decision is not None:
+                self._parse_errors = 0
+                return decision
 
-        if self._parse_errors >= MAX_PARSE_RETRIES:
-            return None
+            invalid_response = response
+            self._parse_errors += 1
+            logger.warning(
+                f"AgentWorker JSON parse failed (attempt {self._parse_errors}/{MAX_PARSE_RETRIES}, "
+                f"response_chars={len(response)})"
+            )
 
-        # 重试——追加格式要求
-        retry_prompt = prompt + RETRY_HINT
-        response = await self._call_llm(WORKER_SYSTEM_PROMPT, retry_prompt)
-        if response is None:
-            return None
-
-        decision = _safe_json_parse(response)
-        if decision is not None:
-            self._parse_errors = 0
-            return decision
-
-        self._parse_errors += 1
+        self._last_decision_error_type = "json_parse_failure"
         return None
