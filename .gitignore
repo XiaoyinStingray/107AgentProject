@@ -81,3 +81,6 @@ test_output/
 
 # ===== Local planning (not for commit) =====
 docs/agent-improvement-plan.md
+
+# ===== LaTeX documents (not for commit) =====
+latex-docs/
