@@ -7,7 +7,7 @@ DuelEngine — Step 100b: 双 Worker 并行 + 实时评分 + SSE 合并流。
 评分维度（实时）:
   - 搜索质量: +5 每次成功搜索, +10 被后续引用, -5 无效重复
   - 步骤效率: 初始50, +3 实质产出, -2 连续空想
-  - 自检质量: +10 发现并修正错误, +5 标注局限
+  - 自检质量: +10 发现并修正错误 / 反思不满意, +5 标注局限 / 调整计划 / 反思含自检关键词
 """
 
 import asyncio
@@ -65,6 +65,29 @@ class DuelScorer:
                 self.self_check += 10
                 self.consecutive_think = 0
             elif any(kw in reason for kw in ["局限", "不足", "待完善", "进一步"]):
+                self.self_check += 5
+                self.consecutive_think = 0
+
+        elif etype == "worker.reflection":
+            # 反思事件是自检的核心信号源
+            satisfied = data.get("satisfied", True)
+            plan_changed = data.get("plan_changed", False)
+            thought = data.get("thought", "")
+
+            if satisfied is False:
+                # Agent 对上一步结果不满意——发现问题的核心信号
+                self.self_check += 10
+                self.consecutive_think = 0
+            elif plan_changed is True:
+                # Agent 主动调整后续计划——适应性自检
+                self.self_check += 5
+                self.consecutive_think = 0
+            elif any(kw in thought for kw in [
+                "修正", "改正", "错误", "不对", "矛盾", "不足",
+                "局限", "待完善", "进一步", "调整", "重新", "改进",
+                "问题", "缺陷", "遗漏", "补充",
+            ]):
+                # 反思内容包含自检关键词
                 self.self_check += 5
                 self.consecutive_think = 0
 

@@ -110,7 +110,6 @@
 		\item \textbf{程序直接验证交付}：每一步是否真正执行由程序检查，不依赖 LLM 判断，最多 2 轮自动修订
 		\item \textbf{用信息论量化行为}：统计 Agent 的工具使用习惯，计算行为一致性分数，配合逐维度诊断证据链，评测结果完全可解释
 		\item \textbf{20+ 页面}： Agent 行为全链路实时可视化
-		\item \textbf{工程级质量保障}：\textbf{1782 个自动化测试用例} + \textbf{145 个 Bug 修复} + \textbf{0 TypeScript 错误} + \textbf{100\% 人工验收通过率}
 	\end{itemize}
 	}}
 	\vspace{0.5em}
@@ -253,135 +252,79 @@ Life Lab 构建了一个基于 \textbf{FastAPI + AutoGen + React + Phaser} 的 A
 \textbf{成果}：不同 Agent 的行为模式可以在\textbf{同一尺度}上比较，评测结果完全\textbf{可解释}，可以看到"为什么这个维度得了这个分"的完整证据链。
 
 %% ============================================================
-\section{测试验收与质量保障}
+\section{平台运行评测数据}
 %% ============================================================
 
-为确保系统稳定性与功能完整性，平台经历了严格的自动化测试与人工验收流程。以下汇总 M1--M12 十二大模块的测试数据。
+平台在实际运行中积累了完整的评测数据，所有数据存储于 SQLite 数据库，以下数据均从数据库中直接提取。
 
-\subsection{全模块测试统计}
+\subsection{评测数据总览}
 
 \begin{table}[H]
 	\centering
-	\small
-	\begin{tabular}{clrrrl}
+	\begin{tabular}{lc}
 		\toprule
-		\textbf{模块} & \textbf{名称} & \textbf{后端用例} & \textbf{前端用例} & \textbf{Bug 数} & \textbf{状态} \\
+		\textbf{数据类型} & \textbf{记录数} \\
 		\midrule
-		M1 & Agent 铸造厂 & 85 & 5 & 9 & ✅ \\
-		M2 & 单人剧场 & 153 & 22 & 2 & ✅ \\
-		M3 & 群体沙盒 & 74 & 7 & 17 & ✅ \\
-		M4 & Agent 竞技场 & 49 & 12 & 8 & ✅ \\
-		M5 & 叙事工厂 & 10 & 13 & 5 & ✅ \\
-		M6 & 观察者控制台 & 56 & 9 & 4 & ✅ \\
-		M7 & 导演干预台 & 14 & 37 & 21 & ✅ \\
-		M8 & Agent 档案馆 & 24 & 37 & 10 & ✅ \\
-		M9 & Agent Team & 104 & --- & 35+2改进 & ✅ \\
-		M10 & LLM Bench & 92 & 25 & 17 & ✅ \\
-		M11 & 游戏化场景 & 37 & 107 & 10 & ✅ \\
-		M12 & Worker 工作台 & 359 & 451 & 7 & ✅ \\
-		\midrule
-		\textbf{合计} & & \textbf{1057} & \textbf{725} & \textbf{145+2改进} & \textbf{✅ 12/12} \\
+		Bench 完整评测运行 & 4 次（全部完成，27/27 任务） \\
+		Bench 子结果 & 94 条 \\
+		Arena 竞技对抗 & 1 场（6 人大乱斗） \\
+		Team 团队协作 & 5 个团队，14 个计划 \\
+		Agent 实例 & 25 个 \\
+		World 世界实例 & 48 个 \\
+		Simulation 模拟运行 & 47 次 \\
 		\bottomrule
 	\end{tabular}
 \end{table}
 
-\textbf{关键指标}：
-\begin{itemize}
-	\item 总测试用例数：\textbf{1782}（后端 1057 + 前端 725）
-	\item 总 Bug 修复数：\textbf{145}（含 2 项体验改进）
-	\item TypeScript 编译错误：\textbf{0}（全量通过）
-	\item Vite 生产构建成功率：\textbf{100\%}
-	\item 人工验收通过率：\textbf{100\%}（所有模块均通过逐项手测）
-\end{itemize}
+4 次 Bench 评测均使用 deepseek-v4-flash 模型，采用标准评测套件（3 Agent $\times$ 3 场景 $\times$ 3 重复 = 27 条评测记录/次）。
 
-\subsection{核心模块深度测试案例}
-
-\subsubsection{M9 Agent Team —— 协作链路验证}
-
-\textbf{测试覆盖}：104 个后端测试 + 16 项人工验收
-
-\textbf{重点验证}：
-\begin{itemize}
-	\item 任务分解：LLM 分解失败时自动降级为规则分配
-	\item 执行幂等性：重复执行不会创建多个 PlanRow
-	\item 文件下载：从报告正文正则提取内容实现本地下载（避免后端路径不匹配）
-	\item SSE 状态同步：Badge 优先使用 SSE 状态而非数据库状态
-	\item 角色演化：\texttt{\_evolved\_roles} 优先级高于初始 \texttt{role\_map}
-\end{itemize}
-
-\textbf{典型 Bug}：BUG-M9-031（后端文件路径持续不匹配）→ 改为前端本地提取策略，彻底解决跨平台路径问题。
-
-\subsubsection{M10 LLM Bench —— 评测准确性验证}
-
-\textbf{测试覆盖}：92 个后端测试 + 25 个前端测试 + 17 项人工验收
-
-\textbf{重点验证}：
-\begin{itemize}
-	\item 六维评分计算：人格一致性、决策质量、交互深度、鲁棒性、创造力、适应性
-	\item 鲁棒性变异系数：$cv = \sigma/\mu$，$R = \max(0, 100 - cv \times 100)$
-	\item 自定义 Agent 字段缺失兜底：使用 \texttt{.get()} 提供默认值（mbti→INTJ, big\_five→均衡值）
-	\item 趋势图 Y 轴固定刻度：改为固定 MAX\_SCORE = 100，避免动态缩放导致视觉误导
-	\item 劣化检测：最近 3 次 vs 之前 3 次，综合分变化 >5 分判定
-\end{itemize}
-
-\textbf{典型 Bug}：BUG-M10-010（自定义 Agent 评测零分根因）→ \texttt{calculate\_metrics} 必须用安全变量而非直接字典访问。
-
-\subsubsection{M11 游戏化场景 —— 实时交互验证}
-
-\textbf{测试覆盖}：37 个后端测试 + 107 个前端测试 + 11 项人工验收
-
-\textbf{重点验证}：
-\begin{itemize}
-	\item DSML 标签清洗：\texttt{\_clean\_dsml()} 正则过滤 LLM 输出中的格式标签
-	\item 对话选项动态生成：每轮 Agent 回应后自动调用 LLM 刷新选项（传入 history 上下文）
-	\item Emoji 投掷机制：区分正负 emoji，仅负面（😡/💣/👻）触发友尽冷却
-	\item 涂鸦识别容错：放宽 6 项阈值（MIN\_POINTS 10→5, LINE\_MAX\_DEVIATION 15→25 等）
-	\item 气泡显示时长：动态计算 \texttt{max(3500, 1800 + 字数×60)} ms
-\end{itemize}
-
-\textbf{典型 Bug}：BUG-M11-008（LLM 对话选项生成不生效）→ AutoGen 不支持 \texttt{temperature/max\_tokens} 参数且需用 \texttt{UserMessage} 对象。
-
-\subsubsection{M12 Worker 工作台 —— 工程复杂度巅峰}
-
-\textbf{测试覆盖}：359 个后端测试 + 451 个前端测试 + 10 项人工验收
-
-\textbf{重点验证}：
-\begin{itemize}
-	\item 状态机完整性：6 个正常状态 + 3 级错误处理策略
-	\item 管道编排：DAG 拓扑排序 + FLOW/LOOP/BRANCH 三种边类型
-	\item 交付硬校验：算式 AST 求值 + 工具台账核验（程序直接验证，不依赖 LLM）
-	\item web\_search 断路器：连续 3 次失败后断路 5 分钟，并行 fallback 缩短超时至 15+5s
-	\item SSE 断线重连：新增 \texttt{/events/stream} 端点 + \texttt{resubscribe()} 方法
-\end{itemize}
-
-\textbf{典型 Bug}：BUG-M12-007（切换页面后执行中任务卡住）→ 组件卸载丢失 SSE 连接，返回后只 hydrate 历史事件但未重连 → 新增流式端点 + 自动恢复机制。
-
-\subsection{质量保障体系}
+\subsection{六维雷达评测结果}
 
 \begin{table}[H]
 	\centering
 	\small
-	\begin{tabular}{lp{8cm}}
+	\begin{tabular}{lccccc}
 		\toprule
-		\textbf{维度} & \textbf{保障措施} \\
+		\textbf{维度} & \textbf{运行 1} & \textbf{运行 2} & \textbf{运行 3} & \textbf{运行 4} & \textbf{平均} \\
 		\midrule
-		代码质量 & Python 类型注解全覆盖 + TypeScript 严格模式 + ESLint/Prettier \\
-		测试覆盖率 & 单元测试（引擎层）+ 集成测试（API 层）+ E2E 测试（全链路） \\
-		静态分析 & tsc --noEmit（0 errors）+ Vite 生产构建（100\% 成功） \\
-		Bug 管理 & 三级分类（P0/P1/P2）+ 根因分析 + 回归验证 \\
-		人工验收 & 逐项功能手测 + 用户体验评估 + 边界条件探索 \\
-		性能监控 & SSE 毫秒级推送 + LLM 调用超时控制 + 并发锁竞争处理 \\
+		人格一致性 & 32.6 & 31.2 & 35.1 & 32.6 & 32.9 \\
+		决策质量 & 32.8 & 33.8 & 37.4 & 35.6 & 34.9 \\
+		交互深度 & 32.6 & 34.3 & 35.7 & 33.7 & 34.1 \\
+		鲁棒性 & 92.6 & 92.4 & 92.0 & 94.1 & 92.8 \\
+		创造力 & 57.8 & 57.2 & 54.1 & 57.4 & 56.6 \\
+		适应性 & 89.3 & 87.0 & 86.6 & 92.3 & 88.8 \\
 		\bottomrule
 	\end{tabular}
 \end{table}
 
-\textbf{核心洞察}：
-\begin{enumerate}
-	\item \textbf{测试驱动开发}：每个模块在 READ 阶段先确认功能基线，再逐项验证，发现 Bug 后立即修复并回归
-	\item \textbf{双路径互保}：关键词匹配（1ms）保证实时性，LLM 深度评估（数秒）保证准确性，程序级校验（确定性）防止 LLM 幻觉
-	\item \textbf{用户体验优先}：Bug 修复不仅关注功能正确性，更重视用户感知（如按钮文字歧义、窗口大小、提示消失时间等）
-	\item \textbf{工程成熟度}：1782 个测试用例 + 145 个 Bug 修复 + 0 TypeScript 错误，证明系统已达到生产级质量标准
-\end{enumerate}
+鲁棒性使用变异系数计算：$cv = \sigma/\mu$，$R = \max(0, 100 - cv \times 100)$。
+
+\subsection{分 Agent 与分场景聚合}
+
+\begin{table}[H]
+	\centering
+	\small
+	\begin{tabular}{llcccccc}
+		\toprule
+		\textbf{Agent} & \textbf{场景} & \textbf{人格} & \textbf{决策} & \textbf{交互} & \textbf{鲁棒} & \textbf{创造} & \textbf{适应} \\
+		\midrule
+		学霸小明 & 期末周 & 45.8 & 30.0 & 28.4 & 80.0 & 66.0 & 91.7 \\
+		学霸小明 & 新生报到 & 33.1 & 30.0 & 26.8 & 80.0 & 58.8 & 97.7 \\
+		社交小红 & 毕业选择 & 38.2 & 33.1 & 30.2 & 80.0 & 57.5 & 81.1 \\
+		领导者小刚 & 毕业选择 & 30.0 & 55.0 & 66.4 & 80.0 & 49.3 & 100.0 \\
+		领导者小刚 & 新生报到 & 30.0 & 33.6 & 40.1 & 80.0 & 53.1 & 78.4 \\
+		\bottomrule
+	\end{tabular}
+\end{table}
+
+\subsection{评测结果分析}
+
+\begin{itemize}
+	\item \textbf{鲁棒性最强}（平均 92.8 分）：模型在跨场景、跨重复运行中表现高度稳定。
+	\item \textbf{人格一致性最弱}（平均 32.9 分）：Agent 行为未能严格遵循 MBTI 设定，是后续优化的核心方向。
+	\item \textbf{人格与场景耦合}：学霸小明在期末周人格一致性最高（45.8），领导者小刚在毕业选择场景交互深度最高（66.4）。
+	\item \textbf{适应性波动显著}（78.4--97.7）：不同人格对环境变化的响应模式存在显著差异。
+\end{itemize}
 
 %% ============================================================
 \section{技术架构}
@@ -473,7 +416,7 @@ Life Lab 提供了一个直观的、可视化的 AI 人格实验环境：用户�
 
 七个阶段、12 个模块的持续迭代，Life Lab 构建了三项其他框架不具备的能力：人格直接决定行为、程序直接验证交付、基于信息论和统计学的量化。这三项能力使 Life Lab 从"有趣的 Agent 玩具"跃升为"可量化、可编排、可涌现的 Agent 社会实验平台"。
 
-更重要的是，\textbf{1782 个自动化测试用例} + \textbf{145 个 Bug 修复} + \textbf{0 TypeScript 错误} + \textbf{100\% 人工验收通过率}，证明系统已从"实验原型"跃升为"生产级平台"。这不是一个仅能演示的玩具，而是一个研究者可以真正用来探索 AI 社会性行为的工具。
+更重要的是，平台在实际运行中积累了 \textbf{94 条评测子结果}，鲁棒性维度平均得分 \textbf{92.8 分}（跨场景高度稳定），为模型行为分析提供了可量化的实验基础。这不是一个仅能演示的玩具，而是一个研究者可以真正用来探索 AI 社会性行为的工具。
 
 Life Lab 不只是一个竞赛作品，它是一个研究者和学生可以真正用来探索 AI 社会性行为的工具。人格可以被铸造，行为可以被观测，涌现可以被量化，协作可以被信赖。这是 Life Lab 与其他 Agent 项目最本质的区别。
 

@@ -14,7 +14,7 @@ interface DuelEvent {
   side: "a" | "b";
   worker_event?: {
     type: string;
-    data: { tool_name?: string; reason?: string; result_summary?: string; thought?: string; step_index?: number };
+    data: Record<string, any>;
   };
   scores?: Record<string, number>;
 }
@@ -68,24 +68,37 @@ export default function DuelArena() {
         body: JSON.stringify({ agent_a_id: agentAId, agent_b_id: agentBId, task }),
         signal: controller.signal,
       });
-
+    
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        let msg = `请求失败 (${res.status})`;
+        try { msg = JSON.parse(errText).detail || msg; } catch { /* */ }
+        setLogsA((p) => [...p, `❌ ${msg}`]);
+        setRunning(false);
+        return;
+      }
+    
       const reader = res.body?.getReader();
-      if (!reader) return;
+      if (!reader) {
+        setLogsA((p) => [...p, "❌ 无法读取响应流"]);
+        setRunning(false);
+        return;
+      }
       const decoder = new TextDecoder();
       let buffer = "";
-
+    
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
-
+    
         for (const line of lines) {
           if (line.startsWith("data: ")) {
             try {
               const evt: DuelEvent = JSON.parse(line.slice(6));
-
+    
               if (evt.type === "duel.event" && evt.worker_event) {
                 const we = evt.worker_event;
                 const data = we.data || {};
@@ -100,6 +113,12 @@ export default function DuelArena() {
                   logLine = `💭 ${data.thought?.slice(0, 80) || ""}`;
                 } else if (we.type === "worker.done") {
                   logLine = "✅ 完成";
+                } else if (we.type === "worker.error") {
+                  logLine = `❌ 错误: ${data.message || "未知错误"}`;
+                } else if (we.type === "worker.started") {
+                  logLine = ` 开始执行...`;
+                } else if (we.type === "worker.plan") {
+                  logLine = `📋 ${data.strategy?.slice(0, 80) || "制定计划..."}`;
                 }
                 if (logLine) {
                   if (evt.side === "a") setLogsA((p) => [...p, logLine]);
@@ -110,7 +129,9 @@ export default function DuelArena() {
               } else if (evt.type === "duel.done") {
                 setResult(evt as unknown as DuelResult);
               }
-            } catch { /* */ }
+            } catch (e) {
+              console.warn("SSE parse error:", e, "line:", line.slice(0, 120));
+            }
           }
         }
       }
