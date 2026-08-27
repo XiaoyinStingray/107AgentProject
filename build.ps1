@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # Life Lab — 一键打包为 Windows exe
 # 用法: .\build.ps1
 # 前提: 已安装 Python 依赖 (pip install -r requirements.txt)
@@ -67,7 +67,8 @@ if (Test-Path $seedDb) {
 } else {
     # 创建空数据库（应用启动时会初始化表结构）
     Write-Host "  数据库文件不存在，将创建空数据库" -ForegroundColor DarkGray
-    python -c "import sqlite3; conn = sqlite3.connect('$seedDb'); conn.close()"
+    [byte[]]$sqliteHeader = @(0x53,0x51,0x4C,0x69,0x74,0x65,0x20,0x66,0x6F,0x72,0x6D,0x61,0x74,0x20,0x33,0x00)
+    [System.IO.File]::WriteAllBytes($seedDb, $sqliteHeader)
     Write-Host "  已创建空 seed.db" -ForegroundColor Green
 }
 
