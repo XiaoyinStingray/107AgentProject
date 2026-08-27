@@ -169,6 +169,16 @@ async def init_db():
     logger.info("Database tables ensured (SQLite)")
 
 
+async def dispose_engine():
+    """关闭当前引擎的所有连接并销毁引擎。用于 reset-db / seed 前释放文件锁。"""
+    global _engine, _async_session_factory
+    if _engine is not None:
+        await _engine.dispose()
+        logger.info("SQLAlchemy engine disposed")
+    _engine = None
+    _async_session_factory = None
+
+
 def reset_db_state():
     """重置引擎和会话工厂（测试用）。"""
     global _engine, _async_session_factory

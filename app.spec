@@ -20,10 +20,13 @@ for f in engines_root.rglob('*'):
         arcname = str(f.relative_to(Path('backend/src')))
         engines_data.append((str(f), str(Path(arcname).parent)))
 
-# ── 数据文件 ─────────────────────────────────────────────────────────────────
+# ── 前端构建产物路径 ──────────────────────────────────────────────────────
+FRONTEND_DIST = 'frontend/dist'
+
+# ── 数据文件（统一定义，Analysis 直接引用） ────────────────────────────────
 datas = [
     # 前端构建产物
-    ('frontend/dist', 'frontend/dist'),
+    (FRONTEND_DIST, 'frontend/dist'),
     # 种子数据库
     ('backend/data/seed.db', 'backend/data'),
     # engines 数据文件
@@ -42,12 +45,12 @@ hiddenimports = [
     'models.simulation', 'models.narrative', 'models.achievement',
     'models.team', 'models.market', 'models.bench', 'models.scene',
     'models.worker', 'models.pipeline', 'models.fingerprint',
-    # 引擎
+    # 引擎（仅列出 PyInstaller 静态分析可能遗漏的）
     'engines.persona.builder', 'engines.persona.remixer',
     'engines.world.engine', 'engines.narrative.engine',
-    'engines.arena.engine', 'engines.arena.modes',
+    'engines.arena.engine', 'engines.arena.battle_royale',
     'engines.arena.scoring', 'engines.team.engine',
-    'engines.scene.engine', 'engines.bench.engine',
+    'engines.scene.engine',
     'engines.bench.recovery', 'engines.bench.metrics',
     'engines.bench.fingerprint', 'engines.worker.scheduler',
     # 第三方
@@ -66,13 +69,7 @@ a = Analysis(
     ['run.py'],
     pathex=['backend/src'],
     binaries=[],
-    datas=[
-        # 前端构建产物
-        (FRONTEND_DIST, 'frontend/dist'),
-        # 种子数据库
-        ('backend/data/seed.db', 'backend/data'),
-        # engines 数据文件
-    ] + datas + engines_data,
+    datas=datas,
     hiddenimports=hiddenimports + [
         # ── 后端模块（PyInstaller 静态分析可能遗漏） ──
         # API 路由
@@ -87,10 +84,39 @@ a = Analysis(
         'models.simulation_orm', 'models.intervention_orm',
         'models.team_orm', 'models.plan_orm', 'models.market_orm',
         'models.bench_orm', 'models.checkpoint_orm',
-        # 引擎模块
-        'engines.agent_factory', 'engines.arena', 'engines.bench',
-        'engines.narrative', 'engines.persona', 'engines.scene',
-        'engines.team', 'engines.world', 'engines.worker',
+        # 引擎模块（全量子模块，防止动态加载遗漏）
+        'engines.agent_factory', 'engines.agent_factory.factory',
+        'engines.agent_factory.loader', 'engines.agent_factory.fingerprint',
+        'engines.agent_factory.execution_memory', 'engines.agent_factory.memory',
+        'engines.agent_factory.tools',
+        'engines.arena', 'engines.arena.engine', 'engines.arena.battle_royale',
+        'engines.arena.prompts', 'engines.arena.report', 'engines.arena.scoring',
+        'engines.arena.utils',
+        'engines.bench', 'engines.bench.fingerprint', 'engines.bench.metrics',
+        'engines.bench.recovery', 'engines.bench.reporter', 'engines.bench.scheduler',
+        'engines.narrative', 'engines.narrative.engine', 'engines.narrative.templates',
+        'engines.persona', 'engines.persona.builder', 'engines.persona.remixer',
+        'engines.persona.prompt_templates', 'engines.persona.template_library',
+        'engines.scene', 'engines.scene.engine',
+        'engines.team', 'engines.team.engine', 'engines.team.coordinator',
+        'engines.team.decomposer', 'engines.team.diagnostics',
+        'engines.team.learning_curve', 'engines.team.recovery',
+        'engines.team.report', 'engines.team.role_evolution',
+        'engines.team.versus', 'engines.team.workspace',
+        'engines.worker', 'engines.worker.engine', 'engines.worker.coordinator',
+        'engines.worker.delivery_validation', 'engines.worker.duel',
+        'engines.worker.events', 'engines.worker.fork',
+        'engines.worker.pipeline', 'engines.worker.pipeline_engine',
+        'engines.worker.prompts', 'engines.worker.recipes',
+        'engines.worker.sandbox', 'engines.worker.scheduler',
+        'engines.worker.state_machine', 'engines.worker.tools',
+        'engines.worker.workspace',
+        'engines.world', 'engines.world.engine', 'engines.world.conflict',
+        'engines.world.dialogue_guard', 'engines.world.goals',
+        'engines.world.instructions', 'engines.world.messages',
+        'engines.world.relationships', 'engines.world.resources',
+        'engines.world.scenarios', 'engines.world.state',
+        'engines.world.streaming',
         # LLM 模块（全部在函数体内延迟导入）
         'llm', 'llm.client', 'llm.errors', 'llm.fallback', 'llm.search',
         # 第三方隐藏导入

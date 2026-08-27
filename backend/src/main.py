@@ -13,7 +13,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from config import DATABASE_PATH, SEED_DATABASE_PATH, ENV_FILE, PROJECT_ROOT, ensure_dirs, settings
-from db import async_session, init_db
+from db import async_session, init_db, dispose_engine
 from api.agents import router as agents_router
 from api.arenas import router as arenas_router
 from api.export import router as export_router
@@ -117,11 +117,17 @@ async def reset_database():
     """清空数据库——删除 lifelab.db，创建全新空白数据库。"""
     target = DATABASE_PATH
     try:
+        # 先释放 SQLAlchemy 连接池，否则 Windows 上无法删除被锁定的文件
+        await dispose_engine()
+
         if target.exists():
             target.unlink()
         import sqlite3
         conn = sqlite3.connect(str(target))
         conn.close()
+
+        # 重新初始化引擎 + 建表
+        await init_db()
         return {"ok": True, "message": "数据库已清空"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"数据库重置失败: {e}")
@@ -200,7 +206,7 @@ async def update_llm_config(body: ConfigUpdateRequest):
     # 写入（先备份）
     if env_path.exists() and env_path.stat().st_size > 0:
         import shutil
-        backup = env_path.with_suffix(".env.bak")
+        backup = env_path.parent / (env_path.name + ".bak")
         shutil.copy2(env_path, backup)
 
     env_path.write_text("\n".join(new_lines).rstrip("\n") + "\n", encoding="utf-8")
@@ -255,10 +261,15 @@ async def seed_database(keep_existing: bool = False):
 
     try:
         if not keep_existing:
+            # 先释放连接池，否则 Windows 上文件被锁导致 copy2 失败
+            await dispose_engine()
             shutil.copy2(seed_path, target_path)
+            # 重新初始化引擎 + 建表
+            await init_db()
             return {"ok": True, "mode": "replace", "message": "已替换为预置数据库"}
         else:
             # 追加模式：将种子中不存在的记录插入（使用 aiosqlite 避免阻塞事件循环）
+            await dispose_engine()
             import aiosqlite
             seed_conn = await aiosqlite.connect(str(seed_path))
             target_conn = await aiosqlite.connect(str(target_path))
@@ -306,6 +317,8 @@ async def seed_database(keep_existing: bool = False):
             await target_conn.commit()
             await seed_conn.close()
             await target_conn.close()
+            # 重新初始化引擎 + 建表
+            await init_db()
             return {"ok": True, "mode": "append", "inserted": inserted}
 
     except HTTPException:

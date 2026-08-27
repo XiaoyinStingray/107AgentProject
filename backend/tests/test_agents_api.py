@@ -132,7 +132,7 @@ class TestCreateAgent:
         """上游 401 应转换为前端可识别的安全错误。"""
         request = httpx.Request(
             "POST",
-            "https://api.deepseek.com/v1/chat/completions",
+            "https://api.deepseek.com/chat/completions",
         )
         response = httpx.Response(401, request=request)
 

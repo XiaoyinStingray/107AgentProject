@@ -10,7 +10,7 @@ from llm.errors import classify_llm_error, register_llm_error_middleware
 
 
 def _status_response(status_code: int) -> httpx.Response:
-    request = httpx.Request("POST", "https://api.deepseek.com/v1/chat/completions")
+    request = httpx.Request("POST", "https://api.deepseek.com/chat/completions")
     return httpx.Response(status_code, request=request)
 
 

@@ -27,30 +27,18 @@ try {
 # ── Step 1: 构建前端 ──────────────────────────────────────────────────
 Write-Host ""
 Write-Host "[1/5] 构建前端..." -ForegroundColor Yellow
-$distDir = Join-Path $ROOT "frontend\dist"
 
-# 检查是否需要重新构建（dist 存在且不为空则跳过）
-$needBuild = $true
-if (Test-Path $distDir) {
-    $indexHtml = Join-Path $distDir "index.html"
-    if (Test-Path $indexHtml) {
-        Write-Host "  frontend/dist 已存在，跳过构建" -ForegroundColor DarkGray
-        $needBuild = $false
-    }
-}
-
-if ($needBuild) {
-    Push-Location (Join-Path $ROOT "frontend")
-    try {
-        powershell -ExecutionPolicy Bypass -Command "npm run build"
-        Write-Host "  前端构建完成" -ForegroundColor Green
-    } catch {
-        Write-Host "  前端构建失败: $_" -ForegroundColor Red
-        Pop-Location
-        exit 1
-    }
+# 始终重新构建前端，确保打包的是最新页面
+Push-Location (Join-Path $ROOT "frontend")
+try {
+    powershell -ExecutionPolicy Bypass -Command "npm run build"
+    Write-Host "  前端构建完成" -ForegroundColor Green
+} catch {
+    Write-Host "  前端构建失败: $_" -ForegroundColor Red
     Pop-Location
+    exit 1
 }
+Pop-Location
 
 # ── Step 2: 准备种子数据库 ────────────────────────────────────────────
 Write-Host ""
@@ -98,7 +86,7 @@ $envContent = @"
 # 请填入你的 LLM API Key（必填）
 LLM_API_KEY=
 # API 地址（DeepSeek / OpenAI 兼容）
-LLM_BASE_URL=https://api.deepseek.com/
+LLM_BASE_URL=https://api.deepseek.com
 # 模型名称
 LLM_MODEL=deepseek-v4-flash
 # 服务端口（默认 8000）

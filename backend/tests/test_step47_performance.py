@@ -48,7 +48,7 @@ def test_deepseek_v4_disables_thinking_and_keeps_temperature(monkeypatch):
     """Non-thinking DeepSeek V4 requests should retain sampling temperature."""
     from config import settings
 
-    monkeypatch.setattr(settings, "llm_base_url", "https://api.deepseek.com/v1")
+    monkeypatch.setattr(settings, "llm_base_url", "https://api.deepseek.com")
     monkeypatch.setattr(settings, "llm_model", "deepseek-v4-flash")
     monkeypatch.setattr(settings, "llm_thinking_enabled", False)
 

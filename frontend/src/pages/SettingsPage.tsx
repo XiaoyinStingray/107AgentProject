@@ -5,6 +5,7 @@
  */
 
 import { useState, useCallback, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import Card from "../components/shared/Card";
 import { useSettings, useUpdateSettings, useResetSettings, type UserSettingsData } from "../api/settings";
 import { unlock } from "../game/achievements";
@@ -13,6 +14,7 @@ import { unlock } from "../game/achievements";
 function DBButton({ label, desc, url, method, confirm: confirmMsg, onSuccess }: {
   label: string; desc: string; url: string; method: string; confirm: string; onSuccess?: () => void;
 }) {
+  const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string | null>(null);
 
@@ -22,11 +24,16 @@ function DBButton({ label, desc, url, method, confirm: confirmMsg, onSuccess }: 
     try {
       const r = await fetch(url, { method });
       const d = await r.json();
-      if (d.ok) { setResult(`✅ ${d.message || "操作成功"}`); onSuccess?.(); }
+      if (d.ok) {
+        setResult(`✅ ${d.message || "操作成功"}`);
+        // 数据库变更后刷新所有 React Query 缓存，无需手动刷新页面
+        queryClient.invalidateQueries();
+        onSuccess?.();
+      }
       else setResult(`❌ ${d.error || "操作失败"}`);
     } catch { setResult("❌ 后端未启动"); }
     setLoading(false);
-  }, [url, method, confirmMsg, onSuccess]);
+  }, [url, method, confirmMsg, onSuccess, queryClient]);
 
   return (
     <div className="flex flex-col gap-1">
@@ -207,7 +214,7 @@ export default function SettingsPage() {
               联网搜索通过 Responses API（<code>api.deepseek.com/responses</code>，不带 /v1）自动工作。
             </p>
             <p className="text-[10px] font-mono text-text-muted/50 mt-1.5">
-              配置：<code className="text-text-muted/70">LLM_BASE_URL=https://api.deepseek.com/v1</code>
+              配置：<code className="text-text-muted/70">LLM_BASE_URL=https://api.deepseek.com</code>
               {" "}<code className="text-text-muted/70">LLM_MODEL=deepseek-chat</code>
             </p>
           </div>

@@ -2,6 +2,7 @@
  * WelcomeModal — 首次使用引导。左栏 API 配置，右栏数据库选择。
  */
 import { useState, useEffect, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { unlock } from "../../game/achievements";
 
 /* ── 步骤指示器 ── */
@@ -20,6 +21,7 @@ function Step({ num, title, children }: { num: number; title: string; children: 
 }
 
 export default function WelcomeModal() {
+  const queryClient = useQueryClient();
   const [needsSetup, setNeedsSetup] = useState(false);
   const [hasKey, setHasKey] = useState(true);
   const [seeding, setSeeding] = useState(false);
@@ -79,12 +81,28 @@ export default function WelcomeModal() {
     try {
       const r = await fetch("/api/seed?keep_existing=false", { method: "POST" });
       const d = await r.json();
-      if (d.ok) { setDone(true); setMsg("✅ 预置数据已就绪"); }
+      if (d.ok) {
+        queryClient.invalidateQueries();
+        setDone(true); setMsg("✅ 预置数据已就绪");
+      }
       else setMsg(`❌ ${d.error}`);
     } catch { setMsg("❌ 后端未启动"); }
     setSeeding(false);
-  }, []);
-  const handleFresh = useCallback(() => { setDone(true); setMsg("✅ 空白数据库已就绪"); }, []);
+  }, [queryClient]);
+  const handleFresh = useCallback(async () => {
+    try {
+      const r = await fetch("/api/reset-db", { method: "POST" });
+      const d = await r.json();
+      if (d.ok) {
+        queryClient.invalidateQueries();
+        setDone(true); setMsg("✅ 空白数据库已就绪");
+      } else {
+        setMsg(`❌ ${d.detail || "清空失败"}`);
+      }
+    } catch {
+      setMsg("❌ 后端未启动");
+    }
+  }, [queryClient]);
 
   // toast 3 秒消失
   useEffect(() => { if (done && msg) { const t = setTimeout(() => setMsg(""), 3000); return () => clearTimeout(t); } }, [done, msg]);
