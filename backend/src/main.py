@@ -4,13 +4,15 @@ FastAPI 应用入口
 """
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+import webbrowser
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from pydantic import BaseModel
 
-from config import DATABASE_PATH, SEED_DATABASE_PATH, ensure_dirs, settings
+from config import DATABASE_PATH, SEED_DATABASE_PATH, ENV_FILE, PROJECT_ROOT, ensure_dirs, settings
 from db import async_session, init_db
 from api.agents import router as agents_router
 from api.arenas import router as arenas_router
@@ -50,6 +52,14 @@ async def lifespan(app: FastAPI):
     scheduler = get_scheduler()
     await scheduler.start()
     logger.info("Life Lab ready (scheduler active, workers restored)")
+
+    # 自动打开浏览器
+    url = f"http://localhost:{settings.api_port}"
+    try:
+        webbrowser.open(url)
+        logger.info(f"Browser opened: {url}")
+    except Exception:
+        logger.info(f"Please open in browser: {url}")
 
     yield
 
@@ -91,6 +101,12 @@ app.include_router(scenes_router)
 app.include_router(workers_router)
 app.include_router(pipelines_router)
 app.include_router(settings_router)
+
+
+# ── 前端静态文件服务（打包模式下提供前端界面） ──────────────────────────
+_frontend_dist = PROJECT_ROOT / "frontend" / "dist"
+if _frontend_dist.exists():
+    app.mount("/assets", StaticFiles(directory=str(_frontend_dist / "assets")), name="static-assets")
 
 
 @app.get("/api/export-db")
@@ -150,8 +166,7 @@ async def update_llm_config(body: ConfigUpdateRequest):
     - 保留 .env 中其他所有内容（注释、空行、其他键值对）原样不变
     - 已有值的键不会被空值覆盖（防止前端误传空字符串擦除配置）
     """
-    from pathlib import Path
-    env_path = Path(__file__).parents[2] / ".env"
+    env_path = ENV_FILE
 
     # 读取原始文件内容
     original_lines: list[str] = []
@@ -303,3 +318,17 @@ async def seed_database(keep_existing: bool = False):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── SPA 路由回退（必须放在所有 API 路由之后） ──────────────────────────────
+if _frontend_dist.exists():
+    @app.get("/{full_path:path}")
+    async def spa_fallback(request: Request, full_path: str):
+        """SPA 路由回退：非 API / 非静态文件请求均返回 index.html"""
+        file_path = _frontend_dist / full_path
+        if file_path.is_file():
+            return FileResponse(str(file_path))
+        index = _frontend_dist / "index.html"
+        if index.exists():
+            return FileResponse(str(index))
+        raise HTTPException(status_code=404, detail="Not found")

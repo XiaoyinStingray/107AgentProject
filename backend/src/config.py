@@ -2,14 +2,39 @@
 配置管理 — 从 .env 读取，pydantic-settings 校验
 """
 
+import sys
 from pathlib import Path
 from pydantic_settings import BaseSettings
 
 
+# ── PyInstaller 打包感知路径 ─────────────────────────────────────────────
+# frozen 模式（exe）：代码在 _MEIPASS 临时目录，用户数据在 exe 同级目录
+# 开发模式：一切相对于项目根目录
+#
+# 注意：sys.frozen / sys._MEIPASS 是 PyInstaller 运行时注入的属性，
+# 类型检查器不可见，统一用 getattr() 安全访问，避免 IDE 报错。
+_FROZEN: bool = bool(getattr(sys, 'frozen', False))
+_MEIPASS: str = getattr(sys, '_MEIPASS', '')
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = PROJECT_ROOT / "backend" / "data"
+
+if _FROZEN and _MEIPASS:
+    # 打包后的代码根目录（_MEIPASS 临时解压目录）
+    PROJECT_ROOT = Path(_MEIPASS)
+    # 用户可写数据目录：exe 所在目录（持久化）
+    _DATA_DIR = Path(sys.executable).parent / "data"
+else:
+    _DATA_DIR = PROJECT_ROOT / "backend" / "data"
+
+# .env 文件位置：开发时项目根目录，打包后 exe 同级目录
+if _FROZEN:
+    ENV_FILE = Path(sys.executable).parent / ".env"
+else:
+    ENV_FILE = PROJECT_ROOT / ".env"
+
+DATA_DIR = _DATA_DIR
 DATABASE_PATH = DATA_DIR / "lifelab.db"
-SEED_DATABASE_PATH = DATA_DIR / "seed.db"
+SEED_DATABASE_PATH = PROJECT_ROOT / "backend" / "data" / "seed.db"
 USER_SETTINGS_PATH = DATA_DIR / "user_settings.json"
 DEFAULT_DATABASE_URL = f"sqlite+aiosqlite:///{DATABASE_PATH.as_posix()}"
 
@@ -32,7 +57,7 @@ def _resolve_relative_sqlite_url(url: str) -> str:
 
 class Settings(BaseSettings):
     model_config = {
-        "env_file": str(Path(__file__).parents[2] / ".env"),
+        "env_file": str(ENV_FILE),
         "env_file_encoding": "utf-8",
         "extra": "ignore",
     }
