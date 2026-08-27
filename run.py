@@ -24,9 +24,10 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=settings.api_port)
     args = parser.parse_args()
 
+    # 直接传递 app 对象（PyInstaller 打包后字符串导入会失败）
+    from main import app  # noqa: E402
     uvicorn.run(
-        "main:app",
+        app,
         host=settings.api_host,
         port=args.port,
-        reload=args.reload or settings.debug,
     )
