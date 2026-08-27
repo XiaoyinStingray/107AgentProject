@@ -87,9 +87,19 @@
 \usepackage[left=2.50cm,right=2.50cm,top=2.80cm,bottom=2.50cm]{geometry}% 页边距设置
 \renewcommand{\baselinestretch}{1.5}% 定义行间距（1.5）
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage{tikz} % TikZ 绘图（架构图）
+\usetikzlibrary{arrows.meta, positioning, calc}
 \usepackage{fancyhdr} %设置全文页眉、页脚的格式
 \pagestyle{fancy}
 \hypersetup{colorlinks=true,linkcolor=black}% 去除引用红框，改变颜色
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% ── 架构图颜色定义 ──
+\definecolor{clrGreen}{HTML}{2E7D32}\definecolor{clrGreenBg}{HTML}{E8F5E9}
+\definecolor{clrBlue}{HTML}{1565C0}\definecolor{clrBlueBg}{HTML}{E3F2FD}
+\definecolor{clrOrange}{HTML}{E65100}\definecolor{clrOrangeBg}{HTML}{FFF3E0}
+\definecolor{clrPurple}{HTML}{6A1B9A}\definecolor{clrPurpleBg}{HTML}{F3E5F5}
+\definecolor{clrRed}{HTML}{C62828}\definecolor{clrRedBg}{HTML}{FFEBEE}
+\definecolor{clrArrow}{HTML}{546E7A}\definecolor{clrTitle}{HTML}{1A237E}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \begin{document}
@@ -100,7 +110,7 @@
 	\maketitle 
 	
 	\begin{abstract}
-		\fangsong 本文档描述AI Agent 社会实验平台 Life Lab 的系统设计。平台采取\textbf{"快慢结合"}、多链路并行的设计思想：关键词匹配能快速给出初步判断，但不够准确；LLM 深度评估需要数秒，但更可靠。两条独立路径互相保险，对抗 LLM 可能产生的错误。在此哲学之上，平台实现了三项核心能力：\textbf{人格驱动的社会涌现}（MBTI 人格直接决定 Agent 怎么移动、怎么社交、怎么产生情绪）、\textbf{可信赖的多 Agent 协作}（程序直接验证每一步是否真正执行）和\textbf{可解释的行为评测}（六个维度打分 + 信息论量化行为一致性 + 逐维度诊断证据链）。本文档重点阐述 M9--M12 四个进阶模块的设计决策，揭示从基础模块到进阶能力的生长脉络。
+		\fangsong 本文档描述 AI Agent 社会实验平台 Life Lab 的系统设计。平台采取\textbf{"快慢结合"}、多链路并行的设计思想：关键词匹配能快速给出初步判断，但不够准确；LLM 深度评估需要数秒，但更可靠。两条独立路径互相保险，对抗 LLM 可能产生的错误。在此哲学之上，平台实现了三项核心能力：\textbf{人格驱动的社会涌现}（MBTI 人格直接决定 Agent 怎么移动、怎么社交、怎么产生情绪）、\textbf{可信赖的多 Agent 协作}（DAG 管道编排 + 程序直接验证每一步是否真正执行）和\textbf{可解释的行为评测}（六个维度打分 + 信息论量化行为一致性 + 逐维度诊断证据链）。本文档重点阐述 M9--M12 四个进阶模块的设计决策，揭示从基础模块到进阶能力的生长脉络，并说明大模型应用方式与调试优化策略。
 	\end{abstract}
 	
 	\noindent\fbox{\parbox{0.95\textwidth}{
@@ -108,8 +118,9 @@
 	\begin{itemize}
 		\item \textbf{"多链路设计"}：关键词匹配 1ms 出结果，LLM 深度评估数秒但更可靠，双路径互保
 		\item \textbf{人格直接决定行为}：MBTI 等可直接驱动对话/移动/情绪三维度，从"说什么"到"怎么走"全链路一致
-		\item \textbf{程序直接验证交付}：算式直接算一遍、工具记录直接查一遍，不依赖 LLM 判断
+		\item \textbf{DAG 管道编排 + 程序直接验证交付}：支持 Loop/Branch 控制流，算式直接算一遍、工具记录直接查一遍，不依赖 LLM 判断
 		\item \textbf{用信息论量化行为} + 跨任务鲁棒性 + 逐维度诊断，确保行为评测从定性走向定量
+		\item \textbf{多模型集成}：支持 DeepSeek / GLM / OpenAI，统一 OpenAI 兼容 API，内置超时重试与降级兜底
 		\item \textbf{20 页面} + Phaser 3 + 图形化管线编辑器，保障系统完整度与工程成熟度
 	\end{itemize}
 	}}
@@ -135,6 +146,7 @@
 	\item \textbf{可扩展性}：引擎层通过 Mixin 模式组合能力，新功能添加不影响既有系统。
 	\item \textbf{实时性}：通过 SSE 实现毫秒级事件推送，前端实时渲染 Agent 思维流和行为。
 	\item \textbf{鲁棒性}：LLM 调用具备超时、重试和降级机制，关键路径均有规则兜底方案。
+	\item \textbf{可信赖性}：多 Agent 协作的每一步交付由程序直接验证，不依赖 LLM 判断，确保任务执行的可审计性。
 \end{enumerate}
 
 \subsection{设计原则}
@@ -167,14 +179,32 @@
 \section{系统总体架构}
 %% ============================================================
 
-系统采用四层架构：
+系统模块按能力由浅到深分为三层，如图 \ref{fig:arch} 所示：
+
+\begin{figure}[H]
+	\centering
+	\includegraphics[width=0.95\textwidth]{arch_tech copy.png}
+	\caption{Life Lab 系统技术架构图：表现层（React + Phaser 3）$\to$ 接口层（FastAPI + SSE）$\to$ 引擎层（8 大引擎）$\to$ 数据层（SQLAlchemy + SQLite）。LLM 服务通过 OpenAI 兼容 API 接入。}
+	\label{fig:arch}
+\end{figure}
 
 \begin{enumerate}
 	\item \textbf{表现层}：React + TypeScript + TailwindCSS + Phaser 3，通过 React Query 管理服务端状态，SSE 接收实时事件。
 	\item \textbf{接口层}：FastAPI 路由层，提供 RESTful API 和 SSE 端点。
-	\item \textbf{引擎层}：persona/、agent\_factory/、world/、narrative/、arena/、team/、bench/、worker/ 八大引擎。
+	\item \textbf{引擎层}：persona/、agent\_factory/、world/、narrative/、arena/、team/、bench/、worker/ 八大引擎，通过 Mixin 模式组合能力。
 	\item \textbf{数据层}：Pydantic 模型 + SQLAlchemy 异步 ORM + SQLite/aiosqlite。
 \end{enumerate}
+
+八大引擎分别负责不同的核心职责：persona/ 负责自然语言铸造人格，agent\_factory/ 负责 Agent 实例化和记忆管理，world/ 负责世界模拟和关系演化，narrative/ 负责 9 种文体叙事生成，arena/ 负责 5 种竞技模式，team/ 负责多 Agent 协作，bench/ 负责六维行为评测，worker/ 负责 DAG 管道编排和交付验证。各引擎独立开发、独立测试，通过引擎间的调用接口实现协作。
+
+平台经过七个阶段的持续迭代，从骨架搭建到融合闭环，逐步构建起完整的 Agent 社会实验能力，如图 \ref{fig:lifecycle} 所示：
+
+\begin{figure}[H]
+	\centering
+	\includegraphics[width=0.95\textwidth]{arch_circle.png}
+	\caption{Life Lab 七阶段连续演进：从 Agent 世界（STATE 1）到融合闭环（STATE 7），涵盖完整前后端、真实执行、LLM Bench、Pipeline 工作流等核心能力。}
+	\label{fig:lifecycle}
+\end{figure}
 
 
 %% ============================================================
@@ -239,7 +269,15 @@ Agent 之间的关系不是简单的“好友/敌人”二分，而是一个 $[-
 
 \subsection{叙事、竞技与干预（M4--M8）}
 
-\textbf{叙事引擎}（M5）将 Agent 经历转化为 9 种文体叙事（小说/日记/信件/播客等），保持 Agent 口吻一致。\textbf{竞技引擎}（M4）支持辩论、面试、路演、盲测和大乱斗五种模式，裁判从四维度评分。\textbf{控制台}（M6）提供上帝视角仪表盘和决策模式识别。\textbf{干预台}（M7）支持运行时注入事件和私密指令。\textbf{档案馆}（M8）实现实验回放、模板沉淀和报告导出。
+\textbf{竞技引擎}（M4）支持辩论、面试、路演、盲测和大乱斗五种模式。辩论模式采用逐阶段淘汰制，面试模式模拟真实群面流程，盲测模式隐藏 Agent 身份避免偏见，裁判从逻辑性、创造性、表达力、人格一致性四维度评分。
+
+\textbf{叙事引擎}（M5）将 Agent 经历转化为 9 种文体叙事（小说/日记/信件/播客脚本等），保持 Agent 口吻一致。每种文体有独立的 Prompt 模板，LLM 不可用时自动降级为基于事件序列的规则兜底。
+
+\textbf{控制台}（M6）提供上帝视角仪表盘和决策模式识别，自动统计 Agent 的分析型/直觉型/果断型/谨慎型占比并实时可视化，帮助用户理解不同人格的决策倾向。
+
+\textbf{干预台}（M7）支持运行时注入公共事件（影响全体 Agent）和私密指令（仅目标 Agent 可见），实现上帝视角的社会实验控制——研究者可以在不中断模拟的前提下观察特定干预对 Agent 行为的影响。
+
+\textbf{档案馆}（M8）支持实验完整回放（逐 tick 事件序列）、模板沉淀（将成功的 Agent 配置保存为可复用模板）和报告导出，确保每次实验都可追溯、可复现。
 
 %% ============================================================
 %% 以下为进阶模块（M9--M12），是本平台的技术深度所在
@@ -249,7 +287,7 @@ Agent 之间的关系不是简单的“好友/敌人”二分，而是一个 $[-
 \section{团队协作引擎（M9）}
 %% ============================================================
 
-M9 实现完整的多 Agent 协作工作流。以下聚焦三个核心设计决策。
+M9 实现完整的多 Agent 协作工作流。以一个 3 人团队执行"撰写市场调研报告"为例：LLM 将任务分解为"资料搜集""数据分析""报告撰写"三步，分别分配给研究型、分析型和写作型 Agent。三步形成线性 DAG（搜集$\to$分析$\to$撰写），同层最多 3 路并行（本例中每层仅 1 个节点）。Agent A 完成资料搜集后，产出文件自动复制到 Agent B 的工作区；Agent B 基于真实文件（而非 Agent A 的"口头描述"）进行分析。交付验收时，程序检查 Agent B 是否真正调用了 read\_file 工具读取了 Agent A 的产出，而非凭空生成分析结果。以下聚焦三个核心设计决策。
 
 \subsection{设计决策一：文件系统 与 消息通信}
 
@@ -340,7 +378,21 @@ M11 的核心创新是\textbf{MBTI 人格到游戏行为的端到端映射}，�
 
 \textbf{选择}：MBTI 直接推导移动参数（间隔、范围、空闲率），而非通过 prompt 间接影响。
 
-\textbf{映射规则}：E/I 维度决定活动频率（外向型移动间隔短），T/F 维度决定行为倾向，N/S 维度决定探索范围。4 种人格组合各有独立的移动配置。
+\textbf{映射规则}：E/I 维度决定活动频率（外向型移动间隔短），T/F 维度决定行为倾向，N/S 维度决定探索范围。4 种人格组合各有独立的移动配置：
+
+\begin{table}[H]
+	\centering
+	\begin{tabular}{lccc}
+		\toprule
+		\textbf{人格组合} & \textbf{移动间隔(ms)} & \textbf{最大范围(格)} & \textbf{空闲概率} \\
+		\midrule
+		内向思考型（I\_T\_） & 9000--16000 & 2 & 0.45 \\
+		内向感受型（I\_F\_） & 7000--13000 & 2 & 0.35 \\
+		外向思考型（E\_T\_） & 4000--9000 & 3 & 0.15 \\
+		外向感受型（E\_F\_） & 3500--8000 & 3 & 0.10 \\
+		\bottomrule
+	\end{tabular}
+\end{table}
 
 \textbf{混合策略}：移动目标选择采用物品寻求 + 社交接近 + 随机漫游的混合策略，使 Agent 的行为既有目的性又有随机性。
 
@@ -518,34 +570,40 @@ Worker 是管道中的执行单元，每个 Worker 通过显式状态机管理�
 \end{enumerate}
 
 %% ============================================================
-\section{技术亮点总结}
+\section{大模型应用与调试优化}
 %% ============================================================
 
-\begin{enumerate}
-	\item \textbf{人格直接决定行为}：MBTI 不仅影响 Agent 的对话风格，还直接决定移动频率、社交倾向和情绪变化，从"说什么"到"怎么走"再到"如何感受"，人格参数贯穿了 Agent 的全部行为维度。
+\subsection{模型接入与调用方式}
 
-	\item \textbf{"快慢结合"双路径互保}：关键词匹配能在 1ms 内给出初步判断，但不够准确；LLM 深度评估需要数秒，但更可靠。在交付验收中，程序直接算一遍算式对不对、查一遍工具调用记录是否真实存在，不依赖 LLM 判断。这一模式在关系评估、任务分解、交付验收中反复出现。
-
-	\item \textbf{用信息熵量化行为}：统计 Agent 的工具使用习惯，用信息熵公式计算行为一致性分数，将"人格是否影响行为"从主观判断变为可计算的数学命题。配合逐维度诊断证据链和决策风格分类，评测结果完全可解释。
-
-	\item \textbf{数据驱动的评测体系}：4 次完整 Bench 评测（94 条子结果）积累了大量实际运行数据，鲁棒性维度平均 92.8 分（跨场景高度稳定），人格一致性维度揭示了后续优化方向（平均 32.9 分），为模型行为分析提供了可量化的实验基础。
-\end{enumerate}
-
-%% ============================================================
-\section{前端交互层}
-%% ============================================================
-
-前端采用 React 18 + TypeScript + Vite，核心技术选型：
+Life Lab 通过 OpenAI 兼容 API 统一接入多种大语言模型，评测中使用 \textbf{DeepSeek-V4-Flash}（api.deepseek.com），同时支持 GLM、OpenAI 等模型的无缝切换。
 
 \begin{itemize}
-	\item \textbf{UI}：TailwindCSS + Lucide Icons
-	\item \textbf{状态管理}：React Query（服务端状态）+ Zustand（客户端状态）
-	\item \textbf{实时通信}：useSSE hook 封装 EventSource，支持自动重连和事件类型分发
-	\item \textbf{游戏渲染}：Phaser 3 集成 M11 游戏化场景
-	\item \textbf{图表}：Recharts 绘制雷达图、折线图等
+	\item \textbf{双模式配置}：系统为不同场景配置了"思考"（think）和"行动"（act）两种 LLM 配置。思考模式使用较高温度用于深度推理（如人格铸造、关系评估），行动模式使用较低温度用于快速决策（如工具调用、动作选择）。
+	\item \textbf{Prompt 工程}：System Message 采用"冻结核心 + 动态上下文"双层结构，核心层（身份、价值观、目标）初始化后不变，上下文层（处境、记忆、笔记）每 tick 注入，确保人格一致性与环境感知的平衡。
+	\item \textbf{联网搜索}：集成 DeepSeek Responses API 内置联网搜索，并配备搜狗/百度/Bing 多引擎并行兜底，支持断路器保护避免连续失败。
 \end{itemize}
 
-前端包含 \textbf{20 个}主要页面，按功能分组：
+Worker 决策 Prompt 的设计遵循一个关键约束：\textbf{Agent 输出必须是严格 JSON，不包含额外文字}。这是从 Team 模式（GroupChat）中吸取的教训——自由文本发言导致解析不可控。系统从不在 Prompt 中暴露 JSON Schema 语法（模型容易混淆 \texttt{"a" | "b"} 这类写法），而是通过具体示例引导格式。当 JSON 解析失败时，系统追加格式提示（含完整示例），最多 3 次重试。
+
+\subsection{调试与优化策略}
+
+针对 LLM 系统的固有不稳定性，平台实现了多层次的调试与优化机制：
+
+\begin{itemize}
+	\item \textbf{超时重试与指数退避}：所有 LLM 调用包装在统一的异步调用器中，默认超时取 settings.agent\_timeout\_seconds，重试间隔采用指数退避（2s、4s、8s），避免对 API 服务造成压力。
+	\item \textbf{断路器保护}：联网搜索模块实现断路器机制，连续失败达到阈值后自动断开，避免反复超时拖慢系统。
+	\item \textbf{统一错误分类}：通过 LLMErrorClassifier 将上游 OpenAI 兼容异常（AuthenticationError、RateLimitError、TimeoutError、ConnectionError）转换为用户友好的中文提示，方便定位问题。
+	\item \textbf{LLM 不可用降级}：任务分解、关系评估等关键路径均有规则兜底方案，LLM 不可用时自动降级为基于关键词/角色的规则引擎，确保系统在任何环境下可用。
+	\item \textbf{JSON 解析重试}：Worker 内部对 LLM 返回的 JSON 进行解析重试，处理格式不规范的情况。
+	\item \textbf{LLM 幻觉交付发现与解决}：在早期测试中，Worker Agent 在交付阶段声称"已完成数据分析"，但实际从未调用过 run\_python 或 read\_file 工具——LLM 验收员竟然也判定为"通过"。这暴露了纯 LLM 验收的根本风险：\textbf{执行者和验收者可能犯同一类错误}。由此引入了程序级硬校验：在 LLM 验收之前，先让程序检查工具台账（Agent 是否真的调用过相关工具）和算式 AST 求值（交付物中的数学表达式是否正确）。硬校验结果强制生效，LLM 无法覆盖。
+	\item \textbf{评测趋势监控}：BenchLab 自动检测评测分数连续下降趋势（对比最近 3 次评测），及时提醒用户可能存在的模型退化问题。
+\end{itemize}
+
+%% ============================================================
+\section{系统实现与前端}
+%% ============================================================
+
+前端采用 React 18 + TypeScript + Vite，通过 React Query 管理服务端状态、Zustand 管理客户端状态、SSE 实现实时通信，Phaser 3 渲染游戏化场景，Recharts 绘制评测图表。系统共实现 \textbf{20+ 页面}，覆盖 12 个模块的全部功能：
 
 \begin{table}[H]
 	\centering
@@ -568,44 +626,20 @@ Worker 是管道中的执行单元，每个 Worker 通过显式状态机管理�
 	\end{tabular}
 \end{table}
 
-其中 PipelineEditor 提供基于 React Flow 的图形化管线编辑器，支持拖拽创建节点、连线定义依赖、实时运行监控。GameScene 集成 Phaser 3 渲染 M11 游戏化场景，Agent 在瓦片地图上自主移动、社交和情绪表达。
+数据层通过 Pydantic 模型 + SQLAlchemy 异步 ORM + aiosqlite 实现全异步操作，核心表包括 AgentRow（人格 JSON、情绪状态、指纹 JSON）、WorldRow、TeamRow、PlanRow、BenchRun、BenchResult、MemoryRow 共 7 张。
 
-%% ============================================================
-\section{数据库设计}
-%% ============================================================
-
-\begin{table}[H]
-	\centering
-	\begin{tabular}{lp{7cm}}
-		\toprule
-		\textbf{表名} & \textbf{说明} \\
-		\midrule
-		AgentRow & Agent 持久化（人格 JSON、情绪状态、指纹 JSON） \\
-		WorldRow & 世界配置（场景、Agent 列表、Tick 数） \\
-		TeamRow & 团队配置（成员、状态） \\
-		PlanRow & 团队执行计划（任务、步骤、进度、结果） \\
-		BenchRun & 评测运行（配置、状态、得分） \\
-		BenchResult & 单条评测结果（指标、事件 JSON） \\
-		MemoryRow & Agent 长期记忆 \\
-		\bottomrule
-	\end{tabular}
-\end{table}
-
-数据库访问通过 async\_session() 管理，使用 aiosqlite 驱动实现全异步操作。
+前端技术亮点包括：(1) SSE 驱动的实时事件流——Agent 的每次思考（think\_aloud）、每次工具调用、每次情绪变化都通过 Server-Sent Events 毫秒级推送到前端，实现"思维流"可视化；(2) Phaser 3 游戏化渲染——2D 瓦片地图上的 Agent 精灵支持 5 种动作状态（idle/walk/talk/think/emote），情绪状态通过头顶气泡实时反馈；(3) 图形化管线编辑器——基于 React Flow 构建，支持拖拽创建 DAG 节点、配置 Loop/Branch 控制流、实时查看每个节点的执行状态。
 
 %% ============================================================
 \section{总结}
 %% ============================================================
 
-Life Lab 通过七大阶段的持续迭代，构建了一个功能完备且具有技术深度的 AI Agent 社会实验平台。系统的核心竞争力在于：
+Life Lab 要解决三个工程问题：LLM 会幻觉——Agent 声称完成了任务却从未执行；行为会同质化——不同人格的 Agent 在场景中表现几乎相同；评测是黑箱——只给分数不给原因。
 
-\begin{enumerate}
-	\item \textbf{完整性}：12 大模块覆盖 Agent 全生命周期，从人格铸造到行为评测到实验沉淀。
-	\item \textbf{深度}：用信息论量化行为一致性、用程序级校验解决交付可信度、Loop/Branch 管道支持迭代控制流，为解决 Agent 系统中的真实痛点提供可能的方案。
-	\item \textbf{一致性}：人格参数从对话到游戏行为的全链路映射，"人格驱动行为"不是口号，而是可验证的工程事实。
-	\item \textbf{工程成熟度}：关键词检测保证实时性，LLM 深度评估保证准确性，程序级校验防止 LLM 判断出错。
-\end{enumerate}
+针对交付幻觉，Life Lab 的回答是\textbf{程序级校验}：算式直接算一遍，工具记录直接查一遍，硬校验结果强制生效，LLM 验收员误判也无法绕过。针对行为同质化，Life Lab 的回答是\textbf{信息论量化}：用 Shannon 信息熵把"人格是否影响行为"从主观判断变为可计算的数学命题。针对评测黑箱，Life Lab 的回答是\textbf{逐维度诊断}：每个分数都有完整证据链，可以看到"为什么得了这个分"。
 
-未来工作方向：更精细的人格-行为映射模型（超越 MBTI 粗粒度分类，引入大五人格连续谱）、3D 场景支持（Three.js/WebGPU 沉浸式观察）、更大规模社会模拟（50+ Agent 复杂社会结构涌现）、以及基于强化学习的 Agent 行为优化。最终目标是构建一个真正的"AI 社会实验室"——让研究者能够以前所未有的深度和规模，探索 AI Agent 的社会性行为。
+贯穿这三个回答的核心工程洞察是\textbf{用确定性对抗随机性}：关键词检测保证实时性，LLM 深度评估保证准确性，程序级校验防止 LLM 判断出错，超时重试/断路器/降级兜底保证系统可用性。这一模式在关系评估、任务分解、交付验收中反复出现，是平台的核心工程哲学。
+
+七个阶段、12 个模块、25 个 Agent、94 条评测子结果、鲁棒性 92.8 分——Life Lab 不是一个仅能演示的玩具，而是一个可以真正用来探索 AI 社会性行为的实验平台。人格可以被铸造，行为可以被观测，涌现可以被量化，协作可以被信赖。
 
 \end{document}
