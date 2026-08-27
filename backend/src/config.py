@@ -1,11 +1,10 @@
-"""
+"""  
 配置管理 — 从 .env 读取，pydantic-settings 校验
 """
 
 import sys
 from pathlib import Path
 from pydantic_settings import BaseSettings
-
 
 # ── PyInstaller 打包感知路径 ─────────────────────────────────────────────
 # frozen 模式（exe）：代码在 _MEIPASS 临时目录，用户数据在 exe 同级目录
@@ -26,11 +25,8 @@ if _FROZEN and _MEIPASS:
 else:
     _DATA_DIR = PROJECT_ROOT / "backend" / "data"
 
-# .env 文件位置：开发时项目根目录，打包后 exe 同级目录
-if _FROZEN:
-    ENV_FILE = Path(sys.executable).parent / ".env"
-else:
-    ENV_FILE = PROJECT_ROOT / ".env"
+# .env 文件位置：开发时项目根目录，打包时 exe 同级目录
+ENV_FILE = (Path(sys.executable).parent / ".env") if _FROZEN else (PROJECT_ROOT / ".env")
 
 DATA_DIR = _DATA_DIR
 DATABASE_PATH = DATA_DIR / "lifelab.db"

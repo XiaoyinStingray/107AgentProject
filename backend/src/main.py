@@ -3,8 +3,8 @@ Life Lab — 人生实验室
 FastAPI 应用入口
 """
 
-from contextlib import asynccontextmanager
 import webbrowser
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -101,12 +101,6 @@ app.include_router(scenes_router)
 app.include_router(workers_router)
 app.include_router(pipelines_router)
 app.include_router(settings_router)
-
-
-# ── 前端静态文件服务（打包模式下提供前端界面） ──────────────────────────
-_frontend_dist = PROJECT_ROOT / "frontend" / "dist"
-if _frontend_dist.exists():
-    app.mount("/assets", StaticFiles(directory=str(_frontend_dist / "assets")), name="static-assets")
 
 
 @app.get("/api/export-db")
@@ -320,14 +314,21 @@ async def seed_database(keep_existing: bool = False):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ── SPA 路由回退（必须放在所有 API 路由之后） ──────────────────────────────
+# ── 前端静态文件服务（打包模式下） ────────────────────────────────────────────
+_frontend_dist = PROJECT_ROOT / "frontend" / "dist"
+if _frontend_dist.exists():
+    app.mount("/assets", StaticFiles(directory=str(_frontend_dist / "assets")), name="static-assets")
+
+
+# ── SPA 路由回退（必须放在所有 API 路由之后） ─────────────────────────────────────
 if _frontend_dist.exists():
     @app.get("/{full_path:path}")
     async def spa_fallback(request: Request, full_path: str):
-        """SPA 路由回退：非 API / 非静态文件请求均返回 index.html"""
+        # 先尝试返回实际文件
         file_path = _frontend_dist / full_path
         if file_path.is_file():
             return FileResponse(str(file_path))
+        # 否则返回 index.html（SPA 路由）
         index = _frontend_dist / "index.html"
         if index.exists():
             return FileResponse(str(index))

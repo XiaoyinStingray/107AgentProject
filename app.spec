@@ -1,49 +1,70 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-Life Lab — PyInstaller 打包配置
+PyInstaller 打包配置 — Life Lab
 用法: pyinstaller app.spec
 """
+
 import os
 from pathlib import Path
-
 from PyInstaller.utils.hooks import collect_all
 
-block_cipher = None
+# ── 收集第三方包的数据文件和隐藏导入 ─────────────────────────────────────────
+aiosqlite_datas, aiosqlite_binaries, aiosqlite_hidden = collect_all('aiosqlite')
+asyncssh_datas, asyncssh_binaries, asyncssh_hidden = collect_all('asyncssh')
 
-ROOT = os.path.abspath('.')
-SRC = os.path.join(ROOT, 'backend', 'src')
-FRONTEND_DIST = os.path.join(ROOT, 'frontend', 'dist')
-
-# ── 收集第三方包的数据文件和隐藏导入 ──────────────────────────────────
-datas = []
-hiddenimports = []
-
-# aiosqlite: SQLAlchemy 异步 SQLite 驱动
-_d, _b, _h = collect_all('aiosqlite')
-datas += _d
-hiddenimports += _h
-
-# asyncssh: SSH 远程执行
-_d, _b, _h = collect_all('asyncssh')
-datas += _d
-hiddenimports += _h
-
-# 收集 engines 目录下的非 Python 数据文件（如 agent_templates.json）
+# ── 收集 engines 目录下的非 Python 数据文件 ──────────────────────────────────
 engines_data = []
-engines_dir = os.path.join(SRC, 'engines')
-for dirpath, dirnames, filenames in os.walk(engines_dir):
-    # 排除 __pycache__
-    dirnames[:] = [d for d in dirnames if d != '__pycache__']
-    for fn in filenames:
-        if not fn.endswith(('.py', '.pyc')):
-            src_file = os.path.join(dirpath, fn)
-            # 计算相对于 src/ 的路径，保持包结构
-            rel = os.path.relpath(dirpath, SRC)
-            engines_data.append((src_file, rel))
+engines_root = Path('backend/src/engines')
+for f in engines_root.rglob('*'):
+    if f.is_file() and f.suffix not in ('.py', '.pyc') and '__pycache__' not in str(f):
+        arcname = str(f.relative_to(Path('backend/src')))
+        engines_data.append((str(f), str(Path(arcname).parent)))
+
+# ── 数据文件 ─────────────────────────────────────────────────────────────────
+datas = [
+    # 前端构建产物
+    ('frontend/dist', 'frontend/dist'),
+    # 种子数据库
+    ('backend/data/seed.db', 'backend/data'),
+    # engines 数据文件
+] + engines_data
+
+# ── 隐藏导入 ─────────────────────────────────────────────────────────────────
+hiddenimports = [
+    # API 路由
+    'api.agents', 'api.arenas', 'api.export', 'api.narratives',
+    'api.simulations', 'api.sse', 'api.scenarios', 'api.templates',
+    'api.worlds', 'api.achievements', 'api.teams', 'api.market',
+    'api.bench', 'api.scenes', 'api.workers', 'api.pipelines',
+    'api.settings', 'api.world_helpers',
+    # ORM 模型
+    'models.agent', 'models.world', 'models.scenario', 'models.arena',
+    'models.simulation', 'models.narrative', 'models.achievement',
+    'models.team', 'models.market', 'models.bench', 'models.scene',
+    'models.worker', 'models.pipeline', 'models.fingerprint',
+    # 引擎
+    'engines.persona.builder', 'engines.persona.remixer',
+    'engines.world.engine', 'engines.narrative.engine',
+    'engines.arena.engine', 'engines.arena.modes',
+    'engines.arena.scoring', 'engines.team.engine',
+    'engines.scene.engine', 'engines.bench.engine',
+    'engines.bench.recovery', 'engines.bench.metrics',
+    'engines.bench.fingerprint', 'engines.worker.scheduler',
+    # 第三方
+    'aiosqlite', 'asyncssh', 'sqlalchemy', 'pydantic',
+    'pydantic_settings', 'fastapi', 'uvicorn', 'loguru',
+    'autogen', 'websockets',
+] + list(aiosqlite_hidden) + list(asyncssh_hidden)
+
+# ── 排除不需要的包（减小体积）─────────────────────────────────────────────────
+excludes = [
+    'tkinter', 'matplotlib', 'scipy', 'numpy', 'pandas',
+    'cv2', 'pytest', 'setuptools', 'pip',
+]
 
 a = Analysis(
     ['run.py'],
-    pathex=[SRC, ROOT],
+    pathex=['backend/src'],
     binaries=[],
     datas=[
         # 前端构建产物
@@ -86,23 +107,16 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[
-        'tkinter', 'matplotlib', 'scipy', 'numpy',
-        'IPython', 'notebook', 'pytest', '_pytest',
-    ],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
+    excludes=excludes,
     noarchive=False,
 )
 
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure)
 
 exe = EXE(
     pyz,
     a.scripts,
     a.binaries,
-    a.zipfiles,
     a.datas,
     [],
     name='LifeLab',
@@ -112,10 +126,11 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,         # 显示控制台（便于查看日志和排查问题）
-    disable_windowed_bounds=False,
+    console=True,
+    disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=None,
 )
