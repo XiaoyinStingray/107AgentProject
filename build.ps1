@@ -85,19 +85,14 @@ try {
 }
 Pop-Location
 
-# ── Step 4: 复制运行时配置文件 ────────────────────────────────────────
+# ── Step 4: 准备运行时配置 ────────────────────────────────────────────
 Write-Host ""
 Write-Host "[4/5] 准备运行时配置..." -ForegroundColor Yellow
 $exeDir = Join-Path $ROOT "dist"
 $envFile = Join-Path $exeDir ".env"
-$srcEnv = Join-Path $ROOT ".env"
 
-# 优先复制项目已有的 .env（包含用户配置），否则创建模板
-if (Test-Path $srcEnv) {
-    Copy-Item $srcEnv $envFile -Force
-    Write-Host "  已复制项目 .env -> dist/.env" -ForegroundColor Green
-} elseif (-not (Test-Path $envFile)) {
-    $envContent = @"
+# 始终生成空模板，让用户自己填写 API Key
+$envContent = @"
 # ===== Life Lab 配置 =====
 # 请填入你的 LLM API Key（必填）
 LLM_API_KEY=
@@ -108,12 +103,9 @@ LLM_MODEL=deepseek-v4-flash
 # 服务端口（默认 8000）
 API_PORT=8000
 "@
-    Set-Content -Path $envFile -Value $envContent -Encoding UTF8
-    Write-Host "  已创建 .env 配置模板 -> dist/.env" -ForegroundColor Green
-    Write-Host "  请编辑 dist/.env 填入你的 LLM API Key" -ForegroundColor Yellow
-} else {
-    Write-Host "  dist/.env 已存在，跳过" -ForegroundColor DarkGray
-}
+Set-Content -Path $envFile -Value $envContent -Encoding UTF8
+Write-Host "  已创建 .env 配置模板 -> dist\.env" -ForegroundColor Green
+Write-Host "  请编辑 dist\.env 填入你的 LLM API Key" -ForegroundColor Yellow
 
 # ── Step 5: 输出结果 ─────────────────────────────────────────────────
 Write-Host ""

@@ -70,6 +70,8 @@ a = Analysis(
         'engines.agent_factory', 'engines.arena', 'engines.bench',
         'engines.narrative', 'engines.persona', 'engines.scene',
         'engines.team', 'engines.world', 'engines.worker',
+        # LLM 模块（全部在函数体内延迟导入）
+        'llm', 'llm.client', 'llm.errors', 'llm.fallback', 'llm.search',
         # 第三方隐藏导入
         'aiosqlite', 'sqlalchemy.dialects.sqlite',
         'anyio._backends._asyncio',
