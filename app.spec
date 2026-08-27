@@ -66,8 +66,44 @@ a = Analysis(
     ['run.py'],
     pathex=['backend/src'],
     binaries=[],
-    datas=datas + list(aiosqlite_datas) + list(asyncssh_datas),
-    hiddenimports=hiddenimports,
+    datas=[
+        # 前端构建产物
+        (FRONTEND_DIST, 'frontend/dist'),
+        # 种子数据库
+        ('backend/data/seed.db', 'backend/data'),
+        # engines 数据文件
+    ] + datas + engines_data,
+    hiddenimports=hiddenimports + [
+        # ── 后端模块（PyInstaller 静态分析可能遗漏） ──
+        # API 路由
+        'api.agents', 'api.arenas', 'api.export', 'api.narratives',
+        'api.simulations', 'api.sse', 'api.scenarios', 'api.templates',
+        'api.worlds', 'api.achievements', 'api.teams', 'api.market',
+        'api.bench', 'api.scenes', 'api.workers', 'api.pipelines',
+        'api.settings',
+        # ORM 模型（db.py 中动态 import）
+        'models.memory', 'models.event', 'models.agent_orm',
+        'models.world_orm', 'models.scenario_orm', 'models.arena_orm',
+        'models.simulation_orm', 'models.intervention_orm',
+        'models.team_orm', 'models.plan_orm', 'models.market_orm',
+        'models.bench_orm', 'models.checkpoint_orm',
+        # 引擎模块
+        'engines.agent_factory', 'engines.arena', 'engines.bench',
+        'engines.narrative', 'engines.persona', 'engines.scene',
+        'engines.team', 'engines.world', 'engines.worker',
+        # LLM 模块（全部在函数体内延迟导入）
+        'llm', 'llm.client', 'llm.errors', 'llm.fallback', 'llm.search',
+        # 第三方隐藏导入
+        'aiosqlite', 'sqlalchemy.dialects.sqlite',
+        'anyio._backends._asyncio',
+        'httpx._transports.default',
+        'asyncssh', 'asyncssh.crypto',
+        'cryptography', 'cryptography.hazmat.backends.openssl',
+        'pydantic_settings',
+        'sse_starlette', 'sse_starlette.sse',
+        'orjson',
+        'autogen_agentchat', 'autogen_ext',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
