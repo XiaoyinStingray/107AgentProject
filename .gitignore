@@ -76,6 +76,10 @@ backend/data/backups/
 *.tmp
 *.temp
 *.ps1
+!build.ps1
+
+# ===== PyInstaller 打包 =====
+app.spec
 
 test_output/
 
