@@ -102,7 +102,7 @@ if (Test-Path $srcEnv) {
 # 请填入你的 LLM API Key（必填）
 LLM_API_KEY=
 # API 地址（DeepSeek / OpenAI 兼容）
-LLM_BASE_URL=https://api.deepseek.com/v1
+LLM_BASE_URL=https://api.deepseek.com/
 # 模型名称
 LLM_MODEL=deepseek-v4-flash
 # 服务端口（默认 8000）
